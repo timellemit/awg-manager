@@ -13,6 +13,8 @@
 set -e
 
 REPO="hoaxisr/awg-manager"
+ENTWARE_REPO="https://hoaxisr.github.io/entware-repo"
+OPKG_CONF="/opt/etc/opkg/awg_manager.conf"
 TMP_DIR="/tmp/awg-manager-install"
 
 # Очистка при ошибке
@@ -133,6 +135,19 @@ install_package() {
     info "Пакет установлен"
 }
 
+# --- Добавить opkg репозиторий ---
+add_repo() {
+    REPO_LINE="src/gz keenetic_custom ${ENTWARE_REPO}/${ARCH}-kn"
+
+    if [ -f "$OPKG_CONF" ] && grep -qF "$REPO_LINE" "$OPKG_CONF" 2>/dev/null; then
+        return
+    fi
+
+    mkdir -p /opt/etc/opkg
+    echo "$REPO_LINE" > "$OPKG_CONF"
+    info "Репозиторий добавлен: ${ENTWARE_REPO}/${ARCH}-kn"
+}
+
 # --- Запуск сервиса ---
 start_service() {
     info "Запускаю сервис..."
@@ -190,6 +205,7 @@ TARGET_VERSION="${1:-}"
 
 ensure_curl
 detect_arch
+add_repo
 check_existing
 fetch_version
 install_package
