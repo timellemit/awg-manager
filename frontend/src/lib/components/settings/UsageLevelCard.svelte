@@ -64,7 +64,7 @@
 	}
 </script>
 
-<div class="card">
+<div class="card usage-level-card">
 	<div class="card-head">
 		<h2>Уровень использования</h2>
 		<p class="muted">
@@ -139,6 +139,9 @@
 </Modal>
 
 <style>
+	.usage-level-card {
+		margin-bottom: 1rem;
+	}
 	.card-head {
 		margin-bottom: 1rem;
 	}
@@ -198,19 +201,25 @@
 		font-weight: 600;
 		font-size: 1rem;
 		margin-bottom: 0.25rem;
+		padding-right: 1.75rem;
 	}
 	.level-summary {
 		color: var(--color-text-muted);
 		font-size: 0.8125rem;
+		padding-right: 1.75rem;
 	}
 
 	.level-check {
 		position: absolute;
 		top: 0.5rem;
-		right: 0.5rem;
+		left: 0.5rem;
 		width: 18px;
 		height: 18px;
 		color: var(--color-accent);
+	}
+	.level-card.selected .level-title,
+	.level-card.selected .level-summary {
+		padding-left: 1.75rem;
 	}
 	.level-check svg {
 		width: 100%;
@@ -223,7 +232,7 @@
 	.info-btn {
 		position: absolute;
 		top: 0.5rem;
-		left: 0.5rem;
+		right: 0.5rem;
 		width: 18px;
 		height: 18px;
 		color: var(--color-text-muted);
