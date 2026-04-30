@@ -21,7 +21,7 @@
 		UpdateInfo,
 		HydraRouteStatus,
 	} from "$lib/types";
-	import type { UsageLevel } from "$lib/types/usageLevel";
+	import { USAGE_LEVEL_LABELS, type UsageLevel } from "$lib/types/usageLevel";
 
 	let systemInfo: SystemInfo | null = $state(null);
 	let settings = $state<Settings | null>(null);
@@ -231,7 +231,7 @@
 		try {
 			settings = await api.updateSettings({ ...settings, usageLevel: level });
 			setGlobalSettings(settings);
-			notifications.success(`Уровень: ${level}`);
+			notifications.success(`Уровень: ${USAGE_LEVEL_LABELS[level]}`);
 		} catch {
 			notifications.error("Не удалось сохранить уровень");
 		} finally {
