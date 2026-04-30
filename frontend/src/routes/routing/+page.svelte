@@ -17,6 +17,8 @@
     import { DeviceProxyTab } from '$lib/components/deviceproxy';
     import { deviceProxyConfig, deviceProxyRuntime } from '$lib/stores/deviceproxy';
     import SingboxRouterTab from './SingboxRouterTab.svelte';
+    import { isRoutingSubTabVisible, type RoutingSubTab, type UsageLevel } from '$lib/types/usageLevel';
+    import { usageLevel } from '$lib/stores/settings';
 
     // Per-section polling stores — subscribe here so all 8 fetch while
     // the routing page is open. Unsubscribed on destroy to stop polling.
@@ -44,7 +46,9 @@
     $effect(() => {
         const t = $page.url.searchParams.get('tab');
         if (t === 'hrneo' || t === 'dns' || t === 'ip' || t === 'policy' || t === 'clientvpn' || t === 'deviceproxy' || t === 'singbox') {
-            activeTab = t;
+            if (tabVisible(t)) {
+                activeTab = t;
+            }
         }
     });
     let isOS5 = $derived($systemInfo.data?.isOS5 ?? false);
@@ -155,6 +159,22 @@
         badgeTone?: 'default' | 'success' | 'warning' | 'muted';
     };
 
+    const TAB_TO_SUBTAB: Record<string, RoutingSubTab> = {
+        policy: 'accessPolicies',
+        clientvpn: 'clientRoutes',
+        dns: 'dnsRoutes',
+        ip: 'ipRoutes',
+        deviceproxy: 'deviceProxy',
+        hrneo: 'hrNeo',
+        singbox: 'singboxRouter',
+    };
+
+    function tabVisible(localId: string, level?: UsageLevel): boolean {
+        const sub = TAB_TO_SUBTAB[localId];
+        const lvl = level ?? $usageLevel;
+        return sub ? isRoutingSubTabVisible(lvl, sub) : true;
+    }
+
     const singboxRouterStatus = singboxRouterStore.status;
     let singboxRuleCount = $derived($singboxRouterStatus?.ruleCount ?? 0);
 
@@ -170,7 +190,9 @@
             { id: 'clientvpn', label: 'VPN для устройств', badge: clientRouteCount },
             deviceProxyTab,
             singboxInstalled ? { id: 'singbox', label: 'Sing-box Router', badge: singboxRuleCount } : null,
-        ] as (TabItem | null)[]).filter((t): t is TabItem => t !== null)
+        ] as (TabItem | null)[])
+            .filter((t): t is TabItem => t !== null)
+            .filter((t) => tabVisible(t.id))
     );
 
     // If the user deep-linked / had the tab active and sing-box disappeared
@@ -179,6 +201,17 @@
         if (!$systemInfo.data) return;
         if (!singboxInstalled && (activeTab === 'deviceproxy' || activeTab === 'singbox')) {
             activeTab = 'dns';
+        }
+    });
+
+    // If the active tab becomes invisible (user lowered usage level while the
+    // HR NEO or Sing-box Router tab was active), pick the first visible tab.
+    $effect(() => {
+        if (!tabItems.find((it) => it.id === activeTab)) {
+            const next = tabItems[0]?.id;
+            if (next) {
+                activeTab = next as typeof activeTab;
+            }
         }
     });
 
