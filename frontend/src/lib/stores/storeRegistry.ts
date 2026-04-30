@@ -14,6 +14,7 @@ export type ResourceKey =
 	| 'sysInfo'                     // ResourceSysInfo
 	| 'pingcheck'                   // ResourcePingcheck
 	| 'saveStatus'                  // ResourceSaveStatus
+	| 'settings'                    // ResourceSettings
 	| 'routing.dnsRoutes'           // ResourceRoutingDnsRoutes
 	| 'routing.staticRoutes'        // ResourceRoutingStaticRoutes
 	| 'routing.accessPolicies'      // ResourceRoutingAccessPolicies

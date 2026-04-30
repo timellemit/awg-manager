@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/hoaxisr/awg-manager/internal/events"
 	"github.com/hoaxisr/awg-manager/internal/logging"
 	"github.com/hoaxisr/awg-manager/internal/response"
 	"github.com/hoaxisr/awg-manager/internal/storage"
@@ -89,6 +90,7 @@ type SettingsHandler struct {
 	pingCheckSnapshot func()
 	logsSnapshot      func()
 	log               *logging.ScopedLogger
+	bus               *events.Bus
 }
 
 // NewSettingsHandler creates a new settings handler.
@@ -114,6 +116,10 @@ func (h *SettingsHandler) SetPingCheckSnapshot(fn func()) { h.pingCheckSnapshot 
 
 // SetLogsSnapshot sets the function that publishes a logs snapshot.
 func (h *SettingsHandler) SetLogsSnapshot(fn func()) { h.logsSnapshot = fn }
+
+// SetEventBus wires the SSE bus so settings mutations broadcast a
+// resource:invalidated hint to all connected clients.
+func (h *SettingsHandler) SetEventBus(bus *events.Bus) { h.bus = bus }
 
 // Get returns current settings.
 //
@@ -309,6 +315,7 @@ func (h *SettingsHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.Success(w, settings)
+	publishInvalidated(h.bus, ResourceSettings, "updated")
 }
 
 // RegenerateApiKey generates a fresh UUID v4 server-side, persists it
@@ -351,6 +358,7 @@ func (h *SettingsHandler) RegenerateApiKey(w http.ResponseWriter, r *http.Reques
 
 	h.log.Info("api-key", "", "API key regenerated")
 	response.Success(w, settings)
+	publishInvalidated(h.bus, ResourceSettings, "api-key-rotated")
 }
 
 // generateUUIDv4 produces an RFC 4122 v4 UUID using crypto/rand.
