@@ -222,6 +222,7 @@ func writeNetfilterHook() error {
 [ "$type" = "ip6tables" ] && exit 0
 [ "$table" = "mangle" ] || exit 0
 [ -f %[1]q ] || exit 0
+pidof sing-box >/dev/null 2>&1 || exit 0
 if ! /opt/sbin/iptables -w -t mangle -nL %[2]s >/dev/null 2>&1; then
   /opt/sbin/iptables-restore --noflush < %[1]q
   /opt/sbin/ip rule add fwmark 0x%[3]x table %[4]d 2>/dev/null || true
