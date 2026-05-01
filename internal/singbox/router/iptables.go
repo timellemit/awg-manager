@@ -129,35 +129,52 @@ type RestoreInputSpec struct {
 }
 
 // socketModuleName is the name of the kernel module that backs
-// `iptables -m socket`. Loaded at boot on most Entware kernels but
-// not guaranteed; we feature-detect via /proc/modules + xtables match
-// help and fall back to no-bypass when absent.
+// `iptables -m socket`. The userspace match library (libxt_socket.so)
+// is statically present on Entware iptables, so `iptables -m socket
+// --help` succeeds even when the kernel module is not loaded — that's
+// why we MUST check /proc/modules, not the help output. Without the
+// kernel module loaded, iptables-restore fails the COMMIT with
+// "No chain/target/match by that name."
 const socketModuleName = "xt_socket"
 
-var (
-	socketMatchOnce      sync.Once
-	socketMatchAvailable bool
-)
+func buildSocketModulePath(kernelVersion string) string {
+	return filepath.Join("/lib/modules", kernelVersion, "xt_socket.ko")
+}
 
-// IsSocketMatchAvailable returns true when iptables knows the `socket`
-// match. Cached after first probe — module presence is static for the
-// lifetime of the process. Probe order:
-//  1. /proc/modules for `xt_socket` (fast path, common case)
-//  2. `iptables -m socket --help` shell-out (only when module is built
-//     into the kernel rather than loaded as a .ko)
-func IsSocketMatchAvailable(ctx context.Context) bool {
-	socketMatchOnce.Do(func() {
-		if isModuleLoaded(socketModuleName) {
-			socketMatchAvailable = true
-			return
-		}
-		res, err := sysexec.Run(ctx, sysiptables.Binary, "-m", "socket", "--help")
-		if err != nil || res == nil {
-			return
-		}
-		socketMatchAvailable = strings.Contains(res.Stdout+res.Stderr, "socket match options")
-	})
-	return socketMatchAvailable
+// EnsureSocketModule best-effort-loads xt_socket. Returns nil on
+// success or when the module is already loaded; returns an error when
+// neither is true. Callers treat the error as "feature unavailable"
+// and skip the socket-bypass rule rather than failing Install.
+//
+// Mirrors EnsureTProxyModule but is non-fatal — TPROXY is required;
+// socket bypass is a defensive optimisation.
+func EnsureSocketModule(ctx context.Context) error {
+	if isModuleLoaded(socketModuleName) {
+		return nil
+	}
+	kernel := osdetect.KernelRelease()
+	if kernel == "" {
+		return ErrNetfilterComponentMissing
+	}
+	path := buildSocketModulePath(kernel)
+	if _, err := os.Stat(path); err != nil {
+		return ErrNetfilterComponentMissing
+	}
+	if _, err := sysexec.Run(ctx, "insmod", path); err != nil {
+		return fmt.Errorf("insmod %s: %w", path, err)
+	}
+	// Module presence is now visible in /proc/modules — no caching
+	// needed; the next IsSocketMatchAvailable call will see it.
+	return nil
+}
+
+// IsSocketMatchAvailable reports whether the kernel currently has the
+// xt_socket module loaded. Userspace help text is NOT consulted: it
+// succeeds even without the kernel module, which would cause
+// iptables-restore to abort. Callers should run EnsureSocketModule
+// first to opportunistically load it.
+func IsSocketMatchAvailable() bool {
+	return isModuleLoaded(socketModuleName)
 }
 
 var bypassCIDRs = []string{
@@ -243,9 +260,14 @@ func (it *IPTables) Install(ctx context.Context, mark string) error {
 	// Idempotent: a no-op when no prior jumps exist.
 	it.removeSourceHooks(ctx)
 
+	// Best-effort load of xt_socket. If it fails (.ko absent on this
+	// kernel) we just skip the bypass rule — TPROXY still works fine
+	// without it, just slightly less defensive on the reply path.
+	_ = EnsureSocketModule(ctx)
+
 	input := buildRestoreInput(RestoreInputSpec{
 		PolicyMark:   mark,
-		SocketBypass: IsSocketMatchAvailable(ctx),
+		SocketBypass: IsSocketMatchAvailable(),
 	})
 	if it.persistRules != nil {
 		if err := it.persistRules(input); err != nil {
