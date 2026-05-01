@@ -5,6 +5,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -108,7 +109,7 @@ func (h *SingboxProxiesHandler) List(w http.ResponseWriter, r *http.Request) {
 		response.MethodNotAllowed(w)
 		return
 	}
-	raw, err := h.clashGet("/proxies", "")
+	raw, err := h.clashGet(r.Context(), "/proxies", "")
 	if err != nil {
 		response.InternalError(w, "clash unreachable: "+err.Error())
 		return
@@ -130,7 +131,7 @@ func (h *SingboxProxiesHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	known := h.knownComposites()
-	var groups []SingboxProxyGroup
+	groups := make([]SingboxProxyGroup, 0, len(known))
 	for _, p := range parsed.Proxies {
 		if _, ok := known[p.Name]; !ok {
 			continue
@@ -161,8 +162,10 @@ func (h *SingboxProxiesHandler) List(w http.ResponseWriter, r *http.Request) {
 }
 
 // clashGet performs an internal HTTP GET against the upstream Clash
-// API. query is appended verbatim if non-empty.
-func (h *SingboxProxiesHandler) clashGet(path, query string) ([]byte, error) {
+// API. query is appended verbatim if non-empty. ctx is propagated so
+// a client cancelling the outer HTTP request also aborts the upstream
+// call, instead of waiting for the per-client timeout.
+func (h *SingboxProxiesHandler) clashGet(ctx context.Context, path, query string) ([]byte, error) {
 	base := h.clashBaseURL()
 	if base == "" {
 		return nil, errors.New("clash base URL not configured")
@@ -175,7 +178,11 @@ func (h *SingboxProxiesHandler) clashGet(path, query string) ([]byte, error) {
 	if client == nil {
 		client = &http.Client{Timeout: 10 * time.Second}
 	}
-	resp, err := client.Get(target)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
