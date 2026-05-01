@@ -53,38 +53,66 @@
   let activeIndex = $state(-1);
   let menuUp = $state(false);
 
+  // Computed coords for fixed-position portaled panel.
+  let panelTop = $state(0);
+  let panelLeft = $state(0);
+  let panelWidth = $state(0);
+
   const selectedOption = $derived(options.find((o) => o.value === value));
 
   const VIEWPORT_PADDING = 8;
+  const PANEL_GAP = 4;
+  const ESTIMATED_PANEL_HEIGHT = 280; // matches max-height in CSS
 
-  function findScrollAncestor(el: HTMLElement | null): HTMLElement | null {
-    for (let p = el?.parentElement ?? null; p; p = p.parentElement) {
-      const cs = getComputedStyle(p);
-      if ((cs.overflowY === 'auto' || cs.overflowY === 'scroll') && p.scrollHeight > p.clientHeight) {
-        return p;
-      }
-    }
-    return null;
+  // Portal action: appends node to document.body so the dropdown panel
+  // escapes any ancestor `overflow: hidden|auto` clipping (e.g. modal body).
+  function portal(node: HTMLElement, target: HTMLElement = document.body) {
+    target.appendChild(node);
+    return {
+      destroy() {
+        if (node.parentNode === target) {
+          target.removeChild(node);
+        }
+      },
+    };
   }
 
   function recomputePlacement() {
-    if (!triggerEl || !panelEl) return;
-    const triggerRect = triggerEl.getBoundingClientRect();
-    const menuHeight = panelEl.getBoundingClientRect().height;
-    // Outer bound: the closest scroll ancestor (e.g. modal body) OR window viewport.
-    const scroller = findScrollAncestor(triggerEl);
-    const bottomBound = scroller ? scroller.getBoundingClientRect().bottom : window.innerHeight;
-    const topBound = scroller ? scroller.getBoundingClientRect().top : 0;
-    const spaceBelow = bottomBound - triggerRect.bottom - VIEWPORT_PADDING;
-    const spaceAbove = triggerRect.top - topBound - VIEWPORT_PADDING;
+    if (!triggerEl) return;
+    const rect = triggerEl.getBoundingClientRect();
+    panelLeft = rect.left;
+    panelWidth = rect.width;
+
+    // Use measured panel height if available, otherwise estimate.
+    const measuredH = panelEl?.getBoundingClientRect().height ?? 0;
+    const panelHeight = measuredH > 0 ? measuredH : ESTIMATED_PANEL_HEIGHT;
+
+    const spaceBelow = window.innerHeight - rect.bottom - VIEWPORT_PADDING;
+    const spaceAbove = rect.top - VIEWPORT_PADDING;
+
     // Flip up only if there isn't enough room below AND there's more room above.
-    menuUp = menuHeight > spaceBelow && spaceAbove > spaceBelow;
+    const flip = panelHeight > spaceBelow && spaceAbove > spaceBelow;
+    menuUp = flip;
+
+    if (flip) {
+      panelTop = Math.max(VIEWPORT_PADDING, rect.top - panelHeight - PANEL_GAP);
+    } else {
+      panelTop = rect.bottom + PANEL_GAP;
+    }
   }
 
   function openPanel() {
     if (disabled) return;
     open = true;
     menuUp = false;
+    // Capture initial coords from trigger BEFORE panel is mounted, so
+    // the portal renders at a sensible position from frame one.
+    if (triggerEl) {
+      const rect = triggerEl.getBoundingClientRect();
+      panelLeft = rect.left;
+      panelWidth = rect.width;
+      panelTop = rect.bottom + PANEL_GAP;
+    }
     // Focus the currently selected option, or the first enabled one.
     const selectedIdx = options.findIndex((o) => o.value === value);
     activeIndex = selectedIdx >= 0 ? selectedIdx : firstEnabledIndex();
@@ -182,6 +210,7 @@
   function handleClickOutside(e: MouseEvent) {
     if (!open) return;
     const t = e.target as Node | null;
+    // panelEl ref still resolves correctly even when portaled to body.
     if (t && (triggerEl?.contains(t) || panelEl?.contains(t))) return;
     closePanel();
   }
@@ -200,7 +229,8 @@
     // Recompute when the menu's own size changes (async content load, group expansion).
     const ro = new ResizeObserver(() => recomputePlacement());
     ro.observe(panelEl);
-    // Recompute on viewport changes (scroll inside modal, window resize).
+    // Recompute on any ancestor scroll (capture phase catches scroll events
+    // from any scroll container, including modal body) and on window resize.
     const onWindowChange = () => recomputePlacement();
     window.addEventListener('resize', onWindowChange);
     window.addEventListener('scroll', onWindowChange, true);
@@ -257,12 +287,14 @@
     {#if open}
       <div
         bind:this={panelEl}
+        use:portal
         id="{fieldId}-listbox"
         role="listbox"
-        class="panel"
+        class="dropdown-panel"
         class:menu-up={menuUp}
         tabindex="-1"
         aria-label={label ?? placeholder}
+        style="top: {panelTop}px; left: {panelLeft}px; width: {panelWidth}px;"
         onkeydown={handlePanelKey}
       >
         {#each options as opt, idx (opt.value)}
@@ -410,12 +442,12 @@
   }
   .chevron svg { width: 16px; height: 16px; }
 
-  .panel {
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0;
-    right: 0;
-    z-index: 50;
+  /* Panel is portaled to <body> with position: fixed, so it escapes any
+     ancestor overflow clipping (modal body, side drawer, etc). z-index
+     1000 sits above Modal (200) and SideDrawer (100). */
+  :global(.dropdown-panel) {
+    position: fixed;
+    z-index: 1000;
     background: var(--color-bg-secondary);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-sm);
@@ -429,9 +461,7 @@
     animation: dropdown-enter 120ms ease-out;
   }
 
-  .panel.menu-up {
-    top: auto;
-    bottom: calc(100% + 4px);
+  :global(.dropdown-panel.menu-up) {
     animation: dropdown-enter-up 120ms ease-out;
   }
 
@@ -445,7 +475,7 @@
     to { opacity: 1; transform: translateY(0); }
   }
 
-  .option {
+  :global(.dropdown-panel .option) {
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -462,28 +492,28 @@
     transition: background var(--t-fast) ease;
   }
 
-  .option:disabled {
+  :global(.dropdown-panel .option:disabled) {
     opacity: 0.4;
     cursor: not-allowed;
   }
 
-  .option.active:not(:disabled) {
+  :global(.dropdown-panel .option.active:not(:disabled)) {
     background: var(--color-bg-hover);
   }
 
-  .option.selected {
+  :global(.dropdown-panel .option.selected) {
     color: var(--color-accent);
     font-weight: 500;
   }
 
-  .option-icon {
+  :global(.dropdown-panel .option-icon) {
     display: inline-flex;
     color: var(--color-text-muted);
     flex-shrink: 0;
   }
-  .option.selected .option-icon { color: var(--color-accent); }
+  :global(.dropdown-panel .option.selected .option-icon) { color: var(--color-accent); }
 
-  .option-text {
+  :global(.dropdown-panel .option-text) {
     display: flex;
     flex-direction: column;
     gap: 1px;
@@ -491,13 +521,13 @@
     min-width: 0;
   }
 
-  .option-label {
+  :global(.dropdown-panel .option-label) {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .option-desc {
+  :global(.dropdown-panel .option-desc) {
     font-size: 11px;
     color: var(--color-text-muted);
     overflow: hidden;
@@ -505,14 +535,14 @@
     white-space: nowrap;
   }
 
-  .option-check {
+  :global(.dropdown-panel .option-check) {
     display: inline-flex;
     color: var(--color-accent);
     flex-shrink: 0;
   }
-  .option-check svg { width: 14px; height: 14px; }
+  :global(.dropdown-panel .option-check svg) { width: 14px; height: 14px; }
 
-  .group-label {
+  :global(.dropdown-panel .group-label) {
     padding: 0.375rem 0.5rem 0.125rem;
     font-size: 10px;
     text-transform: uppercase;
@@ -521,11 +551,11 @@
     font-weight: 600;
   }
 
-  .option.in-group {
+  :global(.dropdown-panel .option.in-group) {
     padding-left: 0.875rem;
   }
 
-  .empty {
+  :global(.dropdown-panel .empty) {
     padding: 0.625rem 0.5rem;
     font-size: 12px;
     color: var(--color-text-muted);
