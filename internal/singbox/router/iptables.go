@@ -15,9 +15,22 @@ import (
 
 const (
 	TPROXYPort   = 51271
-	Fwmark       = 0x1
-	RoutingTable = 100
-	ChainName    = "AWGM-TPROXY"
+	// RedirectPort is sing-box's REDIRECT inbound for TCP. We split TCP
+	// onto NAT REDIRECT (instead of mangle TPROXY) because TPROXY for
+	// TCP requires a working `-m socket --transparent` bypass to deliver
+	// ACK/data on already-established connections — Keenetic's 4.9-ndm-5
+	// kernel evaluates that match as 0 hits, so ACKs would re-enter the
+	// TPROXY rule, get redirected to 127.0.0.1:51271 with the listener
+	// destination, and the kernel would emit RST because no socket
+	// matches that 4-tuple. NAT REDIRECT sidesteps the issue entirely:
+	// conntrack tracks the DNAT for established flows, ACKs are
+	// auto-translated, and sing-box's accept()ed socket handles them
+	// like any normal TCP connection. SKeen ships the same split.
+	RedirectPort  = 51272
+	Fwmark        = 0x1
+	RoutingTable  = 100
+	ChainName     = "AWGM-TPROXY"
+	RedirectChain = "AWGM-REDIRECT"
 	// IPRulePriority is the fixed `ip rule` priority for our fwmark rule.
 	// Above NDMS policy rules (~100-200) and below system main/default
 	// (32766/32767). Hard-coded so Install is fully idempotent and so
@@ -120,61 +133,6 @@ type RestoreInputSpec struct {
 	// policy. Empty means no PREROUTING jump (defensive — caller should
 	// never reach Install with empty mark, but iptables doesn't panic).
 	PolicyMark string
-	// SocketBypass enables `-m socket --transparent -j RETURN` for TCP
-	// at the top of the chain — short-circuits packets that already
-	// belong to a sing-box transparent socket so they never re-enter
-	// TPROXY redirect. Requires xt_socket kernel module; gated by
-	// caller (Install) so the rule set still loads on stock builds.
-	SocketBypass bool
-}
-
-// socketModuleName is the name of the kernel module that backs
-// `iptables -m socket`. The userspace match library (libxt_socket.so)
-// is statically present on Entware iptables, so `iptables -m socket
-// --help` succeeds even when the kernel module is not loaded — that's
-// why we MUST check /proc/modules, not the help output. Without the
-// kernel module loaded, iptables-restore fails the COMMIT with
-// "No chain/target/match by that name."
-const socketModuleName = "xt_socket"
-
-func buildSocketModulePath(kernelVersion string) string {
-	return filepath.Join("/lib/modules", kernelVersion, "xt_socket.ko")
-}
-
-// EnsureSocketModule best-effort-loads xt_socket. Returns nil on
-// success or when the module is already loaded; returns an error when
-// neither is true. Callers treat the error as "feature unavailable"
-// and skip the socket-bypass rule rather than failing Install.
-//
-// Mirrors EnsureTProxyModule but is non-fatal — TPROXY is required;
-// socket bypass is a defensive optimisation.
-func EnsureSocketModule(ctx context.Context) error {
-	if isModuleLoaded(socketModuleName) {
-		return nil
-	}
-	kernel := osdetect.KernelRelease()
-	if kernel == "" {
-		return ErrNetfilterComponentMissing
-	}
-	path := buildSocketModulePath(kernel)
-	if _, err := os.Stat(path); err != nil {
-		return ErrNetfilterComponentMissing
-	}
-	if _, err := sysexec.Run(ctx, "insmod", path); err != nil {
-		return fmt.Errorf("insmod %s: %w", path, err)
-	}
-	// Module presence is now visible in /proc/modules — no caching
-	// needed; the next IsSocketMatchAvailable call will see it.
-	return nil
-}
-
-// IsSocketMatchAvailable reports whether the kernel currently has the
-// xt_socket module loaded. Userspace help text is NOT consulted: it
-// succeeds even without the kernel module, which would cause
-// iptables-restore to abort. Callers should run EnsureSocketModule
-// first to opportunistically load it.
-func IsSocketMatchAvailable() bool {
-	return isModuleLoaded(socketModuleName)
 }
 
 var bypassCIDRs = []string{
@@ -189,44 +147,48 @@ var bypassCIDRs = []string{
 
 func buildRestoreInput(spec RestoreInputSpec) string {
 	var b strings.Builder
+
+	// ---- *mangle table: UDP only via TPROXY ----
 	b.WriteString("*mangle\n")
 	fmt.Fprintf(&b, ":%s - [0:0]\n", ChainName)
 
 	for _, cidr := range bypassCIDRs {
 		fmt.Fprintf(&b, "-A %s -d %s -j RETURN\n", ChainName, cidr)
 	}
-	fmt.Fprintf(&b, "-A %s -p tcp --dport 79 -j RETURN\n", ChainName)
-
 	fmt.Fprintf(&b, "-A %s -m mark --mark 0xff -j RETURN\n", ChainName)
-
-	// Short-circuit packets that already belong to a transparent socket
-	// owned by sing-box. Without this, sing-box's TCP reply path can
-	// re-enter TPROXY redirect (the connection is already terminated
-	// locally; redirecting again breaks reply delivery to the client).
-	// UDP has no equivalent — TPROXY for UDP is stateless. Gated by
-	// xt_socket availability; the feature flag lives in the spec so the
-	// rule set is byte-identical on systems lacking the module.
-	if spec.SocketBypass {
-		fmt.Fprintf(&b, "-A %s -p tcp -m socket --transparent -j RETURN\n", ChainName)
-	}
-
-	fmt.Fprintf(&b, "-A %s -p tcp -j TPROXY --on-port %d --on-ip 127.0.0.1 --tproxy-mark 0x%x\n",
-		ChainName, TPROXYPort, Fwmark)
 	fmt.Fprintf(&b, "-A %s -p udp -j TPROXY --on-port %d --on-ip 127.0.0.1 --tproxy-mark 0x%x\n",
 		ChainName, TPROXYPort, Fwmark)
 
 	if spec.PolicyMark != "" {
 		// `--ctdir ORIGINAL` restricts the jump to packets in the
-		// original direction of the conntrack flow — i.e. outbound from
-		// the LAN client to the internet. Without this filter, NDMS's
-		// connmark applies to BOTH directions of the conntrack entry,
-		// so reply packets coming back from the internet would also be
-		// TPROXY-redirected into sing-box, breaking the return path
-		// (sing-box has no socket for the reply, packets get dropped
-		// instead of being delivered to the client via NDMS DNAT).
-		fmt.Fprintf(&b, "-I PREROUTING 1 -m connmark --mark %s -m conntrack --ctdir ORIGINAL -j %s\n", spec.PolicyMark, ChainName)
+		// original direction of the conntrack flow — i.e. outbound
+		// from the LAN client to the internet. Without this filter,
+		// NDMS's connmark applies to BOTH directions of the conntrack
+		// entry, so reply packets coming back from the internet would
+		// also be redirected into sing-box, breaking the return path.
+		fmt.Fprintf(&b, "-I PREROUTING 1 -p udp -m connmark --mark %s -m conntrack --ctdir ORIGINAL -j %s\n", spec.PolicyMark, ChainName)
 	}
+	b.WriteString("COMMIT\n")
 
+	// ---- *nat table: TCP via REDIRECT ----
+	// REDIRECT is a NAT operation; conntrack records the DNAT for the
+	// SYN and auto-applies it to subsequent packets. Established TCP
+	// flows therefore route to sing-box's ACCEPT()ed socket without
+	// re-evaluating our PREROUTING jump, sidestepping the
+	// transparent-socket-lookup failure that breaks pure-TPROXY TCP
+	// on this kernel.
+	b.WriteString("*nat\n")
+	fmt.Fprintf(&b, ":%s - [0:0]\n", RedirectChain)
+	for _, cidr := range bypassCIDRs {
+		fmt.Fprintf(&b, "-A %s -d %s -j RETURN\n", RedirectChain, cidr)
+	}
+	// Bypass router admin port so we don't redirect our own UI traffic.
+	fmt.Fprintf(&b, "-A %s -p tcp --dport 79 -j RETURN\n", RedirectChain)
+	fmt.Fprintf(&b, "-A %s -p tcp -j REDIRECT --to-ports %d\n", RedirectChain, RedirectPort)
+
+	if spec.PolicyMark != "" {
+		fmt.Fprintf(&b, "-I PREROUTING 1 -p tcp -m connmark --mark %s -m conntrack --ctdir ORIGINAL -j %s\n", spec.PolicyMark, RedirectChain)
+	}
 	b.WriteString("COMMIT\n")
 	return b.String()
 }
@@ -268,14 +230,8 @@ func (it *IPTables) Install(ctx context.Context, mark string) error {
 	// Idempotent: a no-op when no prior jumps exist.
 	it.removeSourceHooks(ctx)
 
-	// Best-effort load of xt_socket. If it fails (.ko absent on this
-	// kernel) we just skip the bypass rule — TPROXY still works fine
-	// without it, just slightly less defensive on the reply path.
-	_ = EnsureSocketModule(ctx)
-
 	input := buildRestoreInput(RestoreInputSpec{
-		PolicyMark:   mark,
-		SocketBypass: IsSocketMatchAvailable(),
+		PolicyMark: mark,
 	})
 	if it.persistRules != nil {
 		if err := it.persistRules(input); err != nil {
@@ -336,16 +292,19 @@ func writeNetfilterHook() error {
 	}
 	script := fmt.Sprintf(`#!/bin/sh
 [ "$type" = "ip6tables" ] && exit 0
-[ "$table" = "mangle" ] || exit 0
+case "$table" in mangle|nat) ;; *) exit 0 ;; esac
 [ -f %[1]q ] || exit 0
 pidof sing-box >/dev/null 2>&1 || exit 0
-if ! /opt/sbin/iptables -w -t mangle -nL %[2]s >/dev/null 2>&1; then
+mangle_ok=0; nat_ok=0
+/opt/sbin/iptables -w -t mangle -nL %[2]s >/dev/null 2>&1 && mangle_ok=1
+/opt/sbin/iptables -w -t nat    -nL %[6]s >/dev/null 2>&1 && nat_ok=1
+if [ "$mangle_ok" -eq 0 ] || [ "$nat_ok" -eq 0 ]; then
   /opt/sbin/iptables-restore --noflush < %[1]q
   /opt/sbin/ip rule add fwmark 0x%[3]x table %[4]d priority %[5]d 2>/dev/null || true
   /opt/sbin/ip route add local 0.0.0.0/0 dev lo table %[4]d 2>/dev/null || true
-  logger -t awgm-tproxy "netfilter.d: restored AWGM-TPROXY chain after NDMS reload"
+  logger -t awgm-tproxy "netfilter.d: restored AWGM chains after NDMS reload"
 fi
-`, netfilterRulesPath, ChainName, Fwmark, RoutingTable, IPRulePriority)
+`, netfilterRulesPath, ChainName, Fwmark, RoutingTable, IPRulePriority, RedirectChain)
 	return os.WriteFile(netfilterHookPath, []byte(script), 0755)
 }
 
@@ -372,14 +331,23 @@ func (it *IPTables) Uninstall(ctx context.Context) error {
 		it.cleanupHook()
 	}
 	const maxUninstallPasses = 32
+	// Drain mangle PREROUTING jumps to AWGM-TPROXY (UDP TPROXY).
 	for i := 0; i < maxUninstallPasses; i++ {
 		if err := it.runIPTables(ctx, "-t", "mangle", "-D", "PREROUTING", "-j", ChainName); err != nil {
+			break
+		}
+	}
+	// Drain nat PREROUTING jumps to AWGM-REDIRECT (TCP REDIRECT).
+	for i := 0; i < maxUninstallPasses; i++ {
+		if err := it.runIPTables(ctx, "-t", "nat", "-D", "PREROUTING", "-j", RedirectChain); err != nil {
 			break
 		}
 	}
 	it.removeSourceHooks(ctx)
 	_ = it.runIPTables(ctx, "-t", "mangle", "-F", ChainName)
 	_ = it.runIPTables(ctx, "-t", "mangle", "-X", ChainName)
+	_ = it.runIPTables(ctx, "-t", "nat", "-F", RedirectChain)
+	_ = it.runIPTables(ctx, "-t", "nat", "-X", RedirectChain)
 	// Drain ALL fwmark rules — historically Install accumulated
 	// duplicates at priorities 0-N (auto-assigned), so a single `del`
 	// would leave the rest. Loop until ENOENT, capped defensively.
@@ -394,12 +362,17 @@ func (it *IPTables) Uninstall(ctx context.Context) error {
 }
 
 func (it *IPTables) removeSourceHooks(ctx context.Context) {
-	result, err := sysexec.Run(ctx, sysiptables.Binary, "-w", "-t", "mangle", "-S", "PREROUTING")
+	it.removeSourceHooksFromTable(ctx, "mangle", ChainName)
+	it.removeSourceHooksFromTable(ctx, "nat", RedirectChain)
+}
+
+func (it *IPTables) removeSourceHooksFromTable(ctx context.Context, table, chain string) {
+	result, err := sysexec.Run(ctx, sysiptables.Binary, "-w", "-t", table, "-S", "PREROUTING")
 	if err != nil || result == nil {
 		return
 	}
 	for _, line := range strings.Split(result.Stdout, "\n") {
-		if !strings.Contains(line, "-j "+ChainName) {
+		if !strings.Contains(line, "-j "+chain) {
 			continue
 		}
 		line = strings.TrimSpace(line)
@@ -407,7 +380,7 @@ func (it *IPTables) removeSourceHooks(ctx context.Context) {
 			continue
 		}
 		deleteLine := strings.Replace(line, "-A PREROUTING", "-D PREROUTING", 1)
-		args := append([]string{"-t", "mangle"}, strings.Fields(deleteLine)...)
+		args := append([]string{"-t", table}, strings.Fields(deleteLine)...)
 		_ = it.runIPTables(ctx, args...)
 	}
 }

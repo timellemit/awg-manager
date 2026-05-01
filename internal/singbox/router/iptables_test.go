@@ -74,14 +74,18 @@ func TestKernelModuleName(t *testing.T) {
 	}
 }
 
-func TestBuildRestoreInput_PolicyMark_EmitsConnmarkRule(t *testing.T) {
+func TestBuildRestoreInput_PolicyMark_EmitsBothJumps(t *testing.T) {
 	spec := RestoreInputSpec{PolicyMark: "0xffffaaa"}
 	out := buildRestoreInput(spec)
-	// `--ctdir ORIGINAL` is mandatory — without it reply packets get
-	// TPROXY-redirected and the client never sees responses.
-	want := "-I PREROUTING 1 -m connmark --mark 0xffffaaa -m conntrack --ctdir ORIGINAL -j " + ChainName
-	if !strings.Contains(out, want) {
-		t.Errorf("output missing PREROUTING rule\nwant substring: %s\ngot:\n%s", want, out)
+	// UDP via mangle TPROXY.
+	wantMangle := "-I PREROUTING 1 -p udp -m connmark --mark 0xffffaaa -m conntrack --ctdir ORIGINAL -j " + ChainName
+	if !strings.Contains(out, wantMangle) {
+		t.Errorf("missing mangle PREROUTING jump\nwant: %s\ngot:\n%s", wantMangle, out)
+	}
+	// TCP via nat REDIRECT.
+	wantNat := "-I PREROUTING 1 -p tcp -m connmark --mark 0xffffaaa -m conntrack --ctdir ORIGINAL -j " + RedirectChain
+	if !strings.Contains(out, wantNat) {
+		t.Errorf("missing nat PREROUTING jump\nwant: %s\ngot:\n%s", wantNat, out)
 	}
 }
 
@@ -93,18 +97,25 @@ func TestBuildRestoreInput_EmptyMark_NoPrerouting(t *testing.T) {
 	}
 }
 
-func TestBuildRestoreInput_BaseRules_AlwaysPresent(t *testing.T) {
+func TestBuildRestoreInput_TablesAndRulesPresent(t *testing.T) {
 	input := buildRestoreInput(RestoreInputSpec{PolicyMark: "0xffffaaa"})
 
 	expected := []string{
+		// mangle table
 		"*mangle",
 		":AWGM-TPROXY - [0:0]",
 		"-A AWGM-TPROXY -d 127.0.0.0/8 -j RETURN",
 		"-A AWGM-TPROXY -d 192.168.0.0/16 -j RETURN",
-		"-A AWGM-TPROXY -p tcp --dport 79 -j RETURN",
 		"-A AWGM-TPROXY -m mark --mark 0xff -j RETURN",
-		"-A AWGM-TPROXY -p tcp -j TPROXY --on-port 51271 --on-ip 127.0.0.1 --tproxy-mark 0x1",
 		"-A AWGM-TPROXY -p udp -j TPROXY --on-port 51271 --on-ip 127.0.0.1 --tproxy-mark 0x1",
+		// nat table
+		"*nat",
+		":AWGM-REDIRECT - [0:0]",
+		"-A AWGM-REDIRECT -d 127.0.0.0/8 -j RETURN",
+		"-A AWGM-REDIRECT -d 192.168.0.0/16 -j RETURN",
+		"-A AWGM-REDIRECT -p tcp --dport 79 -j RETURN",
+		"-A AWGM-REDIRECT -p tcp -j REDIRECT --to-ports 51272",
+		// both tables commit
 		"COMMIT",
 	}
 	for _, line := range expected {
@@ -112,30 +123,9 @@ func TestBuildRestoreInput_BaseRules_AlwaysPresent(t *testing.T) {
 			t.Errorf("missing line: %q\nin:\n%s", line, input)
 		}
 	}
-	// Socket-bypass MUST NOT appear when feature flag is off (xt_socket
-	// missing → loading the rules would fail with "Couldn't load match").
-	if strings.Contains(input, "-m socket --transparent") {
-		t.Errorf("socket bypass present without SocketBypass=true:\n%s", input)
-	}
-}
-
-func TestBuildRestoreInput_SocketBypass_AppearsBeforeTPROXY(t *testing.T) {
-	input := buildRestoreInput(RestoreInputSpec{
-		PolicyMark:   "0xffffaaa",
-		SocketBypass: true,
-	})
-	bypass := "-A AWGM-TPROXY -p tcp -m socket --transparent -j RETURN"
-	tproxy := "-A AWGM-TPROXY -p tcp -j TPROXY"
-	bi := strings.Index(input, bypass)
-	ti := strings.Index(input, tproxy)
-	if bi < 0 {
-		t.Fatalf("missing socket bypass line:\n%s", input)
-	}
-	if ti < 0 {
-		t.Fatalf("missing TPROXY line:\n%s", input)
-	}
-	if bi >= ti {
-		t.Errorf("socket bypass must precede TPROXY rule (bi=%d, ti=%d):\n%s", bi, ti, input)
+	// TCP TPROXY MUST NOT appear in mangle (we moved TCP to nat REDIRECT).
+	if strings.Contains(input, "-A AWGM-TPROXY -p tcp -j TPROXY") {
+		t.Errorf("legacy TCP TPROXY rule must not be present:\n%s", input)
 	}
 }
 
@@ -145,25 +135,52 @@ func TestIPTablesInstallSequence(t *testing.T) {
 	if err := it.Install(context.Background(), "0xffffaaa"); err != nil {
 		t.Fatal(err)
 	}
-	// Expected order: iptables-restore, then `ip rule del` drain (one
-	// pass — fake returns ENOENT immediately), then `ip rule add` with
-	// our fixed priority, then `ip route add local 0.0.0.0/0`.
-	if len(fe.calls) != 4 {
-		t.Fatalf("expected 4 calls, got %d: %+v", len(fe.calls), fe.calls)
+	// Find the operation phases in the call list rather than asserting
+	// strict positions: removeSourceHooks runs `iptables -S PREROUTING`
+	// across mangle+nat first (cleans stale jumps), then iptables-restore,
+	// then `ip rule del` drain, then `ip rule add`, then `ip route add`.
+	var (
+		restoreSeen   bool
+		ruleAddSeen   bool
+		ruleAddArgs   string
+		routeAddSeen  bool
+		ruleDrainSeen bool
+	)
+	for _, c := range fe.calls {
+		switch c.kind {
+		case "restore":
+			restoreSeen = true
+			if !strings.Contains(c.stdin, "AWGM-TPROXY") {
+				t.Errorf("restore stdin missing AWGM-TPROXY:\n%s", c.stdin)
+			}
+			if !strings.Contains(c.stdin, "AWGM-REDIRECT") {
+				t.Errorf("restore stdin missing AWGM-REDIRECT:\n%s", c.stdin)
+			}
+		case "ip":
+			args := strings.Join(c.args, " ")
+			if strings.Contains(args, "rule del fwmark") {
+				ruleDrainSeen = true
+			}
+			if strings.Contains(args, "rule add fwmark") {
+				ruleAddSeen = true
+				ruleAddArgs = args
+			}
+			if strings.Contains(args, "route add local") {
+				routeAddSeen = true
+			}
+		}
 	}
-	if fe.calls[0].kind != "restore" || !strings.Contains(fe.calls[0].stdin, "AWGM-TPROXY") {
-		t.Errorf("call 0: %+v", fe.calls[0])
+	if !restoreSeen {
+		t.Errorf("expected iptables-restore call")
 	}
-	if fe.calls[1].kind != "ip" || !strings.Contains(strings.Join(fe.calls[1].args, " "), "rule del fwmark") {
-		t.Errorf("call 1 (drain): %+v", fe.calls[1])
+	if !ruleDrainSeen {
+		t.Errorf("expected ip rule del drain pass")
 	}
-	addArgs := strings.Join(fe.calls[2].args, " ")
-	if fe.calls[2].kind != "ip" || !strings.Contains(addArgs, "rule add fwmark") ||
-		!strings.Contains(addArgs, "priority 30000") {
-		t.Errorf("call 2 (rule add): %+v", fe.calls[2])
+	if !ruleAddSeen || !strings.Contains(ruleAddArgs, "priority 30000") {
+		t.Errorf("expected ip rule add with priority 30000, got %q", ruleAddArgs)
 	}
-	if fe.calls[3].kind != "ip" || !strings.Contains(strings.Join(fe.calls[3].args, " "), "route add local") {
-		t.Errorf("call 3 (route add): %+v", fe.calls[3])
+	if !routeAddSeen {
+		t.Errorf("expected ip route add local")
 	}
 }
 

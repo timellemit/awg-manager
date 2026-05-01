@@ -371,47 +371,70 @@ func (s *ServiceImpl) healTProxyInbound(ctx context.Context) error {
 	return s.persistConfig(ctx, cfg)
 }
 
+// ensureTProxyInbound enforces the SKeen-style split: tproxy-in
+// handles UDP only, redirect-in handles TCP. TPROXY for TCP relies on
+// `-m socket --transparent` to deliver established-connection packets
+// to sing-box's accept()ed transparent socket, but that match
+// evaluates to 0 on Keenetic 4.9-ndm-5 — established TCP packets fall
+// through to the listener and get RST. NAT REDIRECT sidesteps the
+// problem: conntrack records the DNAT for SYN, established packets
+// are auto-translated.
 func ensureTProxyInbound(in []Inbound) []Inbound {
+	hasTProxy := false
+	hasRedirect := false
 	for i := range in {
-		if in[i].Tag != "tproxy-in" {
-			continue
+		switch in[i].Tag {
+		case "tproxy-in":
+			hasTProxy = true
+			// Force UDP-only on existing entry. Older configs had no
+			// `network` field which means TCP+UDP — that's the broken
+			// behaviour we're moving away from.
+			if in[i].Network != "udp" {
+				in[i].Network = "udp"
+			}
+			if !in[i].UDPFragment {
+				in[i].UDPFragment = true
+			}
+			if in[i].UDPTimeout == "" {
+				in[i].UDPTimeout = "3m0s"
+			}
+			// tcp_fast_open is meaningless on a UDP-only inbound.
+			if in[i].TCPFastOpen {
+				in[i].TCPFastOpen = false
+			}
+			// Strip RoutingMark — see history note below.
+			if in[i].RoutingMark != 0 {
+				in[i].RoutingMark = 0
+			}
+		case "redirect-in":
+			hasRedirect = true
+			if !in[i].TCPFastOpen {
+				in[i].TCPFastOpen = true
+			}
 		}
-		// Self-heal performance/UX fields on existing inbound (older
-		// versions persisted the inbound without these fields). Mirror
-		// the SKeen reference setup: both TCP and UDP get fast-open /
-		// fragment-handling, UDP timeout extended to 3m so long-lived
-		// flows (video calls, gaming) survive idle gaps.
-		if !in[i].TCPFastOpen {
-			in[i].TCPFastOpen = true
-		}
-		if !in[i].UDPFragment {
-			in[i].UDPFragment = true
-		}
-		if in[i].UDPTimeout == "" {
-			in[i].UDPTimeout = "3m0s"
-		}
-		// Strip RoutingMark on existing inbounds — older versions set
-		// it to Fwmark (0x1), which made sing-box mark its reply-path
-		// packets with the same mark our `ip rule fwmark 0x1` routes
-		// to table 100 (local default dev lo). That bounced reply
-		// packets onto loopback instead of the LAN bridge, causing
-		// ERR_CONNECTION_RESET on clients. SKeen reference setup
-		// never sets routing_mark on the tproxy inbound for this
-		// exact reason.
-		if in[i].RoutingMark != 0 {
-			in[i].RoutingMark = 0
-		}
-		return in
 	}
-	return append([]Inbound{{
-		Type:        "tproxy",
-		Tag:         "tproxy-in",
-		Listen:      "127.0.0.1",
-		ListenPort:  TPROXYPort,
-		TCPFastOpen: true,
-		UDPFragment: true,
-		UDPTimeout:  "3m0s",
-	}}, in...)
+	out := in
+	if !hasTProxy {
+		out = append([]Inbound{{
+			Type:        "tproxy",
+			Tag:         "tproxy-in",
+			Listen:      "127.0.0.1",
+			ListenPort:  TPROXYPort,
+			Network:     "udp",
+			UDPFragment: true,
+			UDPTimeout:  "3m0s",
+		}}, out...)
+	}
+	if !hasRedirect {
+		out = append([]Inbound{{
+			Type:        "redirect",
+			Tag:         "redirect-in",
+			Listen:      "127.0.0.1",
+			ListenPort:  RedirectPort,
+			TCPFastOpen: true,
+		}}, out...)
+	}
+	return out
 }
 
 
