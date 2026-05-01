@@ -257,10 +257,43 @@ func ensureBaseConfig(configDir string) {
 	basePath := filepath.Join(configDir, "00-base.json")
 	if _, err := os.Stat(basePath); err == nil {
 		patchBaseClashPort(basePath)
+		patchBaseLogLevel(basePath)
 		return
 	}
 	_ = os.MkdirAll(configDir, 0755)
 	_ = writeJSONFile(basePath, freshBaseConfig())
+}
+
+// patchBaseLogLevel raises the sing-box log level to "trace" when it is
+// missing or set to a coarser level (info/warn/error). Trace is the
+// default for fresh installs (see freshBaseConfig) — without it,
+// router-traffic diagnosis is hard because connection-level events are
+// suppressed. Idempotent on already-trace files; respects "debug" or
+// "panic"/"fatal" without overwriting (those are deliberate user choices).
+func patchBaseLogLevel(basePath string) {
+	data, err := os.ReadFile(basePath)
+	if err != nil {
+		return
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		return
+	}
+	logBlock, _ := m["log"].(map[string]any)
+	if logBlock == nil {
+		logBlock = map[string]any{}
+		m["log"] = logBlock
+	}
+	current, _ := logBlock["level"].(string)
+	switch current {
+	case "trace", "debug", "panic", "fatal":
+		return
+	}
+	logBlock["level"] = "trace"
+	if _, ok := logBlock["timestamp"]; !ok {
+		logBlock["timestamp"] = true
+	}
+	_ = writeJSONFile(basePath, m)
 }
 
 // patchBaseClashPort rewrites only the experimental.clash_api.external_controller

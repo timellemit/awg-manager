@@ -193,7 +193,8 @@ func TestEnsureBaseConfig_NoClashApiBlockUntouched(t *testing.T) {
 	configDir := filepath.Join(dir, "config.d")
 	_ = os.MkdirAll(configDir, 0755)
 	// User explicitly removed clash_api — respect that, don't re-add.
-	custom := `{"log":{"level":"info"}}`
+	// log.level is "debug" so the log-level heal also leaves it alone.
+	custom := `{"log":{"level":"debug"}}`
 	basePath := filepath.Join(configDir, "00-base.json")
 	if err := os.WriteFile(basePath, []byte(custom), 0644); err != nil {
 		t.Fatal(err)
@@ -202,6 +203,45 @@ func TestEnsureBaseConfig_NoClashApiBlockUntouched(t *testing.T) {
 	raw, _ := os.ReadFile(basePath)
 	if string(raw) != custom {
 		t.Errorf("file without clash_api block must not be touched, got %s", raw)
+	}
+}
+
+func TestEnsureBaseConfig_PatchesStaleLogLevel(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config.d")
+	_ = os.MkdirAll(configDir, 0755)
+	stale := `{"log":{"level":"info","timestamp":true},"experimental":{"clash_api":{"external_controller":"127.0.0.1:9099"}}}`
+	basePath := filepath.Join(configDir, "00-base.json")
+	if err := os.WriteFile(basePath, []byte(stale), 0644); err != nil {
+		t.Fatal(err)
+	}
+	ensureBaseConfig(configDir)
+	raw, _ := os.ReadFile(basePath)
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	if m["log"].(map[string]any)["level"] != "trace" {
+		t.Errorf("log.level should be heal-patched to trace, got %v", m["log"])
+	}
+}
+
+func TestEnsureBaseConfig_RespectsDebugLogLevel(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config.d")
+	_ = os.MkdirAll(configDir, 0755)
+	// User-chosen debug — heal must NOT reduce verbosity.
+	custom := `{"log":{"level":"debug","timestamp":true},"experimental":{"clash_api":{"external_controller":"127.0.0.1:9099"}}}`
+	basePath := filepath.Join(configDir, "00-base.json")
+	if err := os.WriteFile(basePath, []byte(custom), 0644); err != nil {
+		t.Fatal(err)
+	}
+	ensureBaseConfig(configDir)
+	raw, _ := os.ReadFile(basePath)
+	var m map[string]any
+	_ = json.Unmarshal(raw, &m)
+	if m["log"].(map[string]any)["level"] != "debug" {
+		t.Errorf("debug must be preserved, got %v", m["log"])
 	}
 }
 
