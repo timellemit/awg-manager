@@ -157,6 +157,21 @@ const server = http.createServer((req, res) => {
 		// Falls through to the generic pass-through below.
 	}
 
+	// When the install-fail flag is on, also report sing-box as not-installed
+	// so the Settings UI shows the "Установить" button (and clicking it hits
+	// the /singbox/install override above with a 500 + fake stderr).
+	if (req.method === 'GET' && path === '/singbox/status' && singboxInstallShouldFail) {
+		fetchJSON(req.url).then(({ status, body }) => {
+			if (body && typeof body === 'object' && body.data) {
+				body.data.installed = false;
+				body.data.running = false;
+				body.data.pid = 0;
+			}
+			send(res, status, body);
+		});
+		return;
+	}
+
 	if (req.method === 'POST' && path === '/__mock/singbox-install-fail') {
 		let raw = '';
 		req.on('data', (c) => (raw += c));
