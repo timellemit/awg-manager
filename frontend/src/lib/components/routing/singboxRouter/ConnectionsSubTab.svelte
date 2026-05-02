@@ -22,6 +22,7 @@
 	let clientsByIP = $state<Map<string, string>>(new Map());
 	let wsStatus = $state<WSStatus>('connecting');
 	let lastMessageAt = $state(0);
+	let tick = $state(0);
 	let filters = $state<ConnectionFilters>({ search: '', outbound: '', network: 'all', rule: '' });
 	let sortBy = $state<'' | 'download' | 'upload' | 'start' | 'source' | 'destination' | 'outbound'>('download');
 	let sortDir = $state<'asc' | 'desc'>('desc');
@@ -49,6 +50,7 @@
 	const totalDown = $derived(filteredConns.reduce((s, c) => s + c.download, 0));
 
 	const statusLabel = $derived.by(() => {
+		void tick; // re-evaluate every tick
 		const sinceMs = Date.now() - lastMessageAt;
 		if (wsStatus === 'open' && lastMessageAt > 0 && sinceMs < 2000) return { dot: '●', text: 'Live', cls: 'ok' };
 		if (wsStatus === 'open' && sinceMs < 5000) return { dot: '●', text: 'Live', cls: 'ok' };
@@ -140,8 +142,7 @@
 			(s) => { wsStatus = s; },
 		);
 		// Force statusLabel to re-derive every second so "Stale" can flip.
-		// svelte-ignore state_referenced_locally
-		staleTimer = setInterval(() => { lastMessageAt = lastMessageAt; }, 1000);
+		staleTimer = setInterval(() => { tick += 1; }, 1000);
 	});
 
 	onDestroy(() => {
