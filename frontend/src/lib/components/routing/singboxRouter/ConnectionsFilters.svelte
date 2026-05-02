@@ -1,5 +1,6 @@
 <!-- frontend/src/lib/components/routing/singboxRouter/ConnectionsFilters.svelte -->
 <script lang="ts">
+	import { onDestroy } from 'svelte';
 	import type { ConnectionFilters, NetworkFilter } from '$lib/types/singboxConnections';
 
 	interface Props {
@@ -13,6 +14,17 @@
 
 	// svelte-ignore state_referenced_locally
 	let searchValue = $state(filters.search);
+
+	$effect(() => {
+		if (searchValue !== filters.search) {
+			searchValue = filters.search;
+		}
+	});
+
+	onDestroy(() => {
+		if (debounceTimer !== null) clearTimeout(debounceTimer);
+	});
+
 	let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 	function commitSearch(): void {
