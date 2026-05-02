@@ -1104,6 +1104,14 @@ export interface MonitoringTunnel {
 	pingcheckTarget: string;
 	selfTarget: string;
 	selfMethod: string;
+	/** "awg" | "system" | "singbox" — drives row visual hints. */
+	source?: 'awg' | 'system' | 'singbox';
+	/** Sing-box outbound tag; empty unless source==='singbox'. */
+	singboxTag?: string;
+	/** Last Clash urltest delay in ms; 0 = no urltest data. */
+	clashDelay?: number;
+	/** urltest group tag this sing-box tunnel belongs to. */
+	urltestGroup?: string;
 }
 
 export interface MonitoringCell {

@@ -1,6 +1,9 @@
 <script lang="ts">
 	import type { MonitoringSnapshot, MonitoringTarget, MonitoringTunnel, MonitoringCell } from '$lib/types';
 	import MatrixCell from './MatrixCell.svelte';
+	import { Badge, LatencySparkline } from '$lib/components/ui';
+	import { latencyTier } from '$lib/utils/latencyTier';
+	import { latencyHistory } from '$lib/stores/singboxProxies';
 
 	interface Props {
 		snapshot: MonitoringSnapshot;
@@ -55,6 +58,21 @@
 									{t.name}
 									<span class="settings-icon" aria-hidden="true">›</span>
 								</a>
+							{/if}
+							{#if t.source === 'singbox' && t.clashDelay && t.clashDelay > 0}
+								<Badge
+									variant={latencyTier(t.clashDelay)}
+									size="sm"
+									mono
+									title={`Источник: urltest группа "${t.urltestGroup ?? ''}"`}
+								>
+									clash: {t.clashDelay}ms
+									<LatencySparkline
+										history={$latencyHistory.get(t.singboxTag ?? '') ?? []}
+										width={36}
+										height={10}
+									/>
+								</Badge>
 							{/if}
 						</th>
 					{/each}
