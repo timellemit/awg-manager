@@ -2,6 +2,7 @@
 <script lang="ts">
 	import { onDestroy } from 'svelte';
 	import type { ConnectionFilters, NetworkFilter } from '$lib/types/singboxConnections';
+	import { Dropdown, type DropdownOption } from '$lib/components/ui';
 
 	interface Props {
 		filters: ConnectionFilters;
@@ -21,11 +22,11 @@
 		}
 	});
 
+	let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
 	onDestroy(() => {
 		if (debounceTimer !== null) clearTimeout(debounceTimer);
 	});
-
-	let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 	function commitSearch(): void {
 		onChange({ ...filters, search: searchValue });
@@ -37,12 +38,24 @@
 		debounceTimer = setTimeout(commitSearch, 200);
 	}
 
-	function setOutbound(v: string): void { onChange({ ...filters, outbound: v }); }
-	function setNetwork(v: NetworkFilter): void { onChange({ ...filters, network: v }); }
-	function setRule(v: string): void { onChange({ ...filters, rule: v }); }
+	const outboundDropdown = $derived<DropdownOption[]>([
+		{ value: '', label: 'Все' },
+		...outboundOptions.map((o) => ({ value: o, label: o })),
+	]);
+
+	const networkDropdown: DropdownOption<NetworkFilter>[] = [
+		{ value: 'all', label: 'Все' },
+		{ value: 'tcp', label: 'TCP' },
+		{ value: 'udp', label: 'UDP' },
+	];
+
+	const ruleDropdown = $derived<DropdownOption[]>([
+		{ value: '', label: 'Все' },
+		...ruleOptions.map((r) => ({ value: r, label: r })),
+	]);
 </script>
 
-<div class="row">
+<div class="col">
 	<input
 		type="text"
 		class="search"
@@ -51,42 +64,39 @@
 		oninput={onSearchInput}
 	/>
 
-	<select class="select" value={filters.outbound} onchange={(e) => setOutbound((e.target as HTMLSelectElement).value)}>
-		<option value="">Outbound: все</option>
-		{#each outboundOptions as o}
-			<option value={o}>{o}</option>
-		{/each}
-	</select>
+	<Dropdown
+		label="Outbound"
+		value={filters.outbound}
+		options={outboundDropdown}
+		onchange={(v) => onChange({ ...filters, outbound: v })}
+		fullWidth
+	/>
 
-	<select class="select" value={filters.network} onchange={(e) => setNetwork((e.target as HTMLSelectElement).value as NetworkFilter)}>
-		<option value="all">Network: все</option>
-		<option value="tcp">TCP</option>
-		<option value="udp">UDP</option>
-	</select>
+	<Dropdown
+		label="Network"
+		value={filters.network}
+		options={networkDropdown}
+		onchange={(v) => onChange({ ...filters, network: v })}
+		fullWidth
+	/>
 
-	<select class="select" value={filters.rule} onchange={(e) => setRule((e.target as HTMLSelectElement).value)}>
-		<option value="">Rule: все</option>
-		{#each ruleOptions as r}
-			<option value={r}>{r}</option>
-		{/each}
-	</select>
+	<Dropdown
+		label="Rule"
+		value={filters.rule}
+		options={ruleDropdown}
+		onchange={(v) => onChange({ ...filters, rule: v })}
+		fullWidth
+	/>
 </div>
 
 <style>
-	.row {
-		display: flex; gap: 8px; flex-wrap: wrap;
+	.col {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
 		margin-bottom: 12px;
 	}
 	.search {
-		flex: 1; min-width: 220px;
-		padding: 6px 10px;
-		font-size: 13px;
-		background: var(--surface-1, #1f2425);
-		border: 1px solid var(--border-1, #2c3134);
-		border-radius: 6px;
-		color: var(--text-primary, #e8e6e3);
-	}
-	.select {
 		padding: 6px 10px;
 		font-size: 13px;
 		background: var(--surface-1, #1f2425);
