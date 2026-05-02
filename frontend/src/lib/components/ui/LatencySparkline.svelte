@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { latencyTier } from '$lib/utils/latencyTier';
+
 	interface Props {
 		/** Latency datapoints in ms, oldest → newest. */
 		history: number[];
@@ -10,10 +12,12 @@
 
 	const strokeColor = $derived.by(() => {
 		const last = history.length > 0 ? history[history.length - 1] : 0;
-		if (last === 0) return 'var(--color-text-muted)';
-		if (last < 100) return 'var(--color-success)';
-		if (last < 300) return 'var(--color-warning)';
-		return 'var(--color-error)';
+		switch (latencyTier(last)) {
+			case 'success': return 'var(--color-success)';
+			case 'warning': return 'var(--color-warning)';
+			case 'error':   return 'var(--color-error)';
+			default:        return 'var(--color-text-muted)';
+		}
 	});
 
 	// Build polyline points scaled to the box. Treats 0 (timeout) as the

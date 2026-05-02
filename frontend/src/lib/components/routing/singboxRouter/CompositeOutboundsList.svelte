@@ -6,6 +6,7 @@
 	import CompositeOutboundEditModal from './CompositeOutboundEditModal.svelte';
 	import ConfirmModal from '$lib/components/ui/ConfirmModal.svelte';
 	import { LatencySparkline } from '$lib/components/ui';
+	import { latencyTier } from '$lib/utils/latencyTier';
 
 	interface Props {
 		outbounds: SingboxRouterOutbound[];
@@ -45,9 +46,12 @@
 	}
 
 	function delayClass(d: number): string {
-		if (d < 100) return 'delay-good';
-		if (d < 300) return 'delay-warn';
-		return 'delay-bad';
+		switch (latencyTier(d)) {
+			case 'success': return 'delay-good';
+			case 'warning': return 'delay-warn';
+			case 'error':   return 'delay-bad';
+			default:        return 'delay-muted';
+		}
 	}
 
 	async function testGroup(group: string): Promise<void> {
