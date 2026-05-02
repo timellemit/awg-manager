@@ -119,6 +119,9 @@
 		border: 1px solid var(--border-1, #2c3134);
 		border-radius: 6px;
 		overflow: hidden;
+		display: flex;
+		flex-direction: column;
+		height: 100%;
 	}
 	.panel-head {
 		padding: 8px 12px;
@@ -171,7 +174,7 @@
 		color: var(--text-tertiary, #6e6e6e);
 		font-family: ui-monospace, monospace; font-size: 10px;
 	}
-	.buckets { max-height: 280px; overflow-y: auto; }
+	.buckets { flex: 1; min-height: 180px; max-height: 280px; overflow-y: auto; }
 	.bucket {
 		all: unset;
 		display: block;

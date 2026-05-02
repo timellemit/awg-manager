@@ -189,10 +189,17 @@
 		border: 1px solid var(--border-1, #2c3134);
 		border-radius: 6px;
 		font-size: 13px;
+		min-height: 36px;
 	}
 	.muted { color: var(--text-tertiary, #6e6e6e); }
 	.dot { color: var(--text-tertiary, #6e6e6e); margin: 0 6px; }
-	.status { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
+	.status {
+		display: inline-flex; align-items: center; gap: 4px;
+		font-size: 12px;
+		min-width: 160px;
+		justify-content: flex-end;
+		font-variant-numeric: tabular-nums;
+	}
 	.status-ok .dot-icon { color: #3d9970; }
 	.status-warn .dot-icon { color: #dab856; }
 	.status-err .dot-icon { color: #ff6b6b; }

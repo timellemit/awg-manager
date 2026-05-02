@@ -128,7 +128,7 @@
 </div>
 
 <style>
-	.wrap { overflow-x: auto; }
+	.wrap { overflow-x: auto; min-height: 320px; }
 	.t { width: 100%; border-collapse: collapse; font-size: 13px; }
 	.t th, .t td {
 		padding: 6px 10px;

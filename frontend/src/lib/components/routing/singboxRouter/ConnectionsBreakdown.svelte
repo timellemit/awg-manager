@@ -41,6 +41,7 @@
 		grid-template-columns: repeat(3, 1fr);
 		gap: 12px;
 		margin-bottom: 16px;
+		align-items: stretch;
 	}
 	@media (max-width: 900px) {
 		.grid { grid-template-columns: 1fr; }
