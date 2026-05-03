@@ -52,6 +52,7 @@ import type {
 	SingboxTunnel,
 	SingboxStatus,
 	SingboxImportResponse,
+	SingboxConfigPreview,
 	DeviceProxyConfig,
 	DeviceProxyOutbound,
 	DeviceProxyRuntime,
@@ -66,10 +67,15 @@ import type {
 	SingboxRouterOutbound,
 	SingboxRouterPreset,
 	RouterPolicy,
-	RouterPolicyDevice,
 	SingboxRouterDNSServer,
 	SingboxRouterDNSRule,
-	SingboxRouterDNSGlobals
+	SingboxRouterDNSGlobals,
+	SingboxRouterInspectRequest,
+	SingboxRouterInspectResult,
+	SingboxProxiesListResponse,
+	SingboxProxiesSelectRequest,
+	SingboxProxiesTestRequest,
+	SingboxProxiesTestResponse
 } from '$lib/types';
 
 interface ApiResponse<T> {
@@ -1182,6 +1188,10 @@ class ApiClient {
 		return this.request('/singbox/status');
 	}
 
+	async singboxGetClientsByIP(): Promise<{ clientsByIP: Record<string, string> }> {
+		return this.request('/singbox/connections/clients');
+	}
+
 	async singboxInstall(): Promise<SingboxStatus> {
 		return this.request('/singbox/install', { method: 'POST' });
 	}
@@ -1191,6 +1201,10 @@ class ApiClient {
 			method: 'POST',
 			body: JSON.stringify({ action }),
 		});
+	}
+
+	async singboxGetConfigPreview(): Promise<SingboxConfigPreview> {
+		return this.request<SingboxConfigPreview>('/singbox/config-preview');
 	}
 
 	async singboxListTunnels(): Promise<SingboxTunnel[]> {
@@ -1307,8 +1321,9 @@ class ApiClient {
 	// #region Monitoring (Phase 3)
 	// ─────────────────────────────────────────────
 
-	async getMonitoringMatrix(): Promise<MonitoringSnapshot> {
-		return this.request<MonitoringSnapshot>('/monitoring/matrix');
+	async getMonitoringMatrix(opts?: { force?: boolean }): Promise<MonitoringSnapshot> {
+		const path = opts?.force ? '/monitoring/matrix?force=1' : '/monitoring/matrix';
+		return this.request<MonitoringSnapshot>(path);
 	}
 
 	async getMonitoringHistory(params: {
@@ -1435,6 +1450,24 @@ class ApiClient {
 		});
 	}
 
+	async singboxRouterListProxies(): Promise<SingboxProxiesListResponse> {
+		return this.request<SingboxProxiesListResponse>('/singbox/router/proxies/list');
+	}
+
+	async singboxRouterSelectProxy(req: SingboxProxiesSelectRequest): Promise<void> {
+		await this.request<unknown>('/singbox/router/proxies/select', {
+			method: 'POST',
+			body: JSON.stringify(req),
+		});
+	}
+
+	async singboxRouterTestProxy(req: SingboxProxiesTestRequest): Promise<SingboxProxiesTestResponse> {
+		return this.request<SingboxProxiesTestResponse>('/singbox/router/proxies/test', {
+			method: 'POST',
+			body: JSON.stringify(req),
+		});
+	}
+
 	async singboxRouterListPresets(): Promise<SingboxRouterPreset[]> {
 		return this.request('/singbox/router/presets/list');
 	}
@@ -1454,26 +1487,6 @@ class ApiClient {
 		return this.request<RouterPolicy>('/singbox/router/policies', {
 			method: 'POST',
 			body: JSON.stringify({ description: description ?? 'awgm-router' }),
-		});
-	}
-
-	async singboxRouterPolicyDevices(policyName: string): Promise<RouterPolicyDevice[]> {
-		return this.request<RouterPolicyDevice[]>(
-			`/singbox/router/policy-devices?name=${encodeURIComponent(policyName)}`
-		);
-	}
-
-	async singboxRouterPolicyBind(mac: string, policyName: string): Promise<void> {
-		await this.request('/singbox/router/policy-devices/bind', {
-			method: 'POST',
-			body: JSON.stringify({ mac, policyName }),
-		});
-	}
-
-	async singboxRouterPolicyUnbind(mac: string): Promise<void> {
-		await this.request('/singbox/router/policy-devices/unbind', {
-			method: 'POST',
-			body: JSON.stringify({ mac }),
 		});
 	}
 
@@ -1542,6 +1555,15 @@ class ApiClient {
 		await this.request('/singbox/router/dns/globals', {
 			method: 'PUT',
 			body: JSON.stringify(globals),
+		});
+	}
+
+	async singboxRouterInspectRoute(
+		req: SingboxRouterInspectRequest,
+	): Promise<SingboxRouterInspectResult> {
+		return this.request('/singbox/router/inspect', {
+			method: 'POST',
+			body: JSON.stringify(req),
 		});
 	}
 

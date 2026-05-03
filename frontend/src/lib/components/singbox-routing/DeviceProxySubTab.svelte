@@ -7,10 +7,10 @@
 		deviceProxyMissingTarget,
 	} from '$lib/stores/deviceproxy';
 	import { SideDrawer } from '$lib/components/ui';
-	import ActiveTunnelCard from './ActiveTunnelCard.svelte';
-	import SettingsCard from './SettingsCard.svelte';
-	import DeviceProxyStatRow from './DeviceProxyStatRow.svelte';
-	import DeviceProxyClientInfoCard from './DeviceProxyClientInfoCard.svelte';
+	import ActiveTunnelCard from '$lib/components/deviceproxy/ActiveTunnelCard.svelte';
+	import SettingsCard from '$lib/components/deviceproxy/SettingsCard.svelte';
+	import DeviceProxyStatRow from '$lib/components/deviceproxy/DeviceProxyStatRow.svelte';
+	import DeviceProxyClientInfoCard from '$lib/components/deviceproxy/DeviceProxyClientInfoCard.svelte';
 	import { api } from '$lib/api/client';
 	import { notifications } from '$lib/stores/notifications';
 	import type { DeviceProxyConfig } from '$lib/types';

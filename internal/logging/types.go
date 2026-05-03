@@ -62,6 +62,7 @@ const (
 	SubSBDNS      = "dns"
 	SubSBRouter   = "router"
 	SubSBRuntime  = "runtime"
+	SubSBProcess  = "process"
 )
 
 // LogEntry represents a single log entry.

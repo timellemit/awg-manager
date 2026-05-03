@@ -46,6 +46,7 @@ import (
 	"github.com/hoaxisr/awg-manager/internal/server"
 	"github.com/hoaxisr/awg-manager/internal/singbox"
 	"github.com/hoaxisr/awg-manager/internal/singbox/awgoutbounds"
+	singboxorch "github.com/hoaxisr/awg-manager/internal/singbox/orchestrator"
 	"github.com/hoaxisr/awg-manager/internal/singbox/router"
 	"github.com/hoaxisr/awg-manager/internal/staticroute"
 	"github.com/hoaxisr/awg-manager/internal/storage"
@@ -566,13 +567,60 @@ func main() {
 
 	// Sing-box integration
 	singboxOp := singbox.NewOperator(singbox.OperatorDeps{
-		Log:      slog.Default().With("component", "singbox"),
-		Queries:  ndmsQueries,
-		Commands: ndmsCommands,
+		Log:       slog.Default().With("component", "singbox"),
+		Queries:   ndmsQueries,
+		Commands:  ndmsCommands,
+		AppLogger: loggingService,
 	})
+
+	// config.d orchestrator — the single writer of slot files (00-base /
+	// 10-tunnels / 15-awg / 20-router / 30-deviceproxy). Producers route
+	// their writes through Save / SetEnabled so a "disabled" domain
+	// actually moves the file out of sing-box's view (config.d/disabled/)
+	// instead of leaving stale content behind.
+	singboxConfigDir := singboxOp.ConfigDir()
+	if err := singbox.MigrateDeviceProxyOutOfTunnels(singboxConfigDir); err != nil {
+		log.Warnf("singbox: deviceproxy migration: %v", err)
+	}
+	sbOrch := singboxorch.New(singboxConfigDir, singboxOp.Process())
+	sbOrch.SetLogger(func(level, msg string) {
+		switch level {
+		case "warn":
+			loggingService.AppLog(logging.LevelWarn, logging.GroupSingbox, logging.SubSBProcess, "orchestrator", "", msg)
+		case "error":
+			loggingService.AppLog(logging.LevelError, logging.GroupSingbox, logging.SubSBProcess, "orchestrator", "", msg)
+		default:
+			loggingService.AppLog(logging.LevelInfo, logging.GroupSingbox, logging.SubSBProcess, "orchestrator", "", msg)
+		}
+	})
+	for _, meta := range singboxorch.KnownSlots() {
+		if err := sbOrch.Register(meta); err != nil {
+			log.Errorf("singbox orchestrator register %s: %v", meta.Slot, err)
+		}
+	}
+	if err := sbOrch.Bootstrap(); err != nil {
+		log.Errorf("singbox orchestrator bootstrap: %v", err)
+	}
+	// Reflect Settings into orchestrator slot enabled-state. tunnels /
+	// awg are content-only (the producers handle empty content safely),
+	// so they're always-on. Router follows Settings.SingboxRouter.Enabled.
+	// deviceproxy follows the deviceproxy storage Config.Enabled and is
+	// reflected after deviceProxySvc is constructed below.
+	_ = sbOrch.SetEnabled(singboxorch.SlotTunnels, true)
+	_ = sbOrch.SetEnabled(singboxorch.SlotAwg, true)
+	if curSettings, err := settingsStore.Load(); err == nil && curSettings != nil {
+		_ = sbOrch.SetEnabled(singboxorch.SlotRouter, curSettings.SingboxRouter.Enabled)
+	}
+
+	// Wire orchestrator into Operator so ApplyConfig writes 10-tunnels.json
+	// through SlotTunnels rather than an in-place write that bypasses
+	// the orchestrator's validate / debounced reload.
+	singboxOp.SetOrch(sbOrch)
+
 	delayChecker := singbox.NewDelayChecker(singboxOp.Clash(), singboxOp, eventBus)
 	singboxHandler := api.NewSingboxHandler(singboxOp, eventBus, delayChecker, testService)
 	clashProxy := api.NewClashProxy(singboxOp)
+	singboxConnsHandler := api.NewSingboxConnectionsHandler(ndmsQueries.Hotspot)
 
 	// Watchdog: runs an immediate reconcile (replacing the old one-shot
 	// startup reconcile) and keeps checking every 30s. If sing-box crashes
@@ -656,6 +704,7 @@ func main() {
 		hydraService,
 		singboxHandler,
 		clashProxy,
+		singboxConnsHandler,
 		monitoringService,
 	)
 
@@ -678,6 +727,7 @@ func main() {
 		Singbox:       newAwgoutboundsSingboxAdapter(singboxOp),
 		AppLog:        logging.NewScopedLogger(loggingService, logging.GroupRouting, logging.SubAWGOutbounds),
 		Bus:           eventBus,
+		Orch:          sbOrch,
 	})
 	awgoutboundsUnsub := awgoutboundsSvc.SubscribeBus(context.Background())
 	defer awgoutboundsUnsub()
@@ -690,13 +740,19 @@ func main() {
 	// Device-proxy service — LAN-facing SOCKS/HTTP proxy managed through
 	// sing-box. See docs/superpowers/specs/2026-04-24-device-proxy-design.md.
 	deviceProxyStore := deviceproxy.NewStore(filepath.Join(*dataDir, "deviceproxy.json"))
+	deviceProxySingboxAdapter := deviceproxy.NewSingboxAdapter(singboxOp)
+	deviceProxySingboxAdapter.SetOrch(sbOrch)
 	deviceProxySvc := deviceproxy.NewService(deviceproxy.Deps{
 		Store:        deviceProxyStore,
-		Singbox:      deviceproxy.NewSingboxAdapter(singboxOp),
+		Singbox:      deviceProxySingboxAdapter,
 		NDMSQuery:    deviceproxy.NewNDMSAdapter(ndmsQueries),
 		Bus:          eventBus,
 		AWGOutbounds: &deviceproxyAWGOutboundsAdapter{src: awgoutboundsSvc},
 	})
+	// Reflect deviceproxy storage state into the orchestrator slot so
+	// the saved Enabled flag matches the on-disk active/disabled
+	// location of 30-deviceproxy.json from boot.
+	_ = sbOrch.SetEnabled(singboxorch.SlotDeviceProxy, deviceProxyStore.Get().Enabled)
 	deviceProxySvc.SetTunnelInboundPorts(func() []int {
 		cfg, err := singboxOp.LoadCurrentConfig()
 		if err != nil {
@@ -735,12 +791,14 @@ func main() {
 	srv.SetMetricsPoller(ndmsMetricsPoller)
 
 	routerSvc := router.NewService(router.Deps{
-		Log:      log,
-		Settings: settingsStore,
-		Singbox:  singboxOp,
-		Policies: &routerAccessPolicyAdapter{svc: accessPolicySvc, wan: wanModel},
-		Events:   eventBus,
-		AWGTags:  &routerAWGTagAdapter{src: awgoutboundsSvc},
+		Log:            log,
+		Settings:       settingsStore,
+		Singbox:        singboxOp,
+		Policies:       &routerAccessPolicyAdapter{svc: accessPolicySvc, wan: wanModel},
+		Events:         eventBus,
+		AWGTags:        &routerAWGTagAdapter{src: awgoutboundsSvc},
+		SingboxTunnels: &routerSingboxTunnelAdapter{src: singboxOp},
+		Orch:           sbOrch,
 	})
 	tunnelService.SetAWGSyncer(awgoutboundsSvc)
 	tunnelService.SetDeviceProxyRefChecker(deviceProxySvc)
@@ -754,8 +812,31 @@ func main() {
 	routerScheduler := router.NewScheduler(routerSvc, settingsStore, log)
 	routerScheduler.Start()
 
+	// Late-bind sing-box / router / Clash deps into the monitoring scheduler.
+	// monitoringService is constructed early (line ~421) so the matrix can
+	// include Keenetic-native tunnels; singboxOp + routerSvc + clashProxy
+	// are constructed later in the bootstrap, hence the deferred wiring.
+	monitoringService.SetSingboxTunnels(&monitoringSingboxTunnelAdapter{op: singboxOp})
+	monitoringService.SetComposites(&monitoringCompositesAdapter{svc: routerSvc})
+	monitoringService.SetClashState(monitoring.NewClashState(clashProxy.ClashBaseURL, nil))
+
 	srv.SetSingboxRouterHandler(api.NewSingboxRouterHandler(routerSvc, loggingService))
 	srv.SetAWGOutboundsHandler(api.NewAWGOutboundsHandler(awgoutboundsSvc))
+	srv.SetSingboxConfigHandler(api.NewSingboxConfigHandler(sbOrch.ConfigDir))
+
+	proxiesHandler := api.NewSingboxProxiesHandler(
+		clashProxy.ClashBaseURL,
+		func() map[string]struct{} {
+			out, _ := routerSvc.ListCompositeOutbounds(context.Background())
+			set := make(map[string]struct{}, len(out))
+			for _, o := range out {
+				set[o.Tag] = struct{}{}
+			}
+			return set
+		},
+		nil,
+	)
+	srv.SetSingboxProxiesHandler(proxiesHandler)
 
 	// Boot status: 0 = booting, 1 = done. Used by /api/system/info.
 	var bootDone int32
@@ -1432,6 +1513,27 @@ func runCleanup(dataDir string) {
 		Queries:  cleanupNDMSQueries,
 		Commands: cleanupNDMSCommands,
 	})
+
+	// Cleanup mode: bootstrap the orchestrator so any subsequent
+	// operator call that goes through ApplyConfig writes the slot
+	// file rather than the legacy in-place tunnels.json. Cleanup
+	// itself only invokes singboxOp.Cleanup, but we keep the wiring
+	// symmetrical to the daemon path so future cleanup steps have it
+	// available.
+	cleanupSingboxConfigDir := singboxOp.ConfigDir()
+	if err := singbox.MigrateDeviceProxyOutOfTunnels(cleanupSingboxConfigDir); err != nil {
+		log.Warnf("singbox: deviceproxy migration: %v", err)
+	}
+	cleanupSbOrch := singboxorch.New(cleanupSingboxConfigDir, singboxOp.Process())
+	for _, meta := range singboxorch.KnownSlots() {
+		if err := cleanupSbOrch.Register(meta); err != nil {
+			log.Errorf("singbox orchestrator register %s: %v", meta.Slot, err)
+		}
+	}
+	if err := cleanupSbOrch.Bootstrap(); err != nil {
+		log.Errorf("singbox orchestrator bootstrap: %v", err)
+	}
+	singboxOp.SetOrch(cleanupSbOrch)
 
 	accessPolicySvc := accesspolicy.New(cleanupNDMSCommands.Policies, cleanupNDMSCommands.Interfaces, cleanupNDMSQueries, settingsStore, log, nil, ndmsquery.NewPolicyMarkStore(cleanupNDMSTransport, log))
 

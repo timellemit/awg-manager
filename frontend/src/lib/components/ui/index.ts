@@ -27,3 +27,6 @@ export type { DropdownOption } from './Dropdown.svelte';
 export { default as SideDrawer } from './SideDrawer.svelte';
 export { default as VersionBadge } from './VersionBadge.svelte';
 export type { VersionBadgeKind, BackendValue, AwgValue } from './VersionBadge.svelte';
+export { default as StatRow } from './StatRow.svelte';
+export type { StatTile, StatTileAccent } from './StatRow.svelte';
+export { default as LatencySparkline } from './LatencySparkline.svelte';

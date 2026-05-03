@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/hoaxisr/awg-manager/internal/deviceproxy"
+	"github.com/hoaxisr/awg-manager/internal/monitoring"
 	"github.com/hoaxisr/awg-manager/internal/singbox"
 	"github.com/hoaxisr/awg-manager/internal/singbox/awgoutbounds"
 	"github.com/hoaxisr/awg-manager/internal/singbox/router"
@@ -113,7 +114,9 @@ func newAwgoutboundsSingboxAdapter(op *singbox.Operator) *awgoutboundsSingboxAda
 }
 
 func (a *awgoutboundsSingboxAdapter) ConfigDir() string { return a.op.ConfigDir() }
-func (a *awgoutboundsSingboxAdapter) Reload() error      { return a.op.Reload() }
+func (a *awgoutboundsSingboxAdapter) Reload() error {
+	return a.op.Process().Reload()
+}
 
 // deviceproxyAWGOutboundsAdapter projects awgoutbounds.TagInfo into
 // deviceproxy.AWGTagInfo. main.go owns this projection so neither
@@ -153,4 +156,74 @@ func (a *routerAWGTagAdapter) ListTags(ctx context.Context) ([]router.AWGTag, er
 		out = append(out, router.AWGTag{Tag: t.Tag})
 	}
 	return out, nil
+}
+
+// routerSingboxTunnelAdapter projects sing-box tunnels (10-tunnels.json)
+// into the simple []string the router needs for cross-slot outbound
+// validation. Mirrors routerAWGTagAdapter so router stays decoupled
+// from internal/singbox types.
+type routerSingboxTunnelAdapter struct {
+	src *singbox.Operator
+}
+
+func (a *routerSingboxTunnelAdapter) ListTunnelTags(ctx context.Context) ([]string, error) {
+	tunnels, err := a.src.ListTunnels(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(tunnels))
+	for _, t := range tunnels {
+		if t.Tag != "" {
+			out = append(out, t.Tag)
+		}
+	}
+	return out, nil
+}
+
+// monitoringSingboxTunnelAdapter projects sing-box tunnels into the
+// shape monitoring.Scheduler expects. Lives here so the monitoring
+// package stays free of singbox imports.
+type monitoringSingboxTunnelAdapter struct {
+	op *singbox.Operator
+}
+
+func (a *monitoringSingboxTunnelAdapter) List(ctx context.Context) ([]monitoring.SingboxTunnelInfo, error) {
+	tunnels, err := a.op.ListTunnels(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]monitoring.SingboxTunnelInfo, 0, len(tunnels))
+	for _, t := range tunnels {
+		if t.Tag == "" || t.KernelInterface == "" {
+			continue
+		}
+		out = append(out, monitoring.SingboxTunnelInfo{
+			Tag:           t.Tag,
+			Name:          t.Tag, // sing-box TunnelInfo doesn't carry a separate Name field
+			InterfaceName: t.KernelInterface,
+		})
+	}
+	return out, nil
+}
+
+// monitoringCompositesAdapter projects router composite outbounds
+// into the shape monitoring.Scheduler expects.
+type monitoringCompositesAdapter struct {
+	svc router.Service
+}
+
+func (a *monitoringCompositesAdapter) List(ctx context.Context) ([]monitoring.CompositeOutboundInfo, error) {
+	outs, err := a.svc.ListCompositeOutbounds(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]monitoring.CompositeOutboundInfo, 0, len(outs))
+	for _, o := range outs {
+		result = append(result, monitoring.CompositeOutboundInfo{
+			Tag:     o.Tag,
+			Type:    o.Type,
+			Members: o.Outbounds, // router.Outbound's member-tags slice
+		})
+	}
+	return result, nil
 }

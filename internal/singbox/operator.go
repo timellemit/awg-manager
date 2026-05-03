@@ -13,8 +13,10 @@ import (
 	"time"
 
 	"github.com/hoaxisr/awg-manager/internal/events"
+	"github.com/hoaxisr/awg-manager/internal/logging"
 	"github.com/hoaxisr/awg-manager/internal/ndms/command"
 	"github.com/hoaxisr/awg-manager/internal/ndms/query"
+	"github.com/hoaxisr/awg-manager/internal/singbox/orchestrator"
 	"github.com/hoaxisr/awg-manager/internal/sys/ndmsinfo"
 )
 
@@ -57,23 +59,25 @@ type Operator struct {
 	clash     *ClashClient
 	bus       *events.Bus
 
+	// processLogger forwards sing-box stdout/stderr lines into the app
+	// log under singbox/process so users can see daemon output at
+	// /diagnostics?tab=logs without ssh'ing in. nil-safe (ScopedLogger
+	// methods no-op on nil), so zero-value Operator structs in tests
+	// stay usable.
+	processLogger *logging.ScopedLogger
+
 	// lastError holds the last fatal exit reason (stderr tail or wait
 	// error) captured by Process.OnExit. Surfaced via Status.LastError so
 	// the UI can explain crashes without forcing the user to ssh in.
 	lastErrorMu sync.RWMutex
 	lastError   string
 
-	// reloadFn is the underlying SIGHUP function; defaults to o.proc.Reload.
-	// Tests inject a closure to bypass real signal delivery.
-	reloadFn func() error
-
-	// Reload coalescing — see Reload() comment for the contract.
-	reloadMu       sync.Mutex
-	reloadTimer    *time.Timer
-	reloadFirstAt  time.Time
-	reloadPending  bool
-	reloadLastErr  error
-	reloadDoneChan chan struct{}
+	// orch is the config.d orchestrator. When non-nil, ApplyConfig
+	// writes 10-tunnels.json through the orchestrator's slot writer
+	// (which handles validate + debounced reload). Wired post-construction
+	// via SetOrch — orchestrator construction needs Operator.Process()
+	// so we can't pass it through OperatorDeps without a cycle.
+	orch *orchestrator.Orchestrator
 }
 
 // OperatorDeps are external dependencies for DI.
@@ -81,8 +85,12 @@ type OperatorDeps struct {
 	Log      *slog.Logger
 	Queries  *query.Queries
 	Commands *command.Commands
-	Dir      string // optional; defaults to /opt/etc/awg-manager/singbox
-	Binary   string // optional; defaults to "sing-box"
+	// AppLogger surfaces sing-box stdout/stderr in the in-memory app
+	// log buffer (visible at /diagnostics?tab=logs). Optional — when
+	// nil, process output is only mirrored to slog.
+	AppLogger logging.AppLogger
+	Dir       string // optional; defaults to /opt/etc/awg-manager/singbox
+	Binary    string // optional; defaults to "sing-box"
 }
 
 func NewOperator(d OperatorDeps) *Operator {
@@ -109,20 +117,20 @@ func NewOperator(d OperatorDeps) *Operator {
 	ensureBaseConfig(configPath)
 
 	op := &Operator{
-		log:        log,
-		dir:        dir,
-		binary:     binary,
-		configPath: configPath,
-		pidPath:    pidPath,
-		proc:       NewProcess(binary, configPath, pidPath),
-		validator:  NewValidator(binary),
-		proxyMgr:   NewProxyManager(d.Queries, d.Commands),
-		clash:      NewClashClient(clashAPIAddr),
+		log:           log,
+		dir:           dir,
+		binary:        binary,
+		configPath:    configPath,
+		pidPath:       pidPath,
+		proc:          NewProcess(binary, configPath, pidPath),
+		validator:     NewValidator(binary),
+		proxyMgr:      NewProxyManager(d.Queries, d.Commands),
+		clash:         NewClashClient(clashAPIAddr),
+		processLogger: logging.NewScopedLogger(d.AppLogger, logging.GroupSingbox, logging.SubSBProcess),
 	}
 	op.proc.OnStderrLine = op.handleStderrLine
+	op.proc.OnStdoutLine = op.handleStdoutLine
 	op.proc.OnExit = op.handleExit
-	op.reloadFn = op.proc.Reload
-	op.reloadDoneChan = make(chan struct{})
 	return op
 }
 
@@ -141,6 +149,40 @@ func (o *Operator) handleStderrLine(line string) {
 		o.log.Warn("singbox stderr", "line", line)
 	default:
 		o.log.Info("singbox stderr", "line", line)
+	}
+}
+
+// handleStdoutLine forwards each sing-box stdout line into the app log
+// under singbox/process. Level chosen by classifyProcessLine.
+func (o *Operator) handleStdoutLine(line string) {
+	if o.processLogger == nil {
+		return
+	}
+	switch classifyProcessLine(line) {
+	case logging.LevelError:
+		o.processLogger.Error("stdout", "", line)
+	case logging.LevelWarn:
+		o.processLogger.Warn("stdout", "", line)
+	default:
+		o.processLogger.Info("stdout", "", line)
+	}
+}
+
+// classifyProcessLine picks a log level from a sing-box stdout/stderr
+// line by simple substring heuristic. Used to surface FATAL/ERROR
+// messages at the right severity in the app log.
+func classifyProcessLine(line string) logging.Level {
+	lower := strings.ToLower(line)
+	switch {
+	case strings.Contains(lower, "panic") ||
+		strings.Contains(lower, "fatal") ||
+		strings.Contains(lower, "error") ||
+		strings.Contains(lower, "failed"):
+		return logging.LevelError
+	case strings.Contains(lower, "warn"):
+		return logging.LevelWarn
+	default:
+		return logging.LevelInfo
 	}
 }
 
@@ -189,6 +231,16 @@ func (o *Operator) LastError() string {
 // other subscribers in the future).
 func (o *Operator) SetEventBus(bus *events.Bus) { o.bus = bus }
 
+// Process exposes the underlying *Process so the orchestrator can
+// drive lifecycle (Start / Stop / Reload / IsRunning). The Process
+// type satisfies orchestrator.ProcessController by structural match.
+func (o *Operator) Process() *Process { return o.proc }
+
+// SetOrch wires the config.d orchestrator after construction. ApplyConfig
+// uses it (when non-nil) to write 10-tunnels.json through the slot
+// writer instead of the legacy direct-write path.
+func (o *Operator) SetOrch(orch *orchestrator.Orchestrator) { o.orch = orch }
+
 // tunnelsFile is the canonical path for the tunnels.json fragment
 // (config.d/10-tunnels.json). Used by applyConfig + RemoveTunnel.
 func (o *Operator) tunnelsFile() string {
@@ -197,17 +249,94 @@ func (o *Operator) tunnelsFile() string {
 
 // ensureBaseConfig writes a minimal 00-base.json if config.d is empty,
 // so sing-box starts standalone (direct outbound + bootstrap DNS) before
-// any tunnels are added.
+// any tunnels are added. Also surgically self-heals an older base config
+// that hard-coded the wrong Clash API port (9090 instead of
+// clashAPIAddr's 9099), which silently broke our LogForwarder /
+// DelayChecker on existing installs.
 func ensureBaseConfig(configDir string) {
 	basePath := filepath.Join(configDir, "00-base.json")
 	if _, err := os.Stat(basePath); err == nil {
+		patchBaseClashPort(basePath)
+		patchBaseLogLevel(basePath)
 		return
 	}
 	_ = os.MkdirAll(configDir, 0755)
-	base := map[string]any{
+	_ = writeJSONFile(basePath, freshBaseConfig())
+}
+
+// patchBaseLogLevel raises the sing-box log level to "trace" when it is
+// missing or set to a coarser level (info/warn/error). Trace is the
+// default for fresh installs (see freshBaseConfig) — without it,
+// router-traffic diagnosis is hard because connection-level events are
+// suppressed. Idempotent on already-trace files; respects "debug" or
+// "panic"/"fatal" without overwriting (those are deliberate user choices).
+func patchBaseLogLevel(basePath string) {
+	data, err := os.ReadFile(basePath)
+	if err != nil {
+		return
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		return
+	}
+	logBlock, _ := m["log"].(map[string]any)
+	if logBlock == nil {
+		logBlock = map[string]any{}
+		m["log"] = logBlock
+	}
+	current, _ := logBlock["level"].(string)
+	switch current {
+	case "trace", "debug", "panic", "fatal":
+		return
+	}
+	logBlock["level"] = "trace"
+	if _, ok := logBlock["timestamp"]; !ok {
+		logBlock["timestamp"] = true
+	}
+	_ = writeJSONFile(basePath, m)
+}
+
+// patchBaseClashPort rewrites only the experimental.clash_api.external_controller
+// field if it points anywhere other than clashAPIAddr. Other fields
+// (user customizations: log level, DNS servers, etc.) are preserved
+// verbatim. No-op when the file already has the correct port or has no
+// experimental.clash_api block at all (latter case: the user removed
+// clash_api on purpose; respect that).
+func patchBaseClashPort(basePath string) {
+	data, err := os.ReadFile(basePath)
+	if err != nil {
+		return
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		return
+	}
+	exp, _ := m["experimental"].(map[string]any)
+	if exp == nil {
+		return
+	}
+	clash, _ := exp["clash_api"].(map[string]any)
+	if clash == nil {
+		return
+	}
+	current, _ := clash["external_controller"].(string)
+	if current == clashAPIAddr {
+		return
+	}
+	clash["external_controller"] = clashAPIAddr
+	_ = writeJSONFile(basePath, m)
+}
+
+// freshBaseConfig returns the canonical base sing-box config. Single
+// source of truth for ensureBaseConfig (initial write + self-heal path).
+func freshBaseConfig() map[string]any {
+	return map[string]any{
 		"log": map[string]any{"level": "trace", "timestamp": true},
 		"experimental": map[string]any{
-			"clash_api":  map[string]any{"external_controller": "127.0.0.1:9090"},
+			// MUST match clashAPIAddr — our ClashClient and LogForwarder
+			// connect here. Hard-coding 9090 (sing-box default) used to
+			// silently break log forwarding on existing installs.
+			"clash_api":  map[string]any{"external_controller": clashAPIAddr},
 			"cache_file": map[string]any{"enabled": true, "path": "cache.db"},
 		},
 		"dns": map[string]any{
@@ -225,12 +354,16 @@ func ensureBaseConfig(configDir string) {
 			"default_domain_resolver": "dns-bootstrap",
 		},
 	}
-	_ = writeJSONFile(basePath, base)
 }
 
 // ConfigDir returns the config.d directory path (used by sing-box-router
 // to drop additional config fragments alongside ours).
 func (o *Operator) ConfigDir() string { return o.configPath }
+
+// Binary returns the path to the sing-box executable. Used by the
+// router's Inspect path to shell out to `sing-box rule-set match` when
+// evaluating rule_set matchers in the Route Inspector.
+func (o *Operator) Binary() string { return o.binary }
 
 // ValidateConfigDir runs `sing-box check` over the entire config.d.
 // Used by callers that just wrote a fragment and want to verify the
@@ -239,111 +372,17 @@ func (o *Operator) ValidateConfigDir(ctx context.Context) error {
 	return o.validator.Validate(o.configPath)
 }
 
-const (
-	reloadDebounce = 200 * time.Millisecond
-	reloadMaxWait  = 500 * time.Millisecond
-)
-
-// Reload schedules a coalesced sing-box config reload (SIGHUP).
-//
-// Behavior:
-//   - Returns nil immediately; the actual reload happens after a
-//     trailing-debounce window (reloadDebounce) — successive calls
-//     within the window reset the timer so a burst of writers
-//     produces a single SIGHUP.
-//   - If the burst keeps going past reloadMaxWait from the first call
-//     in the burst, the existing scheduled reload fires anyway
-//     (starvation guard).
-//   - Errors from the underlying SIGHUP are stored in reloadLastErr
-//     and reachable via ReloadAndWait. Production callers ignore them
-//     here and rely on Status.LastError populated by Process.OnExit.
-func (o *Operator) Reload() error {
-	o.reloadMu.Lock()
-	defer o.reloadMu.Unlock()
-
-	now := time.Now()
-	if !o.reloadPending {
-		o.reloadFirstAt = now
-		o.reloadPending = true
-		// Lazy-init for zero-value test structs that bypass NewOperator;
-		// production paths always have it pre-initialised.
-		if o.reloadDoneChan == nil {
-			o.reloadDoneChan = make(chan struct{})
-		}
-	}
-
-	// Past max-wait — let the already-scheduled timer fire on schedule.
-	if now.Sub(o.reloadFirstAt) >= reloadMaxWait {
-		return nil
-	}
-
-	if o.reloadTimer != nil {
-		o.reloadTimer.Stop()
-	}
-
-	delay := reloadDebounce
-	if remaining := reloadMaxWait - now.Sub(o.reloadFirstAt); remaining < delay {
-		delay = remaining
-	}
-	o.reloadTimer = time.AfterFunc(delay, o.fireReload)
-	return nil
-}
-
-func (o *Operator) fireReload() {
-	o.reloadMu.Lock()
-	o.reloadPending = false
-	o.reloadFirstAt = time.Time{}
-	done := o.reloadDoneChan
-	o.reloadDoneChan = make(chan struct{})
-	fn := o.reloadFn
-	o.reloadMu.Unlock()
-
-	if fn == nil {
-		fn = o.proc.Reload
-	}
-	err := fn()
-
-	o.reloadMu.Lock()
-	o.reloadLastErr = err
-	o.reloadMu.Unlock()
-
-	close(done)
-}
-
-// ReloadAndWait blocks until the next reload (already-scheduled or
-// freshly-triggered) completes, returning that reload's error. Used
-// by tests and the rare blocking caller that must observe the result.
-func (o *Operator) ReloadAndWait(ctx context.Context) error {
-	o.reloadMu.Lock()
-	if !o.reloadPending {
-		o.reloadMu.Unlock()
-		fn := o.reloadFn
-		if fn == nil {
-			fn = o.proc.Reload
-		}
-		err := fn()
-		o.reloadMu.Lock()
-		o.reloadLastErr = err
-		o.reloadMu.Unlock()
-		return err
-	}
-	done := o.reloadDoneChan
-	o.reloadMu.Unlock()
-
-	select {
-	case <-done:
-		o.reloadMu.Lock()
-		err := o.reloadLastErr
-		o.reloadMu.Unlock()
-		return err
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-}
-
 // IsRunning reports whether the sing-box process is alive (and its PID).
 // Public version of o.proc.IsRunning for cross-package callers.
 func (o *Operator) IsRunning() (bool, int) { return o.proc.IsRunning() }
+
+// Reload sends SIGHUP to the sing-box process directly, bypassing any
+// debouncing. Production callers go through the orchestrator's
+// debounced reload (250ms in internal/singbox/orchestrator/reload.go);
+// this passthrough exists for legacy fallback paths and the
+// SingboxController contract (router uses it when Orch is unwired in
+// tests, and the scheduler / RefreshRuleSet call it directly).
+func (o *Operator) Reload() error { return o.proc.Reload() }
 
 // Start cold-starts sing-box after validating the config.d. Public
 // version of the internal startAndWait — used by router.Service.Enable
@@ -827,8 +866,21 @@ func (o *Operator) loadConfig() (*Config, error) {
 // ApplyConfig runs the full Save + Validate + Promote + Reload sequence
 // on an externally-mutated Config. deviceproxy.Service uses this after
 // it has inserted its inbound/outbound/rule into the current config.
+//
+// When the orchestrator is wired (production), the tunnels payload is
+// extracted and written through SlotTunnels — validation + reload are
+// handled by the orchestrator's debounced pipeline. When unwired
+// (tests / pre-bootstrap), falls back to the legacy direct-write path
+// that writes 10-tunnels.json + sing-box check + SIGHUP inline.
 func (o *Operator) ApplyConfig(ctx context.Context, cfg *Config) error {
-	return o.applyConfig(ctx, cfg)
+	if o.orch == nil {
+		return o.applyConfig(ctx, cfg)
+	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal tunnels config: %w", err)
+	}
+	return o.orch.Save(orchestrator.SlotTunnels, data)
 }
 
 // ApplyConfigNoReload runs Save + Validate + Promote on an externally
@@ -841,6 +893,11 @@ func (o *Operator) ApplyConfig(ctx context.Context, cfg *Config) error {
 // deviceproxy.Service uses this on the "default-only change" save
 // path: rewriting config.json changes selector.default for next boot
 // without disturbing the live selector.
+//
+// Bypass orchestrator: this path intentionally avoids SIGHUP. The
+// orchestrator's debounced reload is normally desirable, but here the
+// caller has explicitly opted out to preserve live selector.now. We
+// take the legacy direct-write route even when orch is wired.
 func (o *Operator) ApplyConfigNoReload(ctx context.Context, cfg *Config) error {
 	// Defense-in-depth: no-reload assumes the running daemon will continue
 	// serving with its current in-memory config. If the process is down,

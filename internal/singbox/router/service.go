@@ -2,6 +2,7 @@ package router
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/hoaxisr/awg-manager/internal/events"
 	"github.com/hoaxisr/awg-manager/internal/logger"
+	"github.com/hoaxisr/awg-manager/internal/singbox/orchestrator"
 	"github.com/hoaxisr/awg-manager/internal/storage"
 )
 
@@ -58,6 +60,8 @@ type Service interface {
 
 	GetDNSGlobals(ctx context.Context) (final, strategy string, err error)
 	SetDNSGlobals(ctx context.Context, final, strategy string) error
+
+	Inspect(ctx context.Context, input InspectInput) (InspectResult, error)
 }
 
 type SingboxController interface {
@@ -66,6 +70,11 @@ type SingboxController interface {
 	Start() error
 	ValidateConfigDir(ctx context.Context) error
 	ConfigDir() string
+	// Binary returns the absolute path (or PATH-resolvable name) of the
+	// sing-box executable. Inspect shells out to it for `rule-set match`
+	// evaluation. May return empty string when the binary is unknown —
+	// callers must tolerate that and degrade gracefully.
+	Binary() string
 }
 
 // PolicyDevice is one LAN device known to NDMS hotspot, annotated with
@@ -111,26 +120,57 @@ type AWGTag struct {
 	Tag string
 }
 
+// SingboxTunnelCatalog returns the outbound tags for sing-box tunnels
+// owned by internal/singbox (lives in 10-tunnels.json). Routes can
+// reference these tags as their Outbound (e.g. "veesp" for a VLESS
+// outbound) — without this catalog, computeIssues would flag every
+// such reference as a dangling outbound, surfacing a misleading
+// "правило ссылается на несуществующий outbound" warn even though
+// sing-box itself merges the tags across slots and the rule resolves
+// at runtime.
+type SingboxTunnelCatalog interface {
+	ListTunnelTags(ctx context.Context) ([]string, error)
+}
+
 type Deps struct {
-	Log      *logger.Logger
-	Settings *storage.SettingsStore
-	Singbox  SingboxController
-	Policies AccessPolicyProvider
-	Events   *events.Bus
-	IPTables *IPTables
-	AWGTags  AWGTagCatalog // optional — when nil, computeIssues only sees cfg.Outbounds
+	Log          *logger.Logger
+	Settings     *storage.SettingsStore
+	Singbox      SingboxController
+	Policies     AccessPolicyProvider
+	Events       *events.Bus
+	IPTables     *IPTables
+	AWGTags      AWGTagCatalog        // optional — when nil, computeIssues only sees cfg.Outbounds
+	SingboxTunnels SingboxTunnelCatalog // optional — when nil, computeIssues skips cross-slot tunnel tags
+	// Orch is the config.d orchestrator. When non-nil (production),
+	// persistConfig writes 20-router.json through the slot writer and
+	// Enable / Disable toggle SlotRouter so the file moves between
+	// active and disabled/ — sing-box only sees the file when the
+	// router is enabled. When nil (tests), persistConfig falls back
+	// to the legacy in-place write at routerConfigPath().
+	Orch *orchestrator.Orchestrator
 }
 
 type ServiceImpl struct {
 	deps        Deps
 	mu          sync.Mutex
 	currentMark string // last-installed iptables mark; used by Reconcile to detect change
+
+	// inspectCache backs the route-inspector's rule_set match path. Lazy
+	// constructed on first Inspect call so dev-machine builds (no
+	// sing-box binary, no /tmp writes during NewService) stay clean.
+	inspectCacheOnce sync.Once
+	inspectCache     *ruleSetCache
 }
 
 func NewService(d Deps) *ServiceImpl {
 	if d.IPTables == nil {
 		d.IPTables = NewIPTables()
 	}
+	// Idempotently refresh the netfilter hook script: if a previous
+	// version is on disk (older AWGM without pidof guard), this writes
+	// the current version. No-op when the file is absent — Install
+	// creates it on first Enable.
+	refreshNetfilterHookIfPresent()
 	return &ServiceImpl{deps: d}
 }
 
@@ -138,11 +178,59 @@ func (s *ServiceImpl) routerConfigPath() string {
 	return filepath.Join(s.deps.Singbox.ConfigDir(), "20-router.json")
 }
 
+// disabledRouterConfigPath returns where the orchestrator parks the
+// router slot when SlotRouter is disabled. We keep this knowledge here
+// (rather than asking the orchestrator) so reads remain a pure file
+// operation that does not require taking the orch's lock.
+func (s *ServiceImpl) disabledRouterConfigPath() string {
+	return filepath.Join(s.deps.Singbox.ConfigDir(), "disabled", "20-router.json")
+}
+
+// loadRouterConfig reads the router slot from whichever location holds
+// the file. When the orchestrator is wired and the slot is disabled,
+// the file lives under disabled/ — but UI callers (ListRules etc.)
+// must still see the saved rules so the user can edit them. Falls back
+// to the disabled path when the active path is missing OR returns the
+// "no file" sentinel (LoadConfig hides ENOENT inside an empty config,
+// which would otherwise mask the real on-disk state and overwrite the
+// user's saved rules on the next persistConfig).
 func (s *ServiceImpl) loadRouterConfig() (*RouterConfig, error) {
-	return LoadConfig(s.routerConfigPath())
+	activePath := s.routerConfigPath()
+	if _, statErr := os.Stat(activePath); statErr == nil {
+		return LoadConfig(activePath)
+	} else if !os.IsNotExist(statErr) {
+		return nil, statErr
+	}
+	// Active path is empty. Try disabled (orch-wired only).
+	if s.deps.Orch == nil {
+		return LoadConfig(activePath) // returns NewEmptyConfig per contract
+	}
+	disabledPath := s.disabledRouterConfigPath()
+	if _, statErr := os.Stat(disabledPath); statErr == nil {
+		return LoadConfig(disabledPath)
+	} else if !os.IsNotExist(statErr) {
+		return nil, statErr
+	}
+	// Neither path holds the file — return the empty-config sentinel.
+	return LoadConfig(activePath)
 }
 
 func (s *ServiceImpl) persistConfig(ctx context.Context, cfg *RouterConfig) error {
+	if s.deps.Orch != nil {
+		// Orchestrator path — slot writer handles atomic write,
+		// cross-slot validation and debounced SIGHUP. We just
+		// marshal and hand off the bytes.
+		data, err := json.MarshalIndent(cfg, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshal router config: %w", err)
+		}
+		if err := s.deps.Orch.Save(orchestrator.SlotRouter, data); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	// Legacy fallback (tests) — in-place write + sing-box check + reload.
 	path := s.routerConfigPath()
 	backupPath := path + ".bak"
 
@@ -239,16 +327,35 @@ func (s *ServiceImpl) Enable(ctx context.Context) error {
 	if err := s.persistConfig(ctx, cfg); err != nil {
 		return err
 	}
-	if running, _ := s.deps.Singbox.IsRunning(); !running {
-		if err := s.deps.Singbox.Start(); err != nil {
-			return fmt.Errorf("sing-box start: %w", err)
+	// Promote SlotRouter to active so the orchestrator's reload picks
+	// up 20-router.json. The orchestrator handles starting sing-box if
+	// it isn't already running. When orch is unwired (tests), we keep
+	// the legacy explicit Start call.
+	if s.deps.Orch != nil {
+		if err := s.deps.Orch.SetEnabled(orchestrator.SlotRouter, true); err != nil {
+			return fmt.Errorf("orchestrator enable router: %w", err)
+		}
+	} else {
+		if running, _ := s.deps.Singbox.IsRunning(); !running {
+			if err := s.deps.Singbox.Start(); err != nil {
+				return fmt.Errorf("sing-box start: %w", err)
+			}
 		}
 	}
 
 	if err := s.deps.IPTables.Install(ctx, mark); err != nil {
-		rollback := filterTProxyInbound(cfg.Inbounds)
-		cfg.Inbounds = rollback
-		_ = s.persistConfig(ctx, cfg)
+		// Stop sing-box from listening on the now-orphan TPROXY port,
+		// but DO NOT corrupt the persisted user config. With orchestrator
+		// wired we just park the slot back under disabled/ — sing-box
+		// stops seeing it on next reload, the file's content (including
+		// tproxy-in) is preserved verbatim. Without the orchestrator
+		// (legacy fallback) the only recourse is to strip the inbound.
+		if s.deps.Orch != nil {
+			_ = s.deps.Orch.SetEnabled(orchestrator.SlotRouter, false)
+		} else {
+			cfg.Inbounds = filterTProxyInbound(cfg.Inbounds)
+			_ = s.persistConfig(ctx, cfg)
+		}
 		return fmt.Errorf("iptables install: %w", err)
 	}
 	s.currentMark = mark
@@ -272,19 +379,102 @@ func filterTProxyInbound(in []Inbound) []Inbound {
 	return out
 }
 
-func ensureTProxyInbound(in []Inbound) []Inbound {
-	for _, i := range in {
-		if i.Tag == "tproxy-in" {
-			return in
+// healTProxyInbound checks the persisted router config and re-adds the
+// tproxy-in inbound if missing. Idempotent. Used by Reconcile to
+// recover from a prior failed-Install rollback (which used to strip
+// the inbound destructively).
+func (s *ServiceImpl) healTProxyInbound(ctx context.Context) error {
+	cfg, err := s.loadRouterConfig()
+	if err != nil {
+		return err
+	}
+	for _, in := range cfg.Inbounds {
+		if in.Tag == "tproxy-in" {
+			return nil // already present, nothing to do
 		}
 	}
-	return append([]Inbound{{
-		Type:        "tproxy",
-		Tag:         "tproxy-in",
-		Listen:      "127.0.0.1",
-		ListenPort:  TPROXYPort,
-		RoutingMark: Fwmark,
-	}}, in...)
+	cfg.Inbounds = ensureTProxyInbound(cfg.Inbounds)
+	return s.persistConfig(ctx, cfg)
+}
+
+// ensureTProxyInbound enforces the SKeen-style split: tproxy-in
+// handles UDP only, redirect-in handles TCP. TPROXY for TCP relies on
+// `-m socket --transparent` to deliver established-connection packets
+// to sing-box's accept()ed transparent socket, but that match
+// evaluates to 0 on Keenetic 4.9-ndm-5 — established TCP packets fall
+// through to the listener and get RST. NAT REDIRECT sidesteps the
+// problem: conntrack records the DNAT for SYN, established packets
+// are auto-translated.
+//
+// Both inbounds bind to 0.0.0.0 because iptables REDIRECT rewrites
+// the packet destination to the *primary IP of the inbound interface*
+// (e.g. 10.10.10.1 on br0), NOT to 127.0.0.1. A listener on 127.0.0.1
+// would never see redirected packets — kernel emits RST. SKeen uses
+// "::" for the same reason.
+const inboundListen = "0.0.0.0"
+
+func ensureTProxyInbound(in []Inbound) []Inbound {
+	hasTProxy := false
+	hasRedirect := false
+	for i := range in {
+		switch in[i].Tag {
+		case "tproxy-in":
+			hasTProxy = true
+			// Force UDP-only on existing entry. Older configs had no
+			// `network` field which means TCP+UDP — that's the broken
+			// behaviour we're moving away from.
+			if in[i].Network != "udp" {
+				in[i].Network = "udp"
+			}
+			if !in[i].UDPFragment {
+				in[i].UDPFragment = true
+			}
+			if in[i].UDPTimeout == "" {
+				in[i].UDPTimeout = "3m0s"
+			}
+			// tcp_fast_open is meaningless on a UDP-only inbound.
+			if in[i].TCPFastOpen {
+				in[i].TCPFastOpen = false
+			}
+			// Strip RoutingMark — see history note below.
+			if in[i].RoutingMark != 0 {
+				in[i].RoutingMark = 0
+			}
+			if in[i].Listen != inboundListen {
+				in[i].Listen = inboundListen
+			}
+		case "redirect-in":
+			hasRedirect = true
+			if !in[i].TCPFastOpen {
+				in[i].TCPFastOpen = true
+			}
+			if in[i].Listen != inboundListen {
+				in[i].Listen = inboundListen
+			}
+		}
+	}
+	out := in
+	if !hasTProxy {
+		out = append([]Inbound{{
+			Type:        "tproxy",
+			Tag:         "tproxy-in",
+			Listen:      inboundListen,
+			ListenPort:  TPROXYPort,
+			Network:     "udp",
+			UDPFragment: true,
+			UDPTimeout:  "3m0s",
+		}}, out...)
+	}
+	if !hasRedirect {
+		out = append([]Inbound{{
+			Type:        "redirect",
+			Tag:         "redirect-in",
+			Listen:      inboundListen,
+			ListenPort:  RedirectPort,
+			TCPFastOpen: true,
+		}}, out...)
+	}
+	return out
 }
 
 
@@ -354,16 +544,29 @@ func (s *ServiceImpl) Disable(ctx context.Context) error {
 	}
 	s.currentMark = ""
 
-	cfg, err := s.loadRouterConfig()
-	if err == nil && cfg != nil {
-		filtered := make([]Inbound, 0, len(cfg.Inbounds))
-		for _, in := range cfg.Inbounds {
-			if in.Tag != "tproxy-in" {
-				filtered = append(filtered, in)
-			}
+	if s.deps.Orch != nil {
+		// Move 20-router.json under disabled/ — sing-box's non-recursive
+		// -C config.d does not see it after the next reload, so the
+		// tproxy inbound, route rules, DNS rules and composite outbounds
+		// all disappear from the merged config in one atomic rename.
+		if err := s.deps.Orch.SetEnabled(orchestrator.SlotRouter, false); err != nil {
+			s.deps.Log.Warn(fmt.Sprintf("orchestrator disable router: %v", err))
 		}
-		cfg.Inbounds = filtered
-		_ = s.persistConfig(ctx, cfg)
+	} else {
+		// Legacy fallback: strip the tproxy inbound in place so
+		// the running sing-box stops accepting on the TPROXY port
+		// after the persistConfig reload.
+		cfg, err := s.loadRouterConfig()
+		if err == nil && cfg != nil {
+			filtered := make([]Inbound, 0, len(cfg.Inbounds))
+			for _, in := range cfg.Inbounds {
+				if in.Tag != "tproxy-in" {
+					filtered = append(filtered, in)
+				}
+			}
+			cfg.Inbounds = filtered
+			_ = s.persistConfig(ctx, cfg)
+		}
 	}
 
 	settings, err := s.deps.Settings.Load()
@@ -405,6 +608,12 @@ func (s *ServiceImpl) Reconcile(ctx context.Context) error {
 			}
 			s.currentMark = mark
 			s.mu.Unlock()
+		}
+		// Self-heal: a previous Install rollback or upgrade hop may
+		// have left 20-router.json without the tproxy-in inbound. Re-add
+		// it idempotently so sing-box keeps listening on TPROXYPort.
+		if err := s.healTProxyInbound(ctx); err != nil {
+			s.deps.Log.Warn(fmt.Sprintf("router: heal tproxy inbound: %v", err))
 		}
 	}
 	return nil
@@ -580,6 +789,16 @@ func (s *ServiceImpl) computeIssues(cfg *RouterConfig) []Issue {
 			}
 		}
 	}
+	// Sing-box tunnels live in 10-tunnels.json owned by internal/singbox.
+	// Their tags (e.g. "veesp" for a VLESS outbound) are valid route
+	// targets but invisible to a router-only view of cfg.Outbounds.
+	if s.deps.SingboxTunnels != nil {
+		if tags, err := s.deps.SingboxTunnels.ListTunnelTags(context.Background()); err == nil {
+			for _, tag := range tags {
+				outboundTags[tag] = struct{}{}
+			}
+		}
+	}
 	for i, r := range cfg.Route.Rules {
 		if r.Action == "route" && r.Outbound != "" && r.Outbound != "direct" {
 			if _, ok := outboundTags[r.Outbound]; !ok {
@@ -652,4 +871,36 @@ func (s *ServiceImpl) UnbindDevice(ctx context.Context, mac string) error {
 		return fmt.Errorf("mac required")
 	}
 	return s.deps.Policies.UnassignDevice(ctx, mac)
+}
+
+// Inspect simulates which router rule would match the given input
+// (a domain or an IP). The matcher walk is purely Go; only rule_set
+// matchers shell out to `sing-box rule-set match` to consult the
+// binary or downloaded JSON list. Reads the current persisted config so
+// the result reflects what the user would observe at runtime.
+//
+// When the sing-box binary is unavailable (dev machine, fresh install
+// before the user has installed the package) rule_set matchers degrade
+// to no-match and a Note is appended to the result — the rest of the
+// inspector still works.
+func (s *ServiceImpl) Inspect(ctx context.Context, input InspectInput) (InspectResult, error) {
+	cfg, err := s.loadRouterConfig()
+	if err != nil {
+		return InspectResult{}, err
+	}
+	if cfg == nil {
+		cfg = NewEmptyConfig()
+	}
+	final := cfg.Route.Final
+	if final == "" {
+		final = "direct"
+	}
+	binary := ""
+	if s.deps.Singbox != nil {
+		binary = s.deps.Singbox.Binary()
+	}
+	s.inspectCacheOnce.Do(func() {
+		s.inspectCache = newRuleSetCache("")
+	})
+	return Inspect(input, cfg.Route.Rules, cfg.Route.RuleSet, final, binary, s.inspectCache), nil
 }

@@ -95,6 +95,11 @@
         border: 1px solid var(--border);
         border-radius: var(--radius);
         width: 100%;
+        /* min-width: 0 + box-sizing keeps the card from being inflated
+           past its size-class max-width by an intrinsic min-content child
+           (long URL placeholder, monospace text without break-points). */
+        min-width: 0;
+        box-sizing: border-box;
         /* 100vh on mobile includes hidden browser chrome (address bar,
            toolbar) so the card overflows the visible area. dvh (dynamic
            viewport height) tracks the actual visible space. Fallback to
@@ -105,10 +110,12 @@
         flex-direction: column;
     }
 
-    .max-w-sm { max-width: 24rem; }
-    .max-w-md { max-width: 32rem; }
-    .max-w-lg { max-width: 40rem; }
-    .max-w-xl { max-width: 48rem; }
+    /* Each size class caps at its target width but never exceeds the
+       visible viewport (minus backdrop padding). */
+    .max-w-sm { max-width: min(24rem, calc(100vw - 2rem)); }
+    .max-w-md { max-width: min(32rem, calc(100vw - 2rem)); }
+    .max-w-lg { max-width: min(40rem, calc(100vw - 2rem)); }
+    .max-w-xl { max-width: min(48rem, calc(100vw - 2rem)); }
 
     .modal-header {
         display: flex;
@@ -150,8 +157,22 @@
     .modal-body {
         padding: 1rem;
         overflow-y: auto;
+        overflow-x: hidden;
         flex: 1;
         min-height: 0;
+        min-width: 0;
+    }
+
+    /* Defensive: ensure form controls inside any modal never push the body
+       wider than the card. Inputs/textareas/selects with width:100% +
+       box-sizing:border-box should already fit, but min-width:auto on grid
+       items can leak intrinsic widths through. */
+    .modal-body :global(input),
+    .modal-body :global(textarea),
+    .modal-body :global(select) {
+        max-width: 100%;
+        min-width: 0;
+        box-sizing: border-box;
     }
 
     .modal-footer {

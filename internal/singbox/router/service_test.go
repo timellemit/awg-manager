@@ -76,6 +76,7 @@ func (f *fakeSingbox) IsRunning() (bool, int)                    { return false,
 func (f *fakeSingbox) Start() error                              { return nil }
 func (f *fakeSingbox) ValidateConfigDir(_ context.Context) error { return nil }
 func (f *fakeSingbox) ConfigDir() string                         { return f.dir }
+func (f *fakeSingbox) Binary() string                            { return "" }
 
 // newTestSingbox creates a fakeSingbox backed by a temp directory.
 func newTestSingbox(t *testing.T) *fakeSingbox {

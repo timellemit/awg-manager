@@ -1066,6 +1066,15 @@ export interface SingboxImportResponse {
 	tunnels: SingboxTunnel[]; // fresh full list
 }
 
+/**
+ * Response envelope payload for GET /api/singbox/config-preview.
+ * `json` is the pretty-printed merged sing-box config produced by
+ * stitching all `01-*.json` fragments onto `00-base.json`.
+ */
+export interface SingboxConfigPreview {
+	json: string;
+}
+
 export interface SingboxTraffic {
 	tag: string;
 	upload: number;
@@ -1095,6 +1104,14 @@ export interface MonitoringTunnel {
 	pingcheckTarget: string;
 	selfTarget: string;
 	selfMethod: string;
+	/** "awg" | "system" | "singbox" — drives row visual hints. */
+	source?: 'awg' | 'system' | 'singbox';
+	/** Sing-box outbound tag; empty unless source==='singbox'. */
+	singboxTag?: string;
+	/** Last Clash urltest delay in ms; 0 = no urltest data. */
+	clashDelay?: number;
+	/** urltest group tag this sing-box tunnel belongs to. */
+	urltestGroup?: string;
 }
 
 export interface MonitoringCell {
@@ -1172,20 +1189,6 @@ export interface RouterPolicy {
 	isOurDefault: boolean;
 }
 
-/**
- * One LAN device known to NDMS hotspot, annotated with whether it's
- * currently bound to a specific policy. Distinct from the broader
- * PolicyDevice (accesspolicy domain, includes hostname/active/link/policy):
- * router only needs the bind decision + identifying fields.
- * Source: GET /api/singbox/router/policy-devices?name=X.
- */
-export interface RouterPolicyDevice {
-	mac: string;
-	ip: string;
-	name: string;
-	bound: boolean;
-}
-
 export interface SingboxRouterRule {
 	domain_suffix?: string[];
 	ip_cidr?: string[];
@@ -1195,6 +1198,36 @@ export interface SingboxRouterRule {
 	protocol?: string;
 	action: 'route' | 'reject' | 'sniff' | 'hijack-dns';
 	outbound?: string;
+}
+
+/**
+ * One per-rule decision from the route inspector. matchedRule == -1 in
+ * SingboxRouterInspectResult means no rule produced a final destination
+ * — the route.final outbound was used instead.
+ */
+export interface SingboxRouterInspectMatch {
+	index: number;
+	matched: boolean;
+	action: string;
+	outbound?: string;
+	conditions?: string[];
+	reason?: string;
+}
+
+export interface SingboxRouterInspectResult {
+	input: string;
+	inputType: 'domain' | 'ip';
+	matches: SingboxRouterInspectMatch[];
+	destination: string;
+	matchedRule: number;
+	final: string;
+	note?: string;
+}
+
+export interface SingboxRouterInspectRequest {
+	domain: string;
+	port?: number;
+	protocol?: string;
 }
 
 export interface SingboxRouterRuleSet {
@@ -1217,6 +1250,44 @@ export interface SingboxRouterOutbound {
 	tolerance?: number;
 	default?: string;
 	strategy?: string;
+}
+
+/**
+ * Live state of one composite outbound (selector / urltest / loadbalance).
+ * Returned by GET /api/singbox/router/proxies/list.
+ */
+export interface SingboxProxyMember {
+	tag: string;
+	type: string;
+	/** Last latency in ms; 0 = not tested or unreachable. */
+	lastDelay?: number;
+}
+
+export interface SingboxProxyGroup {
+	tag: string;
+	type: 'selector' | 'urltest' | 'loadbalance';
+	now: string;
+	members: SingboxProxyMember[];
+}
+
+export interface SingboxProxiesListResponse {
+	groups: SingboxProxyGroup[];
+}
+
+export interface SingboxProxiesSelectRequest {
+	group: string;
+	member: string;
+}
+
+export interface SingboxProxiesTestRequest {
+	group: string;
+	url?: string;
+	timeout?: number;
+}
+
+export interface SingboxProxiesTestResponse {
+	/** memberTag → delay in ms; 0 = unreachable. */
+	delays: Record<string, number>;
 }
 
 export interface SingboxRouterPresetLink {

@@ -13,6 +13,7 @@
 		CompositeOutboundsList,
 		PresetsGallery,
 		DNSTab,
+		ConnectionsSubTab,
 		buildOutboundOptions,
 	} from '$lib/components/routing/singboxRouter';
 
@@ -35,7 +36,7 @@
 		}
 	}
 
-	type SubTab = 'rules' | 'rulesets' | 'outbounds' | 'dns' | 'presets';
+	type SubTab = 'rules' | 'rulesets' | 'outbounds' | 'dns' | 'presets' | 'connections';
 	let activeSubTab = $state<SubTab>('rules');
 	let showRefreshModal = $state(false);
 
@@ -73,7 +74,7 @@
 		refresh();
 		loadAWGTags();
 		const hash = typeof window !== 'undefined' ? window.location.hash.replace('#', '') : '';
-		if (hash === 'rules' || hash === 'rulesets' || hash === 'outbounds' || hash === 'dns' || hash === 'presets') {
+		if (hash === 'rules' || hash === 'rulesets' || hash === 'outbounds' || hash === 'dns' || hash === 'presets' || hash === 'connections') {
 			activeSubTab = hash;
 		}
 	});
@@ -121,6 +122,9 @@
 		<button class:active={activeSubTab === 'presets'} onclick={() => setSubTab('presets')} type="button">
 			Пресеты
 		</button>
+		<button class:active={activeSubTab === 'connections'} onclick={() => setSubTab('connections')} type="button">
+			Соединения
+		</button>
 	</div>
 
 	<div class="sub-content">
@@ -145,6 +149,8 @@
 			/>
 		{:else if activeSubTab === 'presets'}
 			<PresetsGallery {presets} {outboundOptions} onApplied={refresh} />
+		{:else if activeSubTab === 'connections'}
+			<ConnectionsSubTab />
 		{/if}
 	</div>
 {/if}

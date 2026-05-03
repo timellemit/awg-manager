@@ -33,6 +33,9 @@ screenshots/
 # Worktrees
 .worktrees/
 
+# Reference/external projects cloned for analysis (e.g. SKeen).
+reference/
+
 # Not needed in remote
 CHANGELOG.md
 README.md

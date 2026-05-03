@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/hoaxisr/awg-manager/internal/logging"
 )
 
 func TestParseSingboxVersionOutput(t *testing.T) {
@@ -150,5 +152,119 @@ func TestEnsureBaseConfig_Idempotent(t *testing.T) {
 	raw, _ := os.ReadFile(basePath)
 	if string(raw) != existing {
 		t.Errorf("existing base must not be overwritten, got %s", raw)
+	}
+}
+
+func TestEnsureBaseConfig_PatchesStaleClashPort(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config.d")
+	_ = os.MkdirAll(configDir, 0755)
+	stale := `{"log":{"level":"debug"},"experimental":{"clash_api":{"external_controller":"127.0.0.1:9090"},"cache_file":{"enabled":true}},"dns":{"final":"my-dns"}}`
+	basePath := filepath.Join(configDir, "00-base.json")
+	if err := os.WriteFile(basePath, []byte(stale), 0644); err != nil {
+		t.Fatal(err)
+	}
+	ensureBaseConfig(configDir)
+	raw, _ := os.ReadFile(basePath)
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	exp := m["experimental"].(map[string]any)
+	clash := exp["clash_api"].(map[string]any)
+	if clash["external_controller"] != "127.0.0.1:9099" {
+		t.Errorf("expected port 9099, got %v", clash["external_controller"])
+	}
+	// User customizations preserved.
+	if m["log"].(map[string]any)["level"] != "debug" {
+		t.Errorf("log.level lost: %v", m["log"])
+	}
+	if m["dns"].(map[string]any)["final"] != "my-dns" {
+		t.Errorf("dns.final lost: %v", m["dns"])
+	}
+	// Other experimental fields preserved.
+	if _, ok := exp["cache_file"]; !ok {
+		t.Errorf("experimental.cache_file lost")
+	}
+}
+
+func TestEnsureBaseConfig_NoClashApiBlockUntouched(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config.d")
+	_ = os.MkdirAll(configDir, 0755)
+	// User explicitly removed clash_api — respect that, don't re-add.
+	// log.level is "debug" so the log-level heal also leaves it alone.
+	custom := `{"log":{"level":"debug"}}`
+	basePath := filepath.Join(configDir, "00-base.json")
+	if err := os.WriteFile(basePath, []byte(custom), 0644); err != nil {
+		t.Fatal(err)
+	}
+	ensureBaseConfig(configDir)
+	raw, _ := os.ReadFile(basePath)
+	if string(raw) != custom {
+		t.Errorf("file without clash_api block must not be touched, got %s", raw)
+	}
+}
+
+func TestEnsureBaseConfig_PatchesStaleLogLevel(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config.d")
+	_ = os.MkdirAll(configDir, 0755)
+	stale := `{"log":{"level":"info","timestamp":true},"experimental":{"clash_api":{"external_controller":"127.0.0.1:9099"}}}`
+	basePath := filepath.Join(configDir, "00-base.json")
+	if err := os.WriteFile(basePath, []byte(stale), 0644); err != nil {
+		t.Fatal(err)
+	}
+	ensureBaseConfig(configDir)
+	raw, _ := os.ReadFile(basePath)
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	if m["log"].(map[string]any)["level"] != "trace" {
+		t.Errorf("log.level should be heal-patched to trace, got %v", m["log"])
+	}
+}
+
+func TestEnsureBaseConfig_RespectsDebugLogLevel(t *testing.T) {
+	dir := t.TempDir()
+	configDir := filepath.Join(dir, "config.d")
+	_ = os.MkdirAll(configDir, 0755)
+	// User-chosen debug — heal must NOT reduce verbosity.
+	custom := `{"log":{"level":"debug","timestamp":true},"experimental":{"clash_api":{"external_controller":"127.0.0.1:9099"}}}`
+	basePath := filepath.Join(configDir, "00-base.json")
+	if err := os.WriteFile(basePath, []byte(custom), 0644); err != nil {
+		t.Fatal(err)
+	}
+	ensureBaseConfig(configDir)
+	raw, _ := os.ReadFile(basePath)
+	var m map[string]any
+	_ = json.Unmarshal(raw, &m)
+	if m["log"].(map[string]any)["level"] != "debug" {
+		t.Errorf("debug must be preserved, got %v", m["log"])
+	}
+}
+
+func TestClassifyProcessLine(t *testing.T) {
+	tests := []struct {
+		in   string
+		want logging.Level
+	}{
+		{"sing-box version 1.9.3 starting", logging.LevelInfo},
+		{"FATAL: failed to bind tproxy", logging.LevelError},
+		{"ERROR connecting to outbound", logging.LevelError},
+		{"panic: nil dereference", logging.LevelError},
+		{"failed to load config", logging.LevelError},
+		{"WARN deprecated config field", logging.LevelWarn},
+		{"warning: unused outbound", logging.LevelWarn},
+		{"INFO route table updated", logging.LevelInfo},
+		{"", logging.LevelInfo},
+		{"some random output", logging.LevelInfo},
+	}
+	for _, tc := range tests {
+		got := classifyProcessLine(tc.in)
+		if got != tc.want {
+			t.Errorf("classifyProcessLine(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }

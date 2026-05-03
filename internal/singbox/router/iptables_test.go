@@ -2,6 +2,8 @@ package router
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -17,6 +19,16 @@ type fakeCall struct {
 	stdin string
 }
 
+// errENOENT mimics the kernel's "rule not found" exit so the drain
+// loops terminate after a single pass — without this, fakeExec.runIP
+// returning nil for `ip rule del` causes the cap-bounded drain loop
+// to record N entries (or, before the cap, to OOM the test process).
+var errENOENT = errIPRule("RTNETLINK answers: No such file or directory")
+
+type errIPRule string
+
+func (e errIPRule) Error() string { return string(e) }
+
 func (f *fakeExec) restoreNoflush(_ context.Context, input string) error {
 	f.calls = append(f.calls, fakeCall{kind: "restore", stdin: input})
 	return f.err
@@ -29,7 +41,15 @@ func (f *fakeExec) runIPTables(_ context.Context, args ...string) error {
 
 func (f *fakeExec) runIP(_ context.Context, args ...string) error {
 	f.calls = append(f.calls, fakeCall{kind: "ip", args: args})
-	return f.err
+	if f.err != nil {
+		return f.err
+	}
+	// Make `ip rule del fwmark ...` return ENOENT after the first call
+	// so drain loops don't append forever.
+	if len(args) >= 4 && args[0] == "rule" && args[1] == "del" {
+		return errENOENT
+	}
+	return nil
 }
 
 func newFakeIPTables(fe *fakeExec) *IPTables {
@@ -54,12 +74,18 @@ func TestKernelModuleName(t *testing.T) {
 	}
 }
 
-func TestBuildRestoreInput_PolicyMark_EmitsConnmarkRule(t *testing.T) {
+func TestBuildRestoreInput_PolicyMark_EmitsBothJumps(t *testing.T) {
 	spec := RestoreInputSpec{PolicyMark: "0xffffaaa"}
 	out := buildRestoreInput(spec)
-	want := "-I PREROUTING 1 -m connmark --mark 0xffffaaa -j " + ChainName
-	if !strings.Contains(out, want) {
-		t.Errorf("output missing PREROUTING rule\nwant substring: %s\ngot:\n%s", want, out)
+	// UDP via mangle TPROXY.
+	wantMangle := "-I PREROUTING 1 -p udp -m connmark --mark 0xffffaaa -m conntrack --ctdir ORIGINAL -j " + ChainName
+	if !strings.Contains(out, wantMangle) {
+		t.Errorf("missing mangle PREROUTING jump\nwant: %s\ngot:\n%s", wantMangle, out)
+	}
+	// TCP via nat REDIRECT.
+	wantNat := "-I PREROUTING 1 -p tcp -m connmark --mark 0xffffaaa -m conntrack --ctdir ORIGINAL -j " + RedirectChain
+	if !strings.Contains(out, wantNat) {
+		t.Errorf("missing nat PREROUTING jump\nwant: %s\ngot:\n%s", wantNat, out)
 	}
 }
 
@@ -71,24 +97,35 @@ func TestBuildRestoreInput_EmptyMark_NoPrerouting(t *testing.T) {
 	}
 }
 
-func TestBuildRestoreInput_BaseRules_AlwaysPresent(t *testing.T) {
+func TestBuildRestoreInput_TablesAndRulesPresent(t *testing.T) {
 	input := buildRestoreInput(RestoreInputSpec{PolicyMark: "0xffffaaa"})
 
 	expected := []string{
+		// mangle table
 		"*mangle",
 		":AWGM-TPROXY - [0:0]",
 		"-A AWGM-TPROXY -d 127.0.0.0/8 -j RETURN",
 		"-A AWGM-TPROXY -d 192.168.0.0/16 -j RETURN",
-		"-A AWGM-TPROXY -p tcp --dport 79 -j RETURN",
 		"-A AWGM-TPROXY -m mark --mark 0xff -j RETURN",
-		"-A AWGM-TPROXY -p tcp -j TPROXY --on-port 51271 --on-ip 127.0.0.1 --tproxy-mark 0x1",
 		"-A AWGM-TPROXY -p udp -j TPROXY --on-port 51271 --on-ip 127.0.0.1 --tproxy-mark 0x1",
+		// nat table
+		"*nat",
+		":AWGM-REDIRECT - [0:0]",
+		"-A AWGM-REDIRECT -d 127.0.0.0/8 -j RETURN",
+		"-A AWGM-REDIRECT -d 192.168.0.0/16 -j RETURN",
+		"-A AWGM-REDIRECT -p tcp --dport 79 -j RETURN",
+		"-A AWGM-REDIRECT -p tcp -j REDIRECT --to-ports 51272",
+		// both tables commit
 		"COMMIT",
 	}
 	for _, line := range expected {
 		if !strings.Contains(input, line) {
 			t.Errorf("missing line: %q\nin:\n%s", line, input)
 		}
+	}
+	// TCP TPROXY MUST NOT appear in mangle (we moved TCP to nat REDIRECT).
+	if strings.Contains(input, "-A AWGM-TPROXY -p tcp -j TPROXY") {
+		t.Errorf("legacy TCP TPROXY rule must not be present:\n%s", input)
 	}
 }
 
@@ -98,17 +135,52 @@ func TestIPTablesInstallSequence(t *testing.T) {
 	if err := it.Install(context.Background(), "0xffffaaa"); err != nil {
 		t.Fatal(err)
 	}
-	if len(fe.calls) != 3 {
-		t.Fatalf("expected 3 calls, got %d: %+v", len(fe.calls), fe.calls)
+	// Find the operation phases in the call list rather than asserting
+	// strict positions: removeSourceHooks runs `iptables -S PREROUTING`
+	// across mangle+nat first (cleans stale jumps), then iptables-restore,
+	// then `ip rule del` drain, then `ip rule add`, then `ip route add`.
+	var (
+		restoreSeen   bool
+		ruleAddSeen   bool
+		ruleAddArgs   string
+		routeAddSeen  bool
+		ruleDrainSeen bool
+	)
+	for _, c := range fe.calls {
+		switch c.kind {
+		case "restore":
+			restoreSeen = true
+			if !strings.Contains(c.stdin, "AWGM-TPROXY") {
+				t.Errorf("restore stdin missing AWGM-TPROXY:\n%s", c.stdin)
+			}
+			if !strings.Contains(c.stdin, "AWGM-REDIRECT") {
+				t.Errorf("restore stdin missing AWGM-REDIRECT:\n%s", c.stdin)
+			}
+		case "ip":
+			args := strings.Join(c.args, " ")
+			if strings.Contains(args, "rule del fwmark") {
+				ruleDrainSeen = true
+			}
+			if strings.Contains(args, "rule add fwmark") {
+				ruleAddSeen = true
+				ruleAddArgs = args
+			}
+			if strings.Contains(args, "route add local") {
+				routeAddSeen = true
+			}
+		}
 	}
-	if fe.calls[0].kind != "restore" || !strings.Contains(fe.calls[0].stdin, "AWGM-TPROXY") {
-		t.Errorf("call 0: %+v", fe.calls[0])
+	if !restoreSeen {
+		t.Errorf("expected iptables-restore call")
 	}
-	if fe.calls[1].kind != "ip" || !strings.Contains(strings.Join(fe.calls[1].args, " "), "rule add fwmark") {
-		t.Errorf("call 1: %+v", fe.calls[1])
+	if !ruleDrainSeen {
+		t.Errorf("expected ip rule del drain pass")
 	}
-	if fe.calls[2].kind != "ip" || !strings.Contains(strings.Join(fe.calls[2].args, " "), "route add local") {
-		t.Errorf("call 2: %+v", fe.calls[2])
+	if !ruleAddSeen || !strings.Contains(ruleAddArgs, "priority 30000") {
+		t.Errorf("expected ip rule add with priority 30000, got %q", ruleAddArgs)
+	}
+	if !routeAddSeen {
+		t.Errorf("expected ip route add local")
 	}
 }
 
@@ -120,6 +192,68 @@ func TestIPTablesUninstallSequence(t *testing.T) {
 	}
 	if len(fe.calls) < 3 {
 		t.Errorf("expected >=3 calls, got %d", len(fe.calls))
+	}
+}
+
+func TestWriteNetfilterHookContainsPidofGuard(t *testing.T) {
+	tmp := t.TempDir()
+	orig := netfilterHookPath
+	netfilterHookPath = filepath.Join(tmp, "50-awgm-tproxy.sh")
+	t.Cleanup(func() { netfilterHookPath = orig })
+
+	if err := writeNetfilterHook(); err != nil {
+		t.Fatalf("writeNetfilterHook: %v", err)
+	}
+	data, err := os.ReadFile(netfilterHookPath)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	body := string(data)
+	if !strings.Contains(body, "pidof sing-box >/dev/null 2>&1 || exit 0") {
+		t.Errorf("hook missing pidof guard:\n%s", body)
+	}
+	if !strings.Contains(body, "iptables-restore --noflush") {
+		t.Errorf("hook missing restore line:\n%s", body)
+	}
+}
+
+func TestRemoveNetfilterRulesFile(t *testing.T) {
+	tmp := t.TempDir()
+	orig := netfilterRulesPath
+	netfilterRulesPath = filepath.Join(tmp, "router-netfilter.rules")
+	t.Cleanup(func() { netfilterRulesPath = orig })
+
+	if err := os.WriteFile(netfilterRulesPath, []byte("dummy"), 0644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	removeNetfilterRulesFile()
+	if _, err := os.Stat(netfilterRulesPath); !os.IsNotExist(err) {
+		t.Errorf("expected file to be gone, got err=%v", err)
+	}
+	// Idempotent — second call must not panic.
+	removeNetfilterRulesFile()
+}
+
+func TestRefreshNetfilterHookIfPresent(t *testing.T) {
+	tmp := t.TempDir()
+	orig := netfilterHookPath
+	netfilterHookPath = filepath.Join(tmp, "50-awgm-tproxy.sh")
+	t.Cleanup(func() { netfilterHookPath = orig })
+
+	// No file → no-op (does not create one).
+	refreshNetfilterHookIfPresent()
+	if _, err := os.Stat(netfilterHookPath); !os.IsNotExist(err) {
+		t.Errorf("expected no file, got err=%v", err)
+	}
+
+	// File present → rewrite with current content (and our pidof guard).
+	if err := os.WriteFile(netfilterHookPath, []byte("# stale old version\n"), 0755); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	refreshNetfilterHookIfPresent()
+	data, _ := os.ReadFile(netfilterHookPath)
+	if !strings.Contains(string(data), "pidof sing-box") {
+		t.Errorf("expected refreshed hook with pidof, got:\n%s", data)
 	}
 }
 

@@ -1,6 +1,5 @@
 export { default as NetfilterMissingBanner } from './NetfilterMissingBanner.svelte';
 export { default as EngineStatusCard } from './EngineStatusCard.svelte';
-export { default as PolicyDevicePicker } from './PolicyDevicePicker.svelte';
 export { default as RefreshSettingsModal } from './RefreshSettingsModal.svelte';
 export { default as RulesList } from './RulesList.svelte';
 export { default as RuleEditModal } from './RuleEditModal.svelte';
@@ -17,5 +16,11 @@ export { default as DNSServerEditModal } from './DNSServerEditModal.svelte';
 export { default as DNSRulesList } from './DNSRulesList.svelte';
 export { default as DNSRuleEditModal } from './DNSRuleEditModal.svelte';
 export { default as DNSGlobals } from './DNSGlobals.svelte';
+export { default as ConnectionsSubTab } from './ConnectionsSubTab.svelte';
+export { default as ConnectionsBreakdown } from './ConnectionsBreakdown.svelte';
+export { default as ConnectionsBreakdownPanel } from './ConnectionsBreakdownPanel.svelte';
+export { default as ConnectionsFilters } from './ConnectionsFilters.svelte';
+export { default as ConnectionsTable } from './ConnectionsTable.svelte';
+export { default as ConnectionsBulkBar } from './ConnectionsBulkBar.svelte';
 export { buildOutboundOptions } from './outboundOptions';
 export type { OutboundGroup } from './outboundOptions';

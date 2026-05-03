@@ -7,6 +7,10 @@
         // the neutral default. `success` = green, `warning` = amber,
         // `muted` = subdued grey (e.g. "stopped").
         badgeTone?: 'default' | 'success' | 'warning' | 'muted';
+        // When true, renders a small vertical divider + extra spacing before
+        // this tab. Used to visually group tabs into clusters (e.g. legacy
+        // NDMS-stack tabs vs sing-box stack on /routing).
+        separatorBefore?: boolean;
     }
 
     interface Props {
@@ -28,28 +32,41 @@
 
     function recalc() {
         if (!containerEl || !measureEl) return;
-        const children = measureEl.children;
+        const children = Array.from(measureEl.children) as HTMLElement[];
         if (children.length === 0) return;
 
         // Available width minus space for the "+N" chip (≈60px)
         const containerWidth = containerEl.offsetWidth;
         const chipWidth = 60;
         let usedWidth = 0;
-        let fits = 0;
+        let tabsFit = 0;
+        const totalTabs = tabs.length;
 
-        for (let i = 0; i < children.length; i++) {
-            const childWidth = (children[i] as HTMLElement).offsetWidth;
-            const needsChip = i < children.length - 1;
-            if (usedWidth + childWidth + (needsChip ? chipWidth : 0) <= containerWidth) {
-                usedWidth += childWidth;
-                fits++;
+        // Children are a mix of button.tab (real tabs) and span.tab-separator
+        // (visual dividers). We count only the buttons toward fits, but
+        // include separator widths in the running total when we cross them.
+        let pendingSeparator = 0;
+        for (const child of children) {
+            const w = child.offsetWidth;
+            if (child.tagName === 'SPAN') {
+                // separator — accumulate; only "spent" once we accept the
+                // following tab.
+                pendingSeparator += w;
+                continue;
+            }
+            const isLastTab = tabsFit === totalTabs - 1;
+            const cost = w + pendingSeparator + (isLastTab ? 0 : chipWidth);
+            if (usedWidth + cost <= containerWidth) {
+                usedWidth += w + pendingSeparator;
+                pendingSeparator = 0;
+                tabsFit++;
             } else {
                 break;
             }
         }
 
         // At least 1 tab visible
-        visibleCount = Math.max(1, fits);
+        visibleCount = Math.max(1, tabsFit);
     }
 
     $effect(() => {
@@ -80,7 +97,10 @@
 <div class="overflow-tabs" bind:this={containerEl}>
     <!-- Hidden measurement row: renders all tabs offscreen to measure widths -->
     <div class="measure-row" bind:this={measureEl} aria-hidden="true">
-        {#each tabs as tab (tab.id)}
+        {#each tabs as tab, i (tab.id)}
+            {#if tab.separatorBefore && i > 0}
+                <span class="tab-separator"></span>
+            {/if}
             <button class="tab" tabindex="-1">
                 {tab.label}
                 {#if tab.badge !== undefined}
@@ -92,7 +112,10 @@
 
     <!-- Visible tabs -->
     <div class="tab-row">
-        {#each visibleTabs as tab (tab.id)}
+        {#each visibleTabs as tab, i (tab.id)}
+            {#if tab.separatorBefore && i > 0}
+                <span class="tab-separator" aria-hidden="true"></span>
+            {/if}
             <button
                 class="tab"
                 class:active={tab.id === active}
@@ -163,6 +186,15 @@
         pointer-events: none;
         height: 0;
         overflow: hidden;
+    }
+
+    .tab-separator {
+        align-self: center;
+        width: 1px;
+        height: 18px;
+        margin: 0 0.75rem;
+        background: var(--border);
+        flex: 0 0 auto;
     }
 
     .tab-row {

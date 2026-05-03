@@ -3,6 +3,7 @@ package monitoring
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -52,15 +53,56 @@ type SystemTunnelInfo struct {
 	Connected     bool
 }
 
+// SingboxTunnelLister enumerates sing-box tunnels (t2sX) so they
+// appear in the matrix alongside AWG/system tunnels. Optional — when
+// nil, sing-box rows are skipped.
+type SingboxTunnelLister interface {
+	List(ctx context.Context) ([]SingboxTunnelInfo, error)
+}
+
+// SingboxTunnelInfo is the minimum subset monitoring needs from a
+// sing-box outbound to render a matrix row.
+type SingboxTunnelInfo struct {
+	Tag           string // sing-box outbound tag, e.g. "veesp"
+	Name          string // human-readable name (often equals Tag)
+	InterfaceName string // kernel iface, e.g. "t2s0"
+}
+
+// CompositeOutboundLister exposes the router's composite outbound
+// list so the scheduler can identify which sing-box tunnels are
+// members of a urltest group (eligible for Clash latency
+// augmentation). Optional — when nil, augmentation is skipped.
+type CompositeOutboundLister interface {
+	List(ctx context.Context) ([]CompositeOutboundInfo, error)
+}
+
+type CompositeOutboundInfo struct {
+	Tag     string   // group tag, e.g. "auto"
+	Type    string   // "selector" | "urltest" | "loadbalance"
+	Members []string // member tags
+}
+
+// ClashStateProvider returns the latest known per-outbound latency.
+// Implementation handles its own caching; scheduler just queries.
+// Optional — when nil, augmentation is skipped. Invalidate is called
+// by force-refresh paths so the next LatencyForOutbound re-fetches.
+type ClashStateProvider interface {
+	LatencyForOutbound(ctx context.Context, tag string) (delayMs int, ok bool)
+	Invalidate()
+}
+
 // SchedulerDeps wires Scheduler against the rest of the system.
 type SchedulerDeps struct {
-	TunnelLister  traffic.TunnelLister
-	TunnelStore   *storage.AWGTunnelStore
-	SystemTunnels SystemTunnelLister // optional — when nil, system tunnels are skipped
-	Prober        Prober             // default prober for all cells
-	ICMPProber    Prober             // optional — used for self-target cells when tunnel.SelfMethod=="ping"
-	Log           logging.AppLogger
-	Bus           *events.Bus // optional — set later via SetEventBus
+	TunnelLister   traffic.TunnelLister
+	TunnelStore    *storage.AWGTunnelStore
+	SystemTunnels  SystemTunnelLister      // optional — when nil, system tunnels are skipped
+	SingboxTunnels SingboxTunnelLister     // optional — when nil, sing-box tunnels are skipped
+	Composites     CompositeOutboundLister // optional — when nil, urltest membership is skipped
+	ClashState     ClashStateProvider      // optional — when nil, ClashDelay/UrltestGroup are not populated
+	Prober         Prober                  // default prober for all cells
+	ICMPProber     Prober                  // optional — used for self-target cells when tunnel.SelfMethod=="ping"
+	Log            logging.AppLogger
+	Bus            *events.Bus // optional — set later via SetEventBus
 }
 
 // Scheduler runs ICMP probes through running tunnels on a fixed interval.
@@ -94,6 +136,28 @@ func NewScheduler(deps SchedulerDeps, history *History) *Scheduler {
 // build the bus once and inject it later.
 func (s *Scheduler) SetEventBus(bus *events.Bus) {
 	s.deps.Bus = bus
+}
+
+// SetSingboxTunnels wires the sing-box tunnel lister after construction so
+// the server bootstrap can build the singbox.Operator (and the adapter that
+// projects it) later in the wiring sequence than the monitoring service
+// itself. Optional — when never set, sing-box rows are skipped.
+func (s *Scheduler) SetSingboxTunnels(l SingboxTunnelLister) {
+	s.deps.SingboxTunnels = l
+}
+
+// SetComposites wires the composite-outbound lister after construction so
+// the server bootstrap can build the router service first. Optional — when
+// never set, urltest membership is skipped.
+func (s *Scheduler) SetComposites(l CompositeOutboundLister) {
+	s.deps.Composites = l
+}
+
+// SetClashState wires the Clash latency cache after construction so the
+// server bootstrap can build the ClashProxy first. Optional — when never
+// set, ClashDelay/UrltestGroup are not populated.
+func (s *Scheduler) SetClashState(p ClashStateProvider) {
+	s.deps.ClashState = p
 }
 
 // Start launches the background loop and returns immediately.
@@ -132,6 +196,19 @@ func (s *Scheduler) loop(ctx context.Context) {
 	}
 }
 
+// RunOnceForced invalidates the Clash cache (if wired) and runs a
+// fresh tick. Used by /monitoring/matrix?force=1 so the Refresh
+// button delivers fresh ICMP and Clash data in one round-trip.
+func (s *Scheduler) RunOnceForced(ctx context.Context) {
+	s.mu.RLock()
+	cs := s.deps.ClashState
+	s.mu.RUnlock()
+	if cs != nil {
+		cs.Invalidate()
+	}
+	s.RunOnce(ctx)
+}
+
 // RunOnce executes a single tick — exposed for testing. Probes every
 // (target × tunnel) pair concurrently up to workerLimit, writes results to
 // history, replaces lastSnap, prunes deleted-tunnel buffers, publishes to
@@ -145,6 +222,7 @@ func (s *Scheduler) RunOnce(ctx context.Context) {
 	}()
 
 	tunnels := s.collectTunnels(ctx)
+	s.augmentSingboxClashData(ctx, tunnels)
 	targets := EffectiveTargets(tunnels)
 
 	cells := make([]Cell, 0, len(targets)*len(tunnels))
@@ -325,5 +403,85 @@ func (s *Scheduler) collectTunnels(ctx context.Context) []Tunnel {
 		}
 	}
 
+	// Sing-box (t2sX) tunnels. Skipped when the lister is unconfigured
+	// (legacy installs that don't run sing-box).
+	if s.deps.SingboxTunnels != nil {
+		sb, err := s.deps.SingboxTunnels.List(ctx)
+		if err == nil {
+			// Dedupe by interface against rows already collected (AWG/system).
+			// In practice no overlap is possible, but the contract is defensive.
+			seenIface := make(map[string]bool, len(out))
+			for _, t := range out {
+				if t.IfaceName != "" {
+					seenIface[t.IfaceName] = true
+				}
+			}
+			for _, sbt := range sb {
+				if sbt.InterfaceName == "" || seenIface[sbt.InterfaceName] {
+					continue
+				}
+				out = append(out, Tunnel{
+					ID:        sbt.Tag, // tag is unique per outbound; safe as ID
+					Name:      sbt.Name,
+					IfaceName: sbt.InterfaceName,
+					// PingcheckTarget / SelfTarget left empty — sing-box
+					// tunnels don't have a per-tunnel restart pingcheck;
+					// matrix row uses BaseTargets only, augmented later
+					// with Clash data.
+					Source:     "singbox",
+					SingboxTag: sbt.Tag,
+				})
+			}
+		}
+	}
+
 	return out
+}
+
+// augmentSingboxClashData walks the tunnels list and, for each
+// sing-box tunnel that is a member of a urltest composite group AND
+// has a recorded latency in the ClashState cache, populates
+// ClashDelay + UrltestGroup. No-op for non-sing-box tunnels and for
+// sing-box tunnels with no urltest membership or no recorded delay.
+//
+// Mutates `tunnels` in place. Safe to call when Composites or
+// ClashState deps are nil — short-circuits.
+func (s *Scheduler) augmentSingboxClashData(ctx context.Context, tunnels []Tunnel) {
+	if s.deps.Composites == nil || s.deps.ClashState == nil {
+		return
+	}
+	composites, err := s.deps.Composites.List(ctx)
+	if err != nil {
+		return
+	}
+	// Build memberTag → urltestGroupTag map. First urltest group wins
+	// per member (sing-box does the same — a member can technically
+	// appear in multiple groups but only one urltest tracks its delay
+	// authoritatively).
+	urltestOf := make(map[string]string)
+	for _, c := range composites {
+		if strings.ToLower(c.Type) != "urltest" {
+			continue
+		}
+		for _, m := range c.Members {
+			if _, exists := urltestOf[m]; !exists {
+				urltestOf[m] = c.Tag
+			}
+		}
+	}
+	for i := range tunnels {
+		if tunnels[i].Source != "singbox" {
+			continue
+		}
+		group, ok := urltestOf[tunnels[i].SingboxTag]
+		if !ok {
+			continue
+		}
+		delay, hasDelay := s.deps.ClashState.LatencyForOutbound(ctx, tunnels[i].SingboxTag)
+		if !hasDelay {
+			continue
+		}
+		tunnels[i].ClashDelay = delay
+		tunnels[i].UrltestGroup = group
+	}
 }

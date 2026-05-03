@@ -28,7 +28,6 @@ export type RoutingSubTab =
 	| 'clientRoutes'
 	| 'dnsRoutes'
 	| 'ipRoutes'
-	| 'deviceProxy'
 	| 'hrNeo'
 	| 'singboxRouter';
 
@@ -49,7 +48,6 @@ const ROUTING_SUBTAB_MIN_LEVEL: Record<RoutingSubTab, UsageLevel> = {
 	clientRoutes: 'advanced',
 	dnsRoutes: 'advanced',
 	ipRoutes: 'advanced',
-	deviceProxy: 'advanced',
 	hrNeo: 'expert',
 	singboxRouter: 'expert',
 };

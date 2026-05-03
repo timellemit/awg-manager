@@ -95,8 +95,11 @@ type Server struct {
 	hydraService        *hydraroute.Service
 	orch                *orchestrator.Orchestrator
 	bus                 *events.Bus
-	singboxHandler       *api.SingboxHandler
-	singboxRouterHandler *api.SingboxRouterHandler
+	singboxHandler        *api.SingboxHandler
+	singboxConnsHandler   *api.SingboxConnectionsHandler
+	singboxRouterHandler  *api.SingboxRouterHandler
+	singboxConfigHandler  *api.SingboxConfigHandler
+	singboxProxiesHandler *api.SingboxProxiesHandler
 	awgOutboundsHandler  *api.AWGOutboundsHandler
 	clashProxy          *api.ClashProxy
 	singboxOp           *singbox.Operator
@@ -122,7 +125,7 @@ type Server struct {
 }
 
 // New creates a new server instance.
-func New(cfg Config, log *logger.Logger, tunnelService api.TunnelService, externalService api.ExternalTunnelService, testingService *testing.Service, keenetic *auth.KeeneticClient, sessions *auth.SessionStore, settings *storage.SettingsStore, tunnels *storage.AWGTunnelStore, pingCheckService api.PingCheckService, loggingService *logging.Service, activeBackend backend.Backend, kmodLoader *kmod.Loader, updaterService *updater.Service, ndmsQueries *ndmsquery.Queries, trafficHistory *traffic.History, dnsRouteService api.DNSRouteService, staticRouteService api.StaticRouteService, systemTunnelService systemtunnel.Service, managedService managed.ManagedServerService, nwgOp *nwg.OperatorNativeWG, terminalManager terminal.Manager, accessPolicySvc accesspolicy.Service, clientRouteSvc clientroute.Service, catalog routing.Catalog, orch *orchestrator.Orchestrator, bus *events.Bus, hydraService *hydraroute.Service, singboxHandler *api.SingboxHandler, clashProxy *api.ClashProxy, monitoringService *monitoring.Service) *Server {
+func New(cfg Config, log *logger.Logger, tunnelService api.TunnelService, externalService api.ExternalTunnelService, testingService *testing.Service, keenetic *auth.KeeneticClient, sessions *auth.SessionStore, settings *storage.SettingsStore, tunnels *storage.AWGTunnelStore, pingCheckService api.PingCheckService, loggingService *logging.Service, activeBackend backend.Backend, kmodLoader *kmod.Loader, updaterService *updater.Service, ndmsQueries *ndmsquery.Queries, trafficHistory *traffic.History, dnsRouteService api.DNSRouteService, staticRouteService api.StaticRouteService, systemTunnelService systemtunnel.Service, managedService managed.ManagedServerService, nwgOp *nwg.OperatorNativeWG, terminalManager terminal.Manager, accessPolicySvc accesspolicy.Service, clientRouteSvc clientroute.Service, catalog routing.Catalog, orch *orchestrator.Orchestrator, bus *events.Bus, hydraService *hydraroute.Service, singboxHandler *api.SingboxHandler, clashProxy *api.ClashProxy, singboxConnsHandler *api.SingboxConnectionsHandler, monitoringService *monitoring.Service) *Server {
 	id := generateInstanceID()
 	log.Infof("Server instance: %s", id)
 
@@ -156,6 +159,7 @@ func New(cfg Config, log *logger.Logger, tunnelService api.TunnelService, extern
 		orch:                orch,
 		bus:                 bus,
 		singboxHandler:      singboxHandler,
+		singboxConnsHandler: singboxConnsHandler,
 		clashProxy:          clashProxy,
 		monitoringService:   monitoringService,
 		authMiddleware:      auth.NewMiddleware(sessions, settings, log),
@@ -218,6 +222,21 @@ func (s *Server) SetSingboxRouterHandler(h *api.SingboxRouterHandler) {
 // so /api/singbox/awg-outbounds/tags can be registered.
 func (s *Server) SetAWGOutboundsHandler(h *api.AWGOutboundsHandler) {
 	s.awgOutboundsHandler = h
+}
+
+// SetSingboxConfigHandler injects the read-only config-preview handler.
+// Wired post-construction because the orchestrator's ConfigDir is only
+// available after main wires everything up.
+func (s *Server) SetSingboxConfigHandler(h *api.SingboxConfigHandler) {
+	s.singboxConfigHandler = h
+}
+
+// SetSingboxProxiesHandler injects the runtime-controls handler that
+// wraps the sing-box clash API. Wired post-construction since both the
+// router service (for composite-tag enumeration) and the clash proxy
+// (for the upstream URL) are constructed late.
+func (s *Server) SetSingboxProxiesHandler(h *api.SingboxProxiesHandler) {
+	s.singboxProxiesHandler = h
 }
 
 // generateInstanceID creates a random 16-byte hex string (32 chars).
@@ -849,9 +868,15 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 			}
 		}))
 	}
+	if s.singboxConfigHandler != nil {
+		mux.HandleFunc("/api/singbox/config-preview", guarded(s.singboxConfigHandler.Preview))
+	}
 	if s.clashProxy != nil {
 		mux.HandleFunc("/api/singbox/clash/", guarded(s.clashProxy.ServeHTTP))
 		mux.HandleFunc("/api/singbox/clash", guarded(s.clashProxy.ServeHTTP))
+	}
+	if s.singboxConnsHandler != nil {
+		mux.HandleFunc("/api/singbox/connections/clients", guarded(s.singboxConnsHandler.Clients))
 	}
 
 	if s.singboxRouterHandler != nil {
@@ -901,6 +926,13 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 				rh.PutDNSGlobals(w, r)
 			}
 		}))
+		mux.HandleFunc("/api/singbox/router/inspect", guarded(rh.Inspect))
+	}
+
+	if s.singboxProxiesHandler != nil {
+		mux.HandleFunc("/api/singbox/router/proxies/list", guarded(s.singboxProxiesHandler.List))
+		mux.HandleFunc("/api/singbox/router/proxies/select", guarded(s.singboxProxiesHandler.Select))
+		mux.HandleFunc("/api/singbox/router/proxies/test", guarded(s.singboxProxiesHandler.Test))
 	}
 
 	if s.awgOutboundsHandler != nil {
