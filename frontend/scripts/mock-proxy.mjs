@@ -40,8 +40,49 @@ let usageLevel = 'expert';
 let singboxInstallShouldFail = process.env.MOCK_SINGBOX_INSTALL_FAIL === '1';
 
 // ── Subscriptions mock state ───────────────────────────────────
-let mockSubscriptions = [];
-let mockSubID = 0;
+// Pre-populated for visual testing — shows non-empty list state, selector with members.
+let mockSubscriptions = [
+	{
+		id: 'sub-demo0001',
+		label: 'Provider Demo',
+		url: 'https://demo-provider.example/sub/aaa',
+		headers: [
+			{ name: 'User-Agent', value: 'Happ/4.6.0/ios/2603181556604' },
+			{ name: 'X-Device-OS', value: 'iOS' },
+		],
+		refreshHours: 24,
+		lastFetched: new Date(Date.now() - 3 * 3600 * 1000).toISOString(),
+		lastError: '',
+		selectorTag: 'sub-demo0001',
+		inboundTag: 'sub-demo0001-in',
+		listenPort: 11001,
+		memberTags: [
+			'sub-demo0001-aabbccdd',
+			'sub-demo0001-eeff0011',
+			'sub-demo0001-22334455',
+		],
+		orphanTags: [],
+		enabled: true,
+		isDefaultRoute: false,
+	},
+	{
+		id: 'sub-demo0002',
+		label: 'Backup Provider',
+		url: 'https://backup.example/sub/bbb',
+		headers: [],
+		refreshHours: 0,
+		lastFetched: new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString(),
+		lastError: 'fetch: HTTP 503',
+		selectorTag: 'sub-demo0002',
+		inboundTag: 'sub-demo0002-in',
+		listenPort: 11002,
+		memberTags: ['sub-demo0002-99887766'],
+		orphanTags: ['sub-demo0002-deadbeef'],
+		enabled: true,
+		isDefaultRoute: false,
+	},
+];
+let mockSubID = 2;
 
 function newSub(input) {
 	mockSubID++;

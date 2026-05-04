@@ -169,7 +169,7 @@ func (s *Store) UpdateState(id string, res RefreshResult) error {
 	}
 	sub.LastFetched = res.When
 	if res.Err != nil {
-		sub.LastError = maskURL(res.Err.Error(), sub.URL)
+		sub.LastError = MaskURL(res.Err.Error(), sub.URL)
 	} else {
 		sub.LastError = ""
 	}
@@ -219,9 +219,9 @@ func (s *Store) SetIsDefaultRoute(id string, isDefault bool) error {
 	return s.saveLocked()
 }
 
-// maskURL replaces the subscription URL in an error message with a placeholder
-// so logs never leak provider tokens / paths.
-func maskURL(msg, url string) string {
+// MaskURL replaces the subscription URL in an error message with a placeholder
+// so logs and API responses never leak provider tokens / paths.
+func MaskURL(msg, url string) string {
 	if url == "" || msg == "" {
 		return msg
 	}

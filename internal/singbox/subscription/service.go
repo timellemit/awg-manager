@@ -91,8 +91,9 @@ func (s *Service) refreshLocked(ctx context.Context, id string) (*RefreshResult,
 	}
 	body, ct, err := Fetch(sub.URL, sub.Headers, s.fetchOpts)
 	if err != nil {
-		s.store.UpdateState(id, RefreshResult{When: time.Now(), Err: err})
-		return nil, err
+		masked := fmt.Errorf("%s", MaskURL(err.Error(), sub.URL))
+		s.store.UpdateState(id, RefreshResult{When: time.Now(), Err: masked})
+		return nil, masked
 	}
 	lines := NormalizeBody(body, ct)
 	parseRes := vlink.ParseBatch(lines)
@@ -188,7 +189,9 @@ func (s *Service) Delete(ctx context.Context, id string, cascade bool) error {
 		for _, m := range sub.MemberTags {
 			s.mutator.RemoveOutbound(m)
 		}
-		s.mutator.Reload(ctx)
+		if err := s.mutator.Reload(ctx); err != nil {
+			return fmt.Errorf("subscription: cascade delete reload: %w", err)
+		}
 	}
 	return s.store.Delete(id)
 }
