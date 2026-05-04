@@ -1440,3 +1440,45 @@ export interface WizardResult {
 	dnsRuleApplied: boolean;
 	engineStarted: boolean;
 }
+
+// === Subscriptions ===
+
+export interface SubscriptionHeader {
+	name: string;
+	value: string;
+}
+
+export interface Subscription {
+	id: string;
+	label: string;
+	url: string;
+	headers: SubscriptionHeader[];
+	refreshHours: number;
+	lastFetched: string; // RFC 3339, "" when never fetched
+	lastError?: string;
+	selectorTag: string;
+	inboundTag: string;
+	listenPort: number;
+	memberTags: string[];
+	orphanTags: string[];
+	enabled: boolean;
+	isDefaultRoute: boolean;
+}
+
+export interface SubscriptionRefreshResult {
+	when: string;
+	added: number;
+	updated: number;
+	orphaned: number;
+	skippedVmess: number;
+	skippedOther: number;
+	parseErrors?: string[];
+}
+
+export interface CreateSubscriptionInput {
+	label: string;
+	url: string;
+	headers: SubscriptionHeader[];
+	refreshHours: number;
+	enabled: boolean;
+}

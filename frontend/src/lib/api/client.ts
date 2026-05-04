@@ -76,7 +76,11 @@ import type {
 	SingboxProxiesListResponse,
 	SingboxProxiesSelectRequest,
 	SingboxProxiesTestRequest,
-	SingboxProxiesTestResponse
+	SingboxProxiesTestResponse,
+	Subscription,
+	SubscriptionHeader,
+	SubscriptionRefreshResult,
+	CreateSubscriptionInput
 } from '$lib/types';
 
 interface ApiResponse<T> {
@@ -1604,6 +1608,79 @@ class ApiClient {
 			method: 'POST',
 			body: JSON.stringify(req),
 		});
+	}
+
+	// #endregion
+
+	// #region Subscriptions
+
+	async listSubscriptions(): Promise<Subscription[]> {
+		return this.request<Subscription[]>('/singbox/subscriptions');
+	}
+
+	async createSubscription(in_: CreateSubscriptionInput): Promise<Subscription> {
+		return this.request<Subscription>('/singbox/subscriptions/create', {
+			method: 'POST',
+			body: JSON.stringify(in_),
+		});
+	}
+
+	async getSubscription(id: string): Promise<Subscription> {
+		return this.request<Subscription>(
+			`/singbox/subscriptions/get?id=${encodeURIComponent(id)}`,
+		);
+	}
+
+	async updateSubscription(
+		id: string,
+		patch: Partial<CreateSubscriptionInput>,
+	): Promise<Subscription> {
+		return this.request<Subscription>(
+			`/singbox/subscriptions/update?id=${encodeURIComponent(id)}`,
+			{
+				method: 'PUT',
+				body: JSON.stringify(patch),
+			},
+		);
+	}
+
+	async deleteSubscription(id: string, cascade: boolean): Promise<void> {
+		const url = `/singbox/subscriptions/delete?id=${encodeURIComponent(id)}&cascade=${cascade ? '1' : '0'}`;
+		await this.request(url, { method: 'DELETE' });
+	}
+
+	async refreshSubscription(id: string): Promise<SubscriptionRefreshResult> {
+		return this.request<SubscriptionRefreshResult>(
+			`/singbox/subscriptions/refresh?id=${encodeURIComponent(id)}`,
+			{ method: 'POST' },
+		);
+	}
+
+	async setSubscriptionActiveMember(id: string, memberTag: string): Promise<void> {
+		await this.request(
+			`/singbox/subscriptions/active-member?id=${encodeURIComponent(id)}`,
+			{
+				method: 'POST',
+				body: JSON.stringify({ memberTag }),
+			},
+		);
+	}
+
+	async setSubscriptionDefaultRoute(id: string, enabled: boolean): Promise<void> {
+		await this.request(
+			`/singbox/subscriptions/default-route?id=${encodeURIComponent(id)}`,
+			{
+				method: 'POST',
+				body: JSON.stringify({ enabled }),
+			},
+		);
+	}
+
+	async deleteSubscriptionOrphans(id: string): Promise<void> {
+		await this.request(
+			`/singbox/subscriptions/orphans/delete?id=${encodeURIComponent(id)}`,
+			{ method: 'POST' },
+		);
 	}
 
 	// #endregion
