@@ -119,6 +119,20 @@ func (s *Service) refreshLocked(ctx context.Context, id string) (*RefreshResult,
 	}
 	lines := NormalizeBody(body, ct)
 	parseRes := vlink.ParseBatch(lines)
+
+	if len(parseRes.Outbounds) == 0 {
+		hint := "ни одной валидной ссылки. Поддерживаются: base64-encoded share-links, HTML с share-link якорями, plain text со ссылками vless://, trojan://, ss://, hysteria2://. Clash YAML / mihomo формат пока не поддерживается."
+		var errMsg string
+		if len(parseRes.Errors) > 0 {
+			errMsg = fmt.Sprintf("subscription: %s Первая ошибка парсера: %s", hint, parseRes.Errors[0].Error())
+		} else {
+			errMsg = fmt.Sprintf("subscription: %s", hint)
+		}
+		err := errors.New(errMsg)
+		s.store.UpdateState(id, RefreshResult{When: time.Now(), Err: err})
+		return nil, err
+	}
+
 	diff := ApplyDiff(id, sub.MemberTags, parseRes.Outbounds)
 
 	if err := s.applyDiff(ctx, sub, diff); err != nil {

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -100,6 +101,29 @@ func TestService_Create_FetchAndMaterialize(t *testing.T) {
 	}
 	if len(mutator.addedInbounds) != 1 {
 		t.Errorf("expected 1 mixed inbound, got %d", len(mutator.addedInbounds))
+	}
+}
+
+func TestService_Create_FailsOnZeroOutbounds_ClashYAML(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/x-yaml")
+		w.Write([]byte("proxies:\n  - name: \"a\"\n    type: vless\n    server: 1.2.3.4\n    port: 443\n"))
+	}))
+	defer srv.Close()
+
+	store, _ := NewStore(filepath.Join(t.TempDir(), "sub.json"))
+	mutator := &fakeMutator{}
+	svc := NewService(store, mutator)
+
+	_, err := svc.Create(context.Background(), CreateInput{Label: "clash", URL: srv.URL, Enabled: true})
+	if err == nil {
+		t.Fatalf("Create with Clash YAML must fail (0 outbounds)")
+	}
+	if !strings.Contains(err.Error(), "Clash YAML") && !strings.Contains(err.Error(), "ни одной валидной") {
+		t.Errorf("error must hint at unsupported format, got: %v", err)
+	}
+	if len(store.List()) != 0 {
+		t.Errorf("subscription must be cleaned up on failed Create, got %d", len(store.List()))
 	}
 }
 
