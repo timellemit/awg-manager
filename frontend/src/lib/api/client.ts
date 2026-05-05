@@ -1293,8 +1293,10 @@ class ApiClient {
 		onResult: (data: { phase: string; bandwidth: number; bytes: number; duration: number }) => void,
 		onDone: () => void,
 		onError: (error: string) => void,
+		iface?: string,
 	): EventSource {
-		const url = `${this.baseUrl}/singbox/tunnels/test/speed/stream?tag=${encodeURIComponent(tag)}&server=${encodeURIComponent(server)}&port=${port}`;
+		const ifaceParam = iface ? `&iface=${encodeURIComponent(iface)}` : '';
+		const url = `${this.baseUrl}/singbox/tunnels/test/speed/stream?tag=${encodeURIComponent(tag)}&server=${encodeURIComponent(server)}&port=${port}${ifaceParam}`;
 		const es = new EventSource(url);
 		es.addEventListener('phase', (e) => {
 			try { onPhase(JSON.parse((e as MessageEvent).data).phase); } catch { /* ignore */ }
