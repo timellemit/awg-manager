@@ -1678,6 +1678,13 @@ func (s *monitoringSystemTunnelAdapter) List(ctx context.Context) ([]monitoring.
 	}
 	out := make([]monitoring.SystemTunnelInfo, 0, len(list))
 	for _, t := range list {
+		// Skip awg-manager's own server interface (tagged with the
+		// ManagedServerDescription prefix "AWGM ..."; see
+		// internal/managed/types.go::ManagedServerDescription). Server-side
+		// WG is not a client tunnel and must not appear in monitoring.
+		if strings.HasPrefix(t.Description, "AWGM") {
+			continue
+		}
 		out = append(out, monitoring.SystemTunnelInfo{
 			ID:            t.ID,
 			InterfaceName: t.InterfaceName,
