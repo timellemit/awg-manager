@@ -41,6 +41,7 @@ type SubscriptionDTO struct {
 	SelectorTag  string                  `json:"selectorTag" example:"sub-abc12345"`
 	InboundTag   string                  `json:"inboundTag" example:"sub-abc12345-in"`
 	ListenPort   int                     `json:"listenPort" example:"11080"`
+	ProxyIndex   int                     `json:"proxyIndex" example:"3"`
 	MemberTags   []string                `json:"memberTags"`
 	Members      []SubscriptionMemberDTO `json:"members"`
 	OrphanTags   []string                `json:"orphanTags"`
@@ -131,6 +132,7 @@ func toSubscriptionDTO(s subscription.Subscription) SubscriptionDTO {
 		SelectorTag:  s.SelectorTag,
 		InboundTag:   s.InboundTag,
 		ListenPort:   int(s.ListenPort),
+		ProxyIndex:   s.ProxyIndex,
 		MemberTags:   memberTags,
 		Members:      memberDTOs,
 		OrphanTags:   orphans,

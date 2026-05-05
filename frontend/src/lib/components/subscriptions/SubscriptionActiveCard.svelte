@@ -11,6 +11,7 @@
     import { subscriptionsStore } from '$lib/stores/subscriptions';
     import type { Subscription, SubscriptionMember } from '$lib/types';
     import SubscriptionMemberPicker from './SubscriptionMemberPicker.svelte';
+    import SingboxSpeedTestModal from '$lib/components/singbox/SingboxSpeedTestModal.svelte';
 
     interface Props {
         subscription: Subscription;
@@ -20,6 +21,19 @@
 
     let pickerOpen = $state(false);
     let checking = $state(false);
+    let speedtestOpen = $state(false);
+
+    // NDMS Proxy interface name (Proxy<N>) and matching kernel TUN
+    // (t2s<N>) — same naming convention sing-box tunnels use, just
+    // keyed off the subscription's allocated proxyIndex. Empty when
+    // proxyIndex < 0 (defensive; live subscriptions on the active list
+    // always have a valid index after the EnsureProxy step).
+    const proxyIface = $derived(
+        subscription.proxyIndex >= 0 ? `Proxy${subscription.proxyIndex}` : '',
+    );
+    const kernelIface = $derived(
+        subscription.proxyIndex >= 0 ? `t2s${subscription.proxyIndex}` : '',
+    );
 
     const DELAY_OK = 200;
     const DELAY_SLOW = 500;
@@ -113,7 +127,15 @@
         <h3 class="title">{subscription.label}</h3>
         <span class="kind-badge">подписка</span>
     </div>
-    <div class="iface">{subscription.inboundTag}</div>
+    <div class="iface">
+        {#if proxyIface}
+            {proxyIface}
+            {#if kernelIface}<span class="kernel">· {kernelIface}</span>{/if}
+            <span class="kernel">· {subscription.inboundTag}</span>
+        {:else}
+            {subscription.inboundTag}
+        {/if}
+    </div>
 
     <div class="badges">
         <span class="badge proto">{protocolLabel}</span>
@@ -193,9 +215,24 @@
     </div>
 
     <div class="actions">
+        <Button
+            variant="ghost"
+            size="sm"
+            disabled={!kernelIface}
+            onclick={() => kernelIface && (speedtestOpen = true)}
+        >
+            Тест скорости
+        </Button>
         <Button variant="ghost" size="sm" onclick={openDetail}>Открыть подписку</Button>
     </div>
 </div>
+
+<SingboxSpeedTestModal
+    open={speedtestOpen}
+    tag={subscription.selectorTag}
+    kernelInterface={kernelIface}
+    onclose={() => (speedtestOpen = false)}
+/>
 
 <style>
     .card {
@@ -258,6 +295,11 @@
         font-size: 0.75rem;
         color: var(--color-text-muted);
         font-family: var(--font-mono, ui-monospace, monospace);
+    }
+    .iface .kernel {
+        color: var(--color-text-muted);
+        opacity: 0.7;
+        margin-left: 0.2rem;
     }
     .badges { display: flex; gap: 0.4rem; flex-wrap: wrap; }
     .badge {

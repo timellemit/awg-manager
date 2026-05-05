@@ -56,6 +56,7 @@ let mockSubscriptions = [
 		selectorTag: 'sub-demo0001',
 		inboundTag: 'sub-demo0001-in',
 		listenPort: 11001,
+		proxyIndex: 11,
 		memberTags: [
 			'sub-demo0001-aabbccdd',
 			'sub-demo0001-eeff0011',
@@ -81,6 +82,7 @@ let mockSubscriptions = [
 		selectorTag: 'sub-demo0002',
 		inboundTag: 'sub-demo0002-in',
 		listenPort: 11002,
+		proxyIndex: 12,
 		memberTags: ['sub-demo0002-99887766'],
 		members: [
 			{ tag: 'sub-demo0002-99887766', protocol: 'shadowsocks', server: 'backup.example', port: 8388, transport: 'tcp', security: '' },
@@ -108,6 +110,7 @@ function newSub(input) {
 		selectorTag: `sub-${shortID}`,
 		inboundTag: `sub-${shortID}-in`,
 		listenPort: 11000 + mockSubID,
+		proxyIndex: 10 + mockSubID,
 		memberTags,
 		members: memberTags.map((tag, i) => ({
 			tag,

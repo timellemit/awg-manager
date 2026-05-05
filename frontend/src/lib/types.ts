@@ -1469,6 +1469,7 @@ export interface Subscription {
 	selectorTag: string;
 	inboundTag: string;
 	listenPort: number;
+	proxyIndex: number;
 	memberTags: string[];
 	members: SubscriptionMember[];
 	orphanTags: string[];
