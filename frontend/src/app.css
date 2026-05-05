@@ -1132,6 +1132,14 @@ label {
 	cursor: not-allowed;
 }
 
+/* Base active state for any .chip without a -level-* / -group-* modifier.
+   Specializations below have higher specificity (0,2,0 vs 0,1,0) and override. */
+.chip.chip-active {
+	background: var(--color-accent);
+	color: white;
+	border-color: var(--color-accent);
+}
+
 .chip-level-error.chip-active {
 	background: var(--color-error-tint);
 	color: var(--color-error);
