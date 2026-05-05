@@ -320,15 +320,6 @@ func (s *Service) SetActiveMember(ctx context.Context, id, memberTag string) err
 	return nil
 }
 
-// SetDefaultRoute marks one subscription as defaultRoute (atomically clears
-// the flag from all others).
-func (s *Service) SetDefaultRoute(ctx context.Context, id string, enabled bool) error {
-	if err := s.store.SetIsDefaultRoute(id, enabled); err != nil {
-		return err
-	}
-	return s.mutator.Reload(ctx)
-}
-
 // DeleteOrphans removes orphan-flagged outbounds from sing-box config and
 // clears the OrphanTags slice in the store.
 func (s *Service) DeleteOrphans(ctx context.Context, id string) error {

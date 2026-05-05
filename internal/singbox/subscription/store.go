@@ -277,25 +277,6 @@ func (s *Store) SetListenPort(id string, port uint16) error {
 	return s.saveLocked()
 }
 
-func (s *Store) SetIsDefaultRoute(id string, isDefault bool) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if isDefault {
-		// Atomically: clear default-route from any other subscription.
-		for _, sub := range s.data {
-			if sub.ID != id {
-				sub.IsDefaultRoute = false
-			}
-		}
-	}
-	sub, ok := s.data[id]
-	if !ok {
-		return fmt.Errorf("subscription %q not found", id)
-	}
-	sub.IsDefaultRoute = isDefault
-	return s.saveLocked()
-}
-
 // MaskURL replaces the subscription URL in an error message with a placeholder
 // so logs and API responses never leak provider tokens / paths.
 func MaskURL(msg, url string) string {

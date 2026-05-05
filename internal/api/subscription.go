@@ -46,7 +46,6 @@ type SubscriptionDTO struct {
 	OrphanTags     []string                `json:"orphanTags"`
 	ActiveMember   string                  `json:"activeMember" example:"sub-abc-aaaa"`
 	Enabled        bool                    `json:"enabled"`
-	IsDefaultRoute bool                    `json:"isDefaultRoute"`
 }
 
 // SubscriptionHeader is a single custom HTTP header for the fetch request.
@@ -89,11 +88,6 @@ type UpdateSubscriptionRequest struct {
 // ActiveMemberRequest is the body for POST /api/singbox/subscriptions/active-member.
 type ActiveMemberRequest struct {
 	MemberTag string `json:"memberTag"`
-}
-
-// DefaultRouteRequest is the body for POST /api/singbox/subscriptions/default-route.
-type DefaultRouteRequest struct {
-	Enabled bool `json:"enabled"`
 }
 
 // toDTO converts a domain Subscription to its API representation.
@@ -141,7 +135,6 @@ func toSubscriptionDTO(s subscription.Subscription) SubscriptionDTO {
 		OrphanTags:     orphans,
 		ActiveMember:   s.ActiveMember,
 		Enabled:        s.Enabled,
-		IsDefaultRoute: s.IsDefaultRoute,
 	}
 }
 
@@ -312,27 +305,6 @@ func (h *SubscriptionHandler) ActiveMember(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if err := h.svc.SetActiveMember(r.Context(), id, req.MemberTag); err != nil {
-		response.InternalError(w, err.Error())
-		return
-	}
-	response.Success(w, struct {
-		OK bool `json:"ok"`
-	}{true})
-}
-
-// DefaultRoute handles POST /api/singbox/subscriptions/default-route?id=
-func (h *SubscriptionHandler) DefaultRoute(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		response.MethodNotAllowed(w)
-		return
-	}
-	id := r.URL.Query().Get("id")
-	var req DefaultRouteRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		response.ErrorWithStatus(w, http.StatusBadRequest, "bad request body", "INVALID_JSON")
-		return
-	}
-	if err := h.svc.SetDefaultRoute(r.Context(), id, req.Enabled); err != nil {
 		response.InternalError(w, err.Error())
 		return
 	}

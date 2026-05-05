@@ -130,29 +130,6 @@ func TestStore_ConcurrentReadWrite(t *testing.T) {
 	}
 }
 
-func TestStore_SetIsDefaultRoute_AtomicallyClearsOthers(t *testing.T) {
-	s, cleanup := newTestStore(t)
-	defer cleanup()
-
-	a, _ := s.Create(CreateInput{Label: "a", URL: "u"})
-	b, _ := s.Create(CreateInput{Label: "b", URL: "u"})
-
-	if err := s.SetIsDefaultRoute(a.ID, true); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.SetIsDefaultRoute(b.ID, true); err != nil {
-		t.Fatal(err)
-	}
-	got, _ := s.Get(a.ID)
-	if got.IsDefaultRoute {
-		t.Error("a.IsDefaultRoute should be false after b became default")
-	}
-	got2, _ := s.Get(b.ID)
-	if !got2.IsDefaultRoute {
-		t.Error("b.IsDefaultRoute should be true")
-	}
-}
-
 func TestStore_MaybeRefresh(t *testing.T) {
 	s, cleanup := newTestStore(t)
 	defer cleanup()

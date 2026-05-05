@@ -32,7 +32,6 @@ type Subscription struct {
 	OrphanTags     []string     `json:"orphanTags"`              // tags missing on last refresh
 	ActiveMember   string       `json:"activeMember,omitempty"` // currently-active selector member tag
 	Enabled        bool         `json:"enabled"`
-	IsDefaultRoute bool         `json:"isDefaultRoute"`
 }
 
 // Header is a single name:value pair sent on the fetch request.
