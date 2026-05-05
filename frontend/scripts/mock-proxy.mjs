@@ -801,6 +801,44 @@ const server = http.createServer(async (req, res) => {
 		return;
 	}
 
+	// Mock subscription "external" URL — return a Clash YAML body.
+	// Used by the mock-Create code path: when CreateInput.URL points at this,
+	// the mock backend pretends the upstream provider returned this YAML.
+	if (req.method === 'GET' && path === '/__mock__/clash-subscription.yaml') {
+		res.writeHead(200, {
+			'Content-Type': 'application/x-yaml',
+			'Access-Control-Allow-Origin': '*',
+		});
+		res.end(`proxies:
+  - name: "🇺🇸 LA-1 (mock)"
+    type: vless
+    server: la1.mock.local
+    port: 443
+    uuid: 3a3b1c2e-9999-4321-aaaa-1234567890ab
+    tls: true
+    servername: la1.mock.local
+    network: ws
+    ws-opts:
+      path: /v
+      headers:
+        Host: la1.mock.local
+  - name: "🇩🇪 FRA-1 (mock)"
+    type: vless
+    server: fra1.mock.local
+    port: 443
+    uuid: 4a4b1c2e-9999-4321-aaaa-1234567890ab
+    tls: true
+    servername: fra1.mock.local
+  - name: "🇯🇵 TYO-1 (mock)"
+    type: trojan
+    server: tyo1.mock.local
+    port: 443
+    password: trpass
+    sni: tyo1.mock.local
+`);
+		return;
+	}
+
 	if (req.method === 'POST' && path === '/singbox/subscriptions/create') {
 		let raw = '';
 		req.on('data', (c) => (raw += c));
@@ -808,6 +846,18 @@ const server = http.createServer(async (req, res) => {
 			try {
 				const body = JSON.parse(raw || '{}');
 				const sub = newSub(body);
+				if (String(body.url || '').endsWith('/__mock__/clash-subscription.yaml')) {
+					const shortID = sub.id.slice(0, 8);
+					const tags = [`sub-${shortID}-c001`, `sub-${shortID}-c002`, `sub-${shortID}-c003`];
+					sub.memberTags = tags;
+					sub.members = [
+						{ tag: tags[0], label: '🇺🇸 LA-1 (mock)', protocol: 'vless', server: 'la1.mock.local', port: 443, transport: 'ws', security: 'tls' },
+						{ tag: tags[1], label: '🇩🇪 FRA-1 (mock)', protocol: 'vless', server: 'fra1.mock.local', port: 443, transport: 'tcp', security: 'tls' },
+						{ tag: tags[2], label: '🇯🇵 TYO-1 (mock)', protocol: 'trojan', server: 'tyo1.mock.local', port: 443, transport: 'tcp', security: 'tls' },
+					];
+					sub.activeMember = '';
+					sub.orphanTags = [];
+				}
 				mockSubscriptions.push(sub);
 				send(res, 200, { success: true, data: sub });
 			} catch (e) {
