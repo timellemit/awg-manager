@@ -64,33 +64,32 @@ func (c *Client) SetAppLogger(appLogger logging.AppLogger) {
 }
 
 // Get performs an HTTP GET to /rci/{path} and decodes JSON into dst.
+// On success no log entry is emitted; every failure path is logged at Error.
 func (c *Client) Get(ctx context.Context, path string, dst any) error {
-	start := time.Now()
 	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+path, nil)
 	if err != nil {
-		c.appLog.Debug("GET", path, fmt.Sprintf("build request: %v", err))
+		c.appLog.Error("GET", path, fmt.Sprintf("build request: %v", err))
 		return fmt.Errorf("rci GET %s: %w", path, err)
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		c.appLog.Debug("GET", path, fmt.Sprintf("transport: %v", err))
+		c.appLog.Error("GET", path, fmt.Sprintf("transport: %v", err))
 		return fmt.Errorf("rci GET %s: %w", path, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		c.appLog.Debug("GET", path, fmt.Sprintf("status %d", resp.StatusCode))
+		c.appLog.Error("GET", path, fmt.Sprintf("status %d", resp.StatusCode))
 		return fmt.Errorf("rci GET %s: status %d", path, resp.StatusCode)
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		c.appLog.Debug("GET", path, fmt.Sprintf("read body: %v", err))
+		c.appLog.Error("GET", path, fmt.Sprintf("read body: %v", err))
 		return fmt.Errorf("rci GET %s: read: %w", path, err)
 	}
 	if err := json.Unmarshal(body, dst); err != nil {
-		c.appLog.Debug("GET", path, fmt.Sprintf("decode: %v", err))
+		c.appLog.Error("GET", path, fmt.Sprintf("decode: %v", err))
 		return fmt.Errorf("rci GET %s: decode: %w", path, err)
 	}
-	c.appLog.Debug("GET", path, fmt.Sprintf("200 in %dms", time.Since(start).Milliseconds()))
 	return nil
 }
 
