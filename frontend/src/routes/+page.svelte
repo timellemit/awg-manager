@@ -17,6 +17,8 @@
 	import { subscriptionsStore } from '$lib/stores/subscriptions';
 	import SubscriptionList from '$lib/components/subscriptions/SubscriptionList.svelte';
 	import SubscriptionCreateModal from '$lib/components/subscriptions/SubscriptionCreateModal.svelte';
+	import SubscriptionActiveCard from '$lib/components/subscriptions/SubscriptionActiveCard.svelte';
+	import type { Subscription, SubscriptionMember } from '$lib/types';
 
 	type TunnelTab = 'awg' | 'singbox' | 'subscriptions';
 
@@ -179,6 +181,16 @@
 
 	let subscriptionsList = $derived($subscriptionsStore.data ?? []);
 	let createModalOpen = $state(false);
+
+	const subscriptionsActiveCards = $derived(
+		($subscriptionsStore.data ?? [])
+			.filter((s) => s.enabled && s.activeMember)
+			.map((s) => {
+				const m = s.members?.find((mm) => mm.tag === s.activeMember);
+				return m ? { subscription: s, activeMember: m } : null;
+			})
+			.filter((x): x is { subscription: Subscription; activeMember: SubscriptionMember } => x !== null),
+	);
 
 	// Tabs
 	let activeTab = $state<TunnelTab>('awg');
@@ -579,6 +591,17 @@
 				<div class="tunnel-grid">
 					{#each singboxTunnelsList as tunnel (tunnel.tag)}
 						<SingboxTunnelCard {tunnel} />
+					{/each}
+				</div>
+			{/if}
+			{#if subscriptionsActiveCards.length > 0}
+				<h3 class="section-head">Подписки — активные ({subscriptionsActiveCards.length})</h3>
+				<div class="active-grid">
+					{#each subscriptionsActiveCards as card (card.subscription.id)}
+						<SubscriptionActiveCard
+							subscription={card.subscription}
+							activeMember={card.activeMember}
+						/>
 					{/each}
 				</div>
 			{/if}
@@ -994,5 +1017,18 @@
 		font-weight: 600;
 		color: var(--text-secondary);
 		margin-bottom: 1rem;
+	}
+
+	.section-head {
+		margin: 1.5rem 0 0.75rem;
+		font-size: 0.85rem;
+		text-transform: uppercase;
+		letter-spacing: 0.5px;
+		color: var(--color-text-muted);
+	}
+	.active-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+		gap: 0.75rem;
 	}
 </style>
