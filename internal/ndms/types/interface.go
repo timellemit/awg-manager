@@ -2,83 +2,11 @@ package types
 
 import "encoding/json"
 
-// --- From ndms/rci.go ---
-
-// InterfaceInfo represents a single interface from /show/interface/{name}.
-type InterfaceInfo struct {
-	State         string `json:"state"`
-	Link          string `json:"link"`
-	Connected     string `json:"connected"`
-	InterfaceName string `json:"interface-name"`
-	Type          string `json:"type"`
-	Description   string `json:"description"`
-	Address       string `json:"address"`
-	Mask          string `json:"mask"`
-	SecurityLevel string `json:"security-level"`
-	Priority      int    `json:"priority"`
-	Uptime        int    `json:"uptime"`
-	Summary       struct {
-		Layer struct {
-			Conf string `json:"conf"`
-			Link string `json:"link"`
-			IPv4 string `json:"ipv4"`
-			IPv6 string `json:"ipv6"`
-		} `json:"layer"`
-	} `json:"summary"`
-}
-
-// RouteEntry represents an element of /show/ip/route.
-type RouteEntry struct {
-	Destination string `json:"destination"`
-	Gateway     string `json:"gateway"`
-	Interface   string `json:"interface"`
-}
-
-// PingCheckListResponse represents /show/ping-check/ response.
-type PingCheckListResponse struct {
-	PingCheck []PingCheckProfile `json:"pingcheck"`
-}
-
-// PingCheckProfile is a single profile in the ping-check list.
-type PingCheckProfile struct {
-	Profile        string                          `json:"profile"`
-	Host           []string                        `json:"host"`
-	Mode           string                          `json:"mode"`
-	UpdateInterval int                             `json:"update-interval"`
-	MaxFails       int                             `json:"max-fails"`
-	MinSuccess     int                             `json:"min-success"`
-	Timeout        int                             `json:"timeout"`
-	Port           int                             `json:"port"`
-	Interface      map[string]PingCheckIfaceStatus `json:"interface"`
-}
-
-// PingCheckIfaceStatus represents a bound interface's check status.
-type PingCheckIfaceStatus struct {
-	SuccessCount int    `json:"successcount"`
-	FailCount    int    `json:"failcount"`
-	Status       string `json:"status"`
-}
-
-// VersionInfo holds /show/version response.
-type VersionInfo struct {
-	Release      string `json:"release"`
-	Title        string `json:"title"`
-	Arch         string `json:"arch"`
-	HwID         string `json:"hw_id"`
-	HwType       string `json:"hw_type"`
-	Model        string `json:"model"`
-	Device       string `json:"device"`
-	Manufacturer string `json:"manufacturer"`
-	Vendor       string `json:"vendor"`
-	Series       string `json:"series"`
-	NDW          struct {
-		Components string `json:"components"`
-	} `json:"ndw"`
-}
-
-// --- From nwg/rci.go ---
-
 // WGInterface represents a WireGuard interface from /show/interface/{name}.
+// Consumed by the NWG operator state parser and diagnostics collectors —
+// both need the combined interface state + first-peer fields in a single
+// HTTP roundtrip, which is why this raw shape is preserved instead of going
+// through the typed query layer (which would split into two RCI calls).
 type WGInterface struct {
 	ID          string          `json:"id"`
 	Type        string          `json:"type"`
@@ -90,13 +18,13 @@ type WGInterface struct {
 	Summary     WGSummary       `json:"summary"`
 }
 
-// WGSection holds WireGuard-specific data.
+// WGSection holds WireGuard-specific data nested under WGInterface.
 type WGSection struct {
 	Status string   `json:"status"`
 	Peer   []WGPeer `json:"peer"`
 }
 
-// WGPeer is a single WireGuard peer.
+// WGPeer is a single WireGuard peer entry under WGSection.
 type WGPeer struct {
 	Online        bool   `json:"online"`
 	LastHandshake int64  `json:"last-handshake"`
@@ -105,18 +33,13 @@ type WGPeer struct {
 	Via           string `json:"via"`
 }
 
-// WGSummary holds layer summary.
+// WGSummary holds the layer summary nested under WGInterface.
 type WGSummary struct {
 	Layer struct {
 		Conf string `json:"conf"`
 	} `json:"layer"`
 }
 
-// WGInterfaceInfo holds basic info about a Wireguard interface (name + description).
-type WGInterfaceInfo struct {
-	Name        string
-	Description string
-}
-
-// NeverHandshake is the sentinel value RCI uses when no handshake has occurred.
+// NeverHandshake is the sentinel value RCI returns when no handshake has
+// occurred yet on a peer.
 const NeverHandshake int64 = 2147483647
