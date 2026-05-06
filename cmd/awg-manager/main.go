@@ -162,16 +162,6 @@ func main() {
 		log,
 	)
 
-	// Load kernel module if available (before backend detection)
-	kmodLoader := kmod.New()
-
-	// Clean up old SoC-based module directories from previous IPK versions
-	kmodLoader.CleanupLegacyModules()
-	// EnsureModule: select bundled .ko if available → insmod
-	if err := kmodLoader.EnsureModule(context.Background()); err != nil {
-		log.Warn("Kernel module not available", map[string]interface{}{"error": err.Error()})
-	}
-
 	// Logging service (created early — injected into tunnel service, pingcheck, dnsroute, operator, state, firewall, nwg)
 	loggingService := logging.NewService(settingsStore)
 	defer loggingService.Stop()
@@ -198,8 +188,21 @@ func main() {
 		ndmsTimeout = 30 * time.Second // boot: wait for NDMS
 	}
 	// Wire ndmsinfo to the SystemInfoStore, then initialize with retry.
+	// MUST run before kmod.New(): the kmod loader reads model/SoC from
+	// ndmsinfo.Get() at construction time.
 	if err := ndmsinfo.Init(context.Background(), ndmsQueries.SystemInfo, ndmsTimeout); err != nil {
 		log.Warn("NDMS version info not available", map[string]interface{}{"error": err.Error()})
+	}
+
+	// Load kernel module if available (before backend detection).
+	// kmod.New() reads model/SoC from ndmsinfo, so it must run after Init above.
+	kmodLoader := kmod.New()
+
+	// Clean up old SoC-based module directories from previous IPK versions
+	kmodLoader.CleanupLegacyModules()
+	// EnsureModule: select bundled .ko if available → insmod
+	if err := kmodLoader.EnsureModule(context.Background()); err != nil {
+		log.Warn("Kernel module not available", map[string]interface{}{"error": err.Error()})
 	}
 
 	// Warm NDMS list caches before accepting clients so the first SSE snapshot
