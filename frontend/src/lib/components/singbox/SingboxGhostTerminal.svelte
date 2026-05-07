@@ -56,6 +56,7 @@
 		</span>
 	</div>
 
+	{#if singboxInstalled}
 	<div class="term-singbox">
 		<textarea
 			class="term-singbox-input"
@@ -93,6 +94,7 @@
 			{/if}
 		{/if}
 	</div>
+	{/if}
 </div>
 
 <style>
