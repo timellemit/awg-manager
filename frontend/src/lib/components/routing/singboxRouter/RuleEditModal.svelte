@@ -38,13 +38,21 @@
 	let busy = $state(false);
 	let error = $state('');
 
+	function parseLines(text: string): string[] {
+		return text.split('\n').map((s) => s.trim()).filter(Boolean);
+	}
+
+	const domainsCount = $derived(parseLines(domainSuffixStr).length);
+	const ipsCount = $derived(parseLines(ipCidrStr).length);
+	const sourceIPsCount = $derived(parseLines(sourceIpCidrStr).length);
+
 	async function save(): Promise<void> {
 		busy = true;
 		error = '';
 		try {
-			const domain_suffix = domainSuffixStr.split('\n').map((s) => s.trim()).filter(Boolean);
-			const ip_cidr = ipCidrStr.split('\n').map((s) => s.trim()).filter(Boolean);
-			const source_ip_cidr = sourceIpCidrStr.split('\n').map((s) => s.trim()).filter(Boolean);
+			const domain_suffix = parseLines(domainSuffixStr);
+			const ip_cidr = parseLines(ipCidrStr);
+			const source_ip_cidr = parseLines(sourceIpCidrStr);
 			const rule_set = ruleSetStr.split(',').map((s) => s.trim()).filter(Boolean);
 			const port = portStr
 				.split(',')
@@ -92,28 +100,58 @@
 		<div class="section-label">Matchers (минимум один)</div>
 
 		<label class="field">
-			<div class="lbl">Domain suffix</div>
-			<textarea bind:value={domainSuffixStr} rows="3" placeholder="по одному на строке, например youtube.com"></textarea>
+			<div class="field-head">
+				<span class="lbl">Domain suffix</span>
+				{#if domainsCount > 0}
+					<span class="count-chip">
+						{domainsCount}
+						{domainsCount === 1 ? 'домен' : domainsCount < 5 ? 'домена' : 'доменов'}
+					</span>
+				{/if}
+			</div>
+			<textarea bind:value={domainSuffixStr} rows="6" placeholder="по одному на строке, например youtube.com"></textarea>
 		</label>
 
 		<label class="field">
-			<div class="lbl">IP CIDR</div>
-			<textarea bind:value={ipCidrStr} rows="2" placeholder="142.250.0.0/15"></textarea>
+			<div class="field-head">
+				<span class="lbl">IP CIDR</span>
+				{#if ipsCount > 0}
+					<span class="count-chip">
+						{ipsCount}
+						{ipsCount === 1 ? 'подсеть' : ipsCount < 5 ? 'подсети' : 'подсетей'}
+					</span>
+				{/if}
+			</div>
+			<textarea bind:value={ipCidrStr} rows="6" placeholder="142.250.0.0/15"></textarea>
 		</label>
 
 		<label class="field">
-			<div class="lbl">Source IP CIDR</div>
-			<textarea bind:value={sourceIpCidrStr} rows="2" placeholder="192.168.1.50"></textarea>
+			<div class="field-head">
+				<span class="lbl">Source IP CIDR</span>
+				{#if sourceIPsCount > 0}
+					<span class="count-chip">
+						{sourceIPsCount}
+						{sourceIPsCount === 1 ? 'источник' : sourceIPsCount < 5 ? 'источника' : 'источников'}
+					</span>
+				{/if}
+			</div>
+			<textarea bind:value={sourceIpCidrStr} rows="6" placeholder="192.168.1.50"></textarea>
 		</label>
 
 		<label class="field">
 			<div class="lbl">Rule sets (через запятую)</div>
 			<input bind:value={ruleSetStr} placeholder="geosite-youtube, geoip-ru" />
+			<div class="hint">
+				Имена уже существующих наборов. Для своих доменов и подсетей используйте поля выше.
+			</div>
 		</label>
 
 		<label class="field">
 			<div class="lbl">Порты (через запятую)</div>
 			<input bind:value={portStr} placeholder="443, 80" />
+			<div class="hint">
+				Необязательно. Дополнительно ограничивает правило конкретными портами.
+			</div>
 		</label>
 
 		<div class="action-section">
@@ -160,6 +198,27 @@
 	.lbl {
 		font-size: 0.75rem;
 		color: var(--muted-text);
+	}
+	.field-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+	}
+	.count-chip {
+		font-size: 0.7rem;
+		color: var(--muted-text);
+		padding: 0.1rem 0.45rem;
+		border: 1px solid var(--border);
+		border-radius: 999px;
+		font-family: ui-monospace, monospace;
+		white-space: nowrap;
+	}
+	.hint {
+		font-size: 0.72rem;
+		color: var(--muted-text);
+		line-height: 1.4;
+		margin-top: 0.15rem;
 	}
 	.field textarea,
 	.field input {
