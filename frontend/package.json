@@ -12,7 +12,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-    "gen:icons": "node scripts/generate-tabler-icons.mjs"
+    "gen:icons": "node scripts/generate-tabler-icons.mjs",
+    "gen:qure-icons": "node scripts/generate-qure-icons.mjs"
   },
   "devDependencies": {
     "@fontsource/ibm-plex-mono": "^5.2.7",

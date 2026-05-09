@@ -261,6 +261,8 @@ export interface DnsRoute {
 	 * Absent for existing-policy and interface-mode flows.
 	 */
 	hrPolicyInterfaces?: string[];
+	/** Optional URL for a custom icon (e.g. Qure CDN PNG or user-supplied URL). */
+	iconUrl?: string;
 }
 
 export interface StaticRouteList {
@@ -272,6 +274,8 @@ export interface StaticRouteList {
 	enabled: boolean;
 	createdAt: string;
 	updatedAt: string;
+	/** Optional URL for a custom icon (e.g. Qure CDN PNG or user-supplied URL). */
+	iconUrl?: string;
 }
 
 export interface RoutingTunnel {

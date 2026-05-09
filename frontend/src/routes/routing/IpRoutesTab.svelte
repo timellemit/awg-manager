@@ -3,6 +3,7 @@
     import type { StaticRouteList, RoutingTunnel } from '$lib/types';
     import { Modal, StoreStatusBadge, Button, Dropdown, type DropdownOption } from '$lib/components/ui';
     import { IpRouteCard, IpRouteEditModal, IpRouteImportModal } from '$lib/components/routing';
+    import { IconPickerModal } from '$lib/components/dnsroutes';
     import { exportStaticRoutes, type PortableStaticRoute } from '$lib/utils/staticroute-export';
     import { downloadJson } from '$lib/utils/dns-export';
     import { notifications } from '$lib/stores/notifications';
@@ -43,6 +44,8 @@
     let ipToggling = $state<string | null>(null);
     let ipSaving = $state(false);
     let ipCreateOpen = $state(false);
+    let iconPickerOpen = $state(false);
+    let pickingForRoute = $state<StaticRouteList | null>(null);
 
     // Orphan = list whose tunnel was deleted (TunnelID=""). Kept in storage
     // so the user can reassign it via the Edit dialog instead of rebuilding
@@ -51,7 +54,7 @@
     let boundRoutes = $derived(ipRoutes.filter(r => r.tunnelID));
     let ipActiveCount = $derived(boundRoutes.filter(r => r.enabled).length);
 
-    async function saveIpRoute(data: { name: string; tunnelID: string; subnets: string[]; fallback: '' | 'reject' }) {
+    async function saveIpRoute(data: { name: string; tunnelID: string; subnets: string[]; fallback: '' | 'reject'; iconUrl?: string }) {
         ipSaving = true;
         try {
             if (editingIpRoute) {
@@ -61,6 +64,7 @@
                     tunnelID: data.tunnelID,
                     subnets: data.subnets,
                     fallback: data.fallback,
+                    iconUrl: data.iconUrl,
                 });
                 notifications.success('IP-маршрут обновлён');
             } else {
@@ -69,6 +73,7 @@
                     tunnelID: data.tunnelID,
                     subnets: data.subnets,
                     fallback: data.fallback,
+                    iconUrl: data.iconUrl,
                     enabled: true,
                 });
                 notifications.success('IP-маршрут создан');
@@ -276,6 +281,7 @@
                         selectable={ipSelectionMode}
                         selected={ipSelected.has(route.id)}
                         onselect={() => toggleIpSelect(route.id)}
+                        onicon={() => { pickingForRoute = route; iconPickerOpen = true; }}
                     />
                 {/each}
             </div>
@@ -295,6 +301,7 @@
                     selectable={ipSelectionMode}
                     selected={ipSelected.has(route.id)}
                     onselect={() => toggleIpSelect(route.id)}
+                    onicon={() => { pickingForRoute = route; iconPickerOpen = true; }}
                 />
             {/each}
         </div>
@@ -337,6 +344,27 @@
             <Button variant="danger" onclick={bulkIpDelete}>Удалить</Button>
         {/snippet}
     </Modal>
+{/if}
+
+{#if pickingForRoute}
+    <IconPickerModal
+        open={iconPickerOpen}
+        iconUrl={pickingForRoute.iconUrl}
+        ruleName={pickingForRoute.name}
+        onclose={() => { iconPickerOpen = false; pickingForRoute = null; }}
+        onapply={async (newUrl) => {
+            if (!pickingForRoute) return;
+            const route = pickingForRoute;
+            iconPickerOpen = false;
+            pickingForRoute = null;
+            try {
+                await api.updateStaticRoute({ ...route, iconUrl: newUrl ?? undefined });
+                notifications.success(newUrl ? 'Иконка изменена' : 'Иконка сброшена');
+            } catch (e: any) {
+                notifications.error(e?.message || 'Не удалось обновить иконку');
+            }
+        }}
+    />
 {/if}
 
 <style>

@@ -4,7 +4,7 @@
     import type { DnsRoute, RoutingTunnel } from '$lib/types';
     import type { ServicePreset } from '$lib/data/presets';
     import { Modal, StoreStatusBadge, Button, Dropdown, type DropdownOption } from '$lib/components/ui';
-    import { DnsRouteCard, DnsRouteEditModal, DnsRouteImportModal, DnsRoutePresetModal } from '$lib/components/dnsroutes';
+    import { DnsRouteCard, DnsRouteEditModal, DnsRouteImportModal, DnsRoutePresetModal, IconPickerModal } from '$lib/components/dnsroutes';
     import { exportRoutes, downloadJson } from '$lib/utils/dns-export';
     import { notifications } from '$lib/stores/notifications';
     import { dnsRoutesStore } from '$lib/stores/routing';
@@ -51,6 +51,8 @@
     let dnsSaving = $state(false);
     let dnsModalOpen = $state(false);
     let addMenuOpen = $state(false);
+    let iconPickerOpen = $state(false);
+    let pickingForRoute = $state<DnsRoute | null>(null);
 
     function handleClickOutside() { addMenuOpen = false; }
     onMount(() => document.addEventListener('click', handleClickOutside));
@@ -409,6 +411,7 @@
                         selectable={dnsSelectionMode}
                         selected={dnsSelected.has(route.id)}
                         onselect={() => toggleDnsSelect(route.id)}
+                        onicon={() => { pickingForRoute = route; iconPickerOpen = true; }}
                     />
                 {/each}
             </div>
@@ -429,6 +432,7 @@
                     selectable={dnsSelectionMode}
                     selected={dnsSelected.has(route.id)}
                     onselect={() => toggleDnsSelect(route.id)}
+                    onicon={() => { pickingForRoute = route; iconPickerOpen = true; }}
                 />
             {/each}
         </div>
@@ -483,6 +487,27 @@
             <Button variant="danger" onclick={bulkDnsDelete}>Удалить</Button>
         {/snippet}
     </Modal>
+{/if}
+
+{#if pickingForRoute}
+    <IconPickerModal
+        open={iconPickerOpen}
+        iconUrl={pickingForRoute.iconUrl}
+        ruleName={pickingForRoute.name}
+        onclose={() => { iconPickerOpen = false; pickingForRoute = null; }}
+        onapply={async (newUrl) => {
+            if (!pickingForRoute) return;
+            const route = pickingForRoute;
+            iconPickerOpen = false;
+            pickingForRoute = null;
+            try {
+                await api.updateDnsRoute(route.id, { ...route, iconUrl: newUrl ?? undefined });
+                notifications.success(newUrl ? 'Иконка изменена' : 'Иконка сброшена');
+            } catch (e: any) {
+                notifications.error(e?.message || 'Не удалось обновить иконку');
+            }
+        }}
+    />
 {/if}
 {/if}
 

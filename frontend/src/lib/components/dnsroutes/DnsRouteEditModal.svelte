@@ -3,6 +3,8 @@
 	import { Modal, Button, Dropdown, type DropdownOption } from '$lib/components/ui';
 	import { formatRelativeTime } from '$lib/utils/format';
 	import DnsRouteDomainEditor from './DnsRouteDomainEditor.svelte';
+	import ServiceIcon from './ServiceIcon.svelte';
+	import IconPickerModal from './IconPickerModal.svelte';
 
 	interface Props {
 		open: boolean;
@@ -20,6 +22,8 @@
 
 	// Form state
 	let name = $state('');
+	let iconUrl = $state<string | undefined>(undefined);
+	let iconPickerOpen = $state(false);
 	let manualDomains = $state<string[]>([]);
 	let subscriptions = $state<DnsRouteSubscription[]>([]);
 	let routes = $state<DnsRouteTarget[]>([]);
@@ -62,6 +66,7 @@
 					hrPolicyName = route.hrPolicyName || '';
 					excludesText = (route.excludes ?? []).join('\n');
 					hrInterfaceId = (isHR && route.routes?.[0]?.tunnelId) || tunnels[0]?.id || '';
+					iconUrl = route.iconUrl;
 				} else {
 					name = '';
 					manualDomains = [];
@@ -72,6 +77,7 @@
 					hrPolicyName = '';
 					excludesText = '';
 					hrInterfaceId = tunnels[0]?.id || '';
+					iconUrl = undefined;
 				}
 				newSubUrl = '';
 				newRouteTunnelId = '';
@@ -203,6 +209,7 @@
 			excludes: isNDMS ? parsedExcludes : undefined,
 			hrRouteMode: isHR ? hrRouteMode : undefined,
 			hrPolicyName: isPolicyMode ? (hrPolicyName || `AWG_${name.trim().replace(/\s+/g, '_')}`) : undefined,
+			iconUrl: iconUrl || undefined,
 		};
 		onsave(data);
 	}
@@ -228,6 +235,29 @@
 			oninput={(e) => { name = (e.target as HTMLInputElement).value; }}
 		/>
 		<div class="error-text" class:visible={nameError}>Введите название</div>
+	</div>
+
+	<!-- Icon -->
+	<div class="form-group">
+		<!-- svelte-ignore a11y_label_has_associated_control -->
+		<label class="field-label">Иконка</label>
+		<div class="icon-row">
+			<ServiceIcon {iconUrl} name={name || 'rule'} size={36} />
+			<div class="icon-meta">
+				{#if iconUrl}
+					<div class="icon-src">Кастомная иконка</div>
+					<div class="icon-hint" title={iconUrl}>{iconUrl}</div>
+				{:else}
+					<div class="icon-src">Авто-определение по имени</div>
+					<div class="icon-hint">
+						{name ? `Подбирается по «${name}»` : 'Введите имя — иконка подберётся автоматически'}
+					</div>
+				{/if}
+			</div>
+			<Button variant="ghost" size="sm" onclick={() => (iconPickerOpen = true)}>
+				{iconUrl ? 'Сменить' : 'Выбрать'}
+			</Button>
+		</div>
 	</div>
 
 	<!-- Backend selector -->
@@ -458,6 +488,17 @@
 		</Button>
 	{/snippet}
 </Modal>
+
+<IconPickerModal
+	open={iconPickerOpen}
+	{iconUrl}
+	ruleName={name}
+	onclose={() => (iconPickerOpen = false)}
+	onapply={(newUrl) => {
+		iconUrl = newUrl ?? undefined;
+		iconPickerOpen = false;
+	}}
+/>
 
 <style>
 	.form-group {
@@ -817,4 +858,5 @@
 		outline: none;
 		border-color: var(--color-accent);
 	}
+
 </style>
