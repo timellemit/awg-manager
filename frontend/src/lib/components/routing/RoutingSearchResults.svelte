@@ -31,7 +31,7 @@
             <div class="results-group-title">DNS-правила</div>
             {#each dnsResults as rule}
                 <button class="result-card" onclick={() => onRuleClick?.(rule.id, rule.type)}>
-                    <ServiceIcon name={rule.name} size={32} />
+                    <ServiceIcon name={rule.name} iconUrl={rule.iconUrl} size={32} />
                     <div class="result-body">
                         <div class="result-title">
                             <span class="result-led" class:led-on={rule.enabled} class:led-off={!rule.enabled}></span>
@@ -116,7 +116,7 @@
                 {#each resolveMatch.rules as rule}
                     <button class="result-card" onclick={() => onRuleClick?.(rule.id, rule.type)}>
                         {#if rule.type === 'dns'}
-                            <ServiceIcon name={rule.name} size={32} />
+                            <ServiceIcon name={rule.name} iconUrl={rule.iconUrl} size={32} />
                         {:else}
                             <div class="result-icon-box result-icon-ip">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
