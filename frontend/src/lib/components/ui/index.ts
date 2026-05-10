@@ -22,6 +22,7 @@ export { default as LegacyTabs } from './LegacyTabs.svelte';
 export { default as LegacyTab } from './LegacyTab.svelte';
 export { default as Input } from './Input.svelte';
 export type { InputType, InputAutocomplete } from './Input.svelte';
+export { default as ChipMultiSelect, type ChipOption } from './ChipMultiSelect.svelte';
 export { default as Dropdown } from './Dropdown.svelte';
 export type { DropdownOption } from './Dropdown.svelte';
 export { default as SideDrawer } from './SideDrawer.svelte';
