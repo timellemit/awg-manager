@@ -1,4 +1,7 @@
 <script lang="ts">
+    import { goto } from '$app/navigation';
+    import { page } from '$app/stores';
+
     interface Tab {
         id: string;
         label: string;
@@ -17,14 +20,61 @@
         tabs: Tab[];
         active: string;
         onchange: (id: string) => void;
+        /**
+         * When set, syncs the active tab with this URL query param. The
+         * primitive reads it on mount / on history navigation, and writes
+         * to it on user clicks via goto({ replaceState: true }). Other
+         * search params are preserved.
+         */
+        urlParam?: string;
+        /**
+         * Tab id treated as the page default. When the active tab equals
+         * this value, the URL param is removed (clean URL). Defaults to
+         * tabs[0]?.id.
+         */
+        defaultTab?: string;
     }
 
-    let { tabs, active, onchange }: Props = $props();
+    let { tabs, active, onchange, urlParam, defaultTab }: Props = $props();
 
     let containerEl: HTMLDivElement | undefined = $state();
     let measureEl: HTMLDivElement | undefined = $state();
     let visibleCount = $state(Infinity);
     let dropdownOpen = $state(false);
+
+    function writeUrl(id: string) {
+        if (!urlParam) return;
+        const url = new URL($page.url);
+        const fallback = defaultTab ?? tabs[0]?.id;
+        if (id === fallback) {
+            url.searchParams.delete(urlParam);
+        } else {
+            url.searchParams.set(urlParam, id);
+        }
+        const target = url.pathname + (url.searchParams.toString() ? `?${url.searchParams}` : '') + url.hash;
+        if (target === $page.url.pathname + $page.url.search + $page.url.hash) return;
+        void goto(target, { replaceState: true, keepFocus: true, noScroll: true });
+    }
+
+    // Inbound sync: URL → onchange. Triggers on mount, browser back/forward,
+    // and any external goto() touching this query param. Silently ignores
+    // values that don't match a known tab id.
+    $effect(() => {
+        if (!urlParam) return;
+        const fromUrl = $page.url.searchParams.get(urlParam);
+        if (fromUrl == null) return;
+        if (fromUrl === active) return;
+        if (!tabs.find((t) => t.id === fromUrl)) return;
+        onchange(fromUrl);
+    });
+
+    // Outbound sync: active prop → URL. Catches programmatic changes
+    // (e.g. parent bouncing off a hidden tab). No-op when URL already
+    // matches via writeUrl's own guard.
+    $effect(() => {
+        if (!urlParam) return;
+        writeUrl(active);
+    });
 
     let visibleTabs = $derived(tabs.slice(0, visibleCount));
     let overflowTabs = $derived(tabs.slice(visibleCount));
