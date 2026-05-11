@@ -10,7 +10,16 @@
 	let loading = $state(true);
 	let snapshotTaken = $state(false);
 
-	const policyName = $derived($wizardState.resolvedPolicyName);
+	// In 'existing' mode, the chosen policy's NDMS internal name is known
+	// immediately (user picked it on StepPolicy). In 'create' mode, the policy
+	// doesn't exist until Phase 1 of apply — resolvedPolicyName stays null
+	// during navigation, which correctly leaves StepDevices showing only
+	// unassigned devices (nothing to pre-check yet).
+	const policyName = $derived(
+		$wizardState.policyMode === 'existing'
+			? $wizardState.existingPolicyName
+			: $wizardState.resolvedPolicyName,
+	);
 	const policyMode = $derived($wizardState.policyMode);
 	const selectedMacs = $derived($wizardState.deviceMacs);
 
@@ -68,8 +77,13 @@
 
 <div class="title">Какие устройства пустить через мастер?</div>
 <div class="hint">
-	Создаётся access policy <b>{policyName ?? '...'}</b>. Показаны только устройства,
-	не привязанные к другой policy.
+	{#if $wizardState.policyMode === 'existing'}
+		Используется access policy <b>{policyName ?? '...'}</b>. Показаны только устройства,
+		не привязанные к другой policy.
+	{:else}
+		Создаётся access policy <b>{policyName ?? '...'}</b>. Показаны только устройства,
+		не привязанные к другой policy.
+	{/if}
 </div>
 
 {#if loading}
