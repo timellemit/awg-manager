@@ -43,3 +43,21 @@ X-Device-Locale: ru
 X-Ver-OS: 26.4
 X-App-Version: 4.6.0
 X-Device-Model: iPhone 17 Pro Max`;
+
+// ALL_HEADERS_PRESET is a fill-me-in scaffold for niche providers whose
+// expected headers don't match the named presets. Lines with empty values
+// are silently dropped by parseHeadersText, so the user can ignore rows
+// that don't apply. The set mirrors the "Часто требуются провайдерами"
+// help block in HeadersTextarea.svelte — keep the two in sync if either
+// list is edited.
+export const ALL_HEADERS_PRESET = `# Заполните только нужные строки. Пустые игнорируются при сохранении.
+User-Agent:
+Accept-Encoding:
+X-HWID:
+X-Device-OS:
+X-Device-Locale:
+X-Device-Model:
+X-Ver-OS:
+X-App-Version:
+X-Real-IP:
+X-Forwarded-For:`;

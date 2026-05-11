@@ -4,10 +4,13 @@
 	import type { SingboxRouterOutbound } from '$lib/types';
 	import type { OutboundGroup } from './outboundOptions';
 
-	const STRATEGY_OPTIONS: DropdownOption[] = [
-		{ value: 'round_robin', label: 'round_robin' },
-		{ value: 'consistent_hashing', label: 'consistent_hashing' },
-	];
+	// Only urltest and selector are offered for new groups — `loadbalance`
+	// was removed in sing-box 1.13+ and FATALs on startup if present. The
+	// list view still tolerates legacy loadbalance entries that may exist
+	// in older 20-router.json files (CompositeOutboundsList renders them
+	// read-only). When the user edits such an entry through this modal,
+	// the type narrows to urltest on open — that's a deliberate one-way
+	// migration, not an accidental data loss.
 
 	interface Props {
 		outbound?: SingboxRouterOutbound;
@@ -18,8 +21,8 @@
 	let { outbound, outboundOptions, onClose, onSave }: Props = $props();
 
 	// svelte-ignore state_referenced_locally
-	let type: 'urltest' | 'selector' | 'loadbalance' = $state(
-		(outbound?.type as 'urltest' | 'selector' | 'loadbalance') ?? 'urltest'
+	let type: 'urltest' | 'selector' = $state(
+		outbound?.type === 'selector' ? 'selector' : 'urltest'
 	);
 	// svelte-ignore state_referenced_locally
 	let tag = $state(outbound?.tag ?? '');
@@ -33,8 +36,6 @@
 	let tolerance = $state(outbound?.tolerance ?? 50);
 	// svelte-ignore state_referenced_locally
 	let defaultOutbound = $state(outbound?.default ?? '');
-	// svelte-ignore state_referenced_locally
-	let strategy = $state(outbound?.strategy ?? 'round_robin');
 
 	let busy = $state(false);
 	let error = $state('');
@@ -92,10 +93,8 @@
 				built.url = url;
 				built.interval = interval;
 				built.tolerance = tolerance;
-			} else if (type === 'selector') {
+			} else {
 				built.default = defaultOutbound || members[0];
-			} else if (type === 'loadbalance') {
-				built.strategy = strategy;
 			}
 
 			await onSave(built);
@@ -106,11 +105,11 @@
 		}
 	}
 
-	const typeDescription = $derived.by(() => {
-		if (type === 'urltest') return 'Периодически пингует каждого члена и автоматически направляет через самого быстрого.';
-		if (type === 'selector') return 'Ручное переключение через Clash API. Новые подключения идут через выбранный default.';
-		return 'Равномерно распределяет нагрузку между членами по выбранной стратегии.';
-	});
+	const typeDescription = $derived(
+		type === 'urltest'
+			? 'Периодически пингует каждого члена и автоматически направляет через самого быстрого.'
+			: 'Ручное переключение через Clash API. Новые подключения идут через выбранный default.'
+	);
 </script>
 
 <Modal open onclose={onClose} title={outbound ? 'Редактировать outbound' : 'Новый outbound'}>
@@ -119,7 +118,6 @@
 		<div class="segment">
 			<button class:active={type === 'urltest'} onclick={() => (type = 'urltest')} type="button">URLTest</button>
 			<button class:active={type === 'selector'} onclick={() => (type = 'selector')} type="button">Selector</button>
-			<button class:active={type === 'loadbalance'} onclick={() => (type = 'loadbalance')} type="button">LoadBalance</button>
 		</div>
 		<div class="type-hint">{typeDescription}</div>
 
@@ -177,7 +175,7 @@
 					<input type="number" bind:value={tolerance} />
 				</label>
 			</div>
-		{:else if type === 'selector'}
+		{:else}
 			<div class="field">
 				<div class="lbl">Default (один из members)</div>
 				<Dropdown
@@ -187,11 +185,6 @@
 					disabled={members.length === 0}
 					fullWidth
 				/>
-			</div>
-		{:else}
-			<div class="field">
-				<div class="lbl">Strategy</div>
-				<Dropdown bind:value={strategy} options={STRATEGY_OPTIONS} fullWidth />
 			</div>
 		{/if}
 
