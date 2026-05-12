@@ -165,6 +165,7 @@ func NewOperator(d OperatorDeps) *Operator {
 	ensureBaseConfig(configPath)
 	ensureLegacyConfigMigrated(dir)
 	patchTunnelsSlotStripBaseDNS(filepath.Join(configPath, "10-tunnels.json"))
+	stripStrayDirectPlaceholder(configPath)
 
 	op := &Operator{
 		log:           log,
@@ -639,6 +640,59 @@ func patchBaseDirectOutbound(basePath string) {
 	}
 	m["outbounds"] = append(obs, map[string]any{"type": "direct", "tag": "direct"})
 	_ = writeJSONFile(basePath, m)
+}
+
+// stripStrayDirectPlaceholder removes the canonical
+// {type:"direct", tag:"direct"} placeholder from every slot file in
+// configDir EXCEPT 00-base.json. Sing-box rejects the merged config
+// with "duplicate outbound/endpoint tag: direct" when the placeholder
+// appears in more than one slot — the typical cause is a v2.8.x
+// single-file config.json that migrated to 10-tunnels.json before
+// commit 1186280b (2026-05-03) wired filterOutDirectPlaceholder into
+// the migration path. patchBaseDirectOutbound then injects the
+// placeholder into 00-base.json as well, creating the collision.
+//
+// User-customised direct outbounds that DO have additional fields
+// (e.g. bind_interface) are also dropped — same semantics as
+// filterOutDirectPlaceholder, used during the legacy migration. The
+// canonical placeholder is owned by 00-base.json; if a user needs a
+// per-WAN direct outbound, they should give it a distinct tag.
+//
+// Subdirectories (disabled/, pending/) are skipped — sing-box does not
+// merge them. Idempotent: a clean slot tree is a no-op.
+func stripStrayDirectPlaceholder(configDir string) {
+	entries, err := os.ReadDir(configDir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if name == "00-base.json" || filepath.Ext(name) != ".json" {
+			continue
+		}
+		slotPath := filepath.Join(configDir, name)
+		data, err := os.ReadFile(slotPath)
+		if err != nil {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal(data, &m); err != nil {
+			continue
+		}
+		before, _ := m["outbounds"].([]any)
+		if len(before) == 0 {
+			continue
+		}
+		after := filterOutDirectPlaceholder(before)
+		if len(after) == len(before) {
+			continue
+		}
+		m["outbounds"] = after
+		_ = writeJSONFile(slotPath, m)
+	}
 }
 
 // legacyCacheFilePath is the hardcoded path some older sing-box docs/configs

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/hoaxisr/awg-manager/internal/logging"
 )
@@ -835,6 +836,124 @@ func TestEnsureBaseConfig_AppendsDirectAlongsideOtherOutbounds(t *testing.T) {
 	}
 	if !tags["sub-x"] || !tags["direct"] {
 		t.Errorf("missing required tags, got %v", tags)
+	}
+}
+
+// Production regression (sing-box 1.14.0-alpha.21):
+// "duplicate outbound/endpoint tag: direct" reported by two users on
+// 2.9.17.x. A v2.8.x config.json migrated into 10-tunnels.json *before*
+// commit 1186280b added filterOutDirectPlaceholder to the migration
+// path. patchBaseDirectOutbound then also injects "direct" into
+// 00-base.json, producing the collision sing-box rejects.
+// stripStrayDirectPlaceholder repairs the install on next boot by
+// removing the canonical placeholder from every slot file EXCEPT
+// 00-base.json.
+func TestStripStrayDirectPlaceholder_RemovesDuplicateFromTunnelsSlot(t *testing.T) {
+	configDir := t.TempDir()
+	// 00-base.json — canonical direct stays.
+	base := `{"outbounds":[{"type":"direct","tag":"direct"}]}`
+	if err := os.WriteFile(filepath.Join(configDir, "00-base.json"), []byte(base), 0644); err != nil {
+		t.Fatal(err)
+	}
+	// 10-tunnels.json — legacy v2.8.x placeholder alongside a real tunnel.
+	tunnels := `{"outbounds":[
+		{"type":"direct","tag":"direct"},
+		{"type":"vless","tag":"my-tunnel","server":"h.example","server_port":443,"uuid":"u"}
+	]}`
+	if err := os.WriteFile(filepath.Join(configDir, "10-tunnels.json"), []byte(tunnels), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	stripStrayDirectPlaceholder(configDir)
+
+	// 00-base.json untouched.
+	raw, _ := os.ReadFile(filepath.Join(configDir, "00-base.json"))
+	var m map[string]any
+	_ = json.Unmarshal(raw, &m)
+	if obs := m["outbounds"].([]any); len(obs) != 1 || obs[0].(map[string]any)["tag"] != "direct" {
+		t.Errorf("00-base.json must be untouched: %s", raw)
+	}
+
+	// 10-tunnels.json — placeholder dropped, real tunnel preserved.
+	raw, _ = os.ReadFile(filepath.Join(configDir, "10-tunnels.json"))
+	_ = json.Unmarshal(raw, &m)
+	obs := m["outbounds"].([]any)
+	if len(obs) != 1 {
+		t.Fatalf("10-tunnels.json: want 1 outbound (placeholder dropped), got %d: %s", len(obs), raw)
+	}
+	if tag := obs[0].(map[string]any)["tag"].(string); tag != "my-tunnel" {
+		t.Errorf("10-tunnels.json: surviving outbound must be the real tunnel, got tag=%q", tag)
+	}
+}
+
+// stripStrayDirectPlaceholder must not touch direct outbounds with
+// non-placeholder tags (e.g. awg-tunnel-foo with bind_interface) —
+// those are 15-awg.json's legitimate per-WAN direct outbounds and
+// they don't collide with 00-base.json's canonical "direct".
+func TestStripStrayDirectPlaceholder_PreservesNonPlaceholderDirect(t *testing.T) {
+	configDir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(configDir, "00-base.json"),
+		[]byte(`{"outbounds":[{"type":"direct","tag":"direct"}]}`), 0644)
+	awg := `{"outbounds":[{"type":"direct","tag":"awg-tunnel-a","bind_interface":"t2s0"}]}`
+	_ = os.WriteFile(filepath.Join(configDir, "15-awg.json"), []byte(awg), 0644)
+
+	stripStrayDirectPlaceholder(configDir)
+
+	raw, _ := os.ReadFile(filepath.Join(configDir, "15-awg.json"))
+	var m map[string]any
+	_ = json.Unmarshal(raw, &m)
+	obs := m["outbounds"].([]any)
+	if len(obs) != 1 {
+		t.Fatalf("15-awg.json: want 1 outbound (non-placeholder direct preserved), got %d", len(obs))
+	}
+	if tag := obs[0].(map[string]any)["tag"].(string); tag != "awg-tunnel-a" {
+		t.Errorf("15-awg.json: per-WAN direct outbound must survive, got tag=%q", tag)
+	}
+}
+
+// No-op on clean tree: every slot file unchanged.
+func TestStripStrayDirectPlaceholder_NoOpWhenCleanTree(t *testing.T) {
+	configDir := t.TempDir()
+	files := map[string]string{
+		"00-base.json":          `{"outbounds":[{"type":"direct","tag":"direct"}]}`,
+		"10-tunnels.json":       `{"outbounds":[{"type":"vless","tag":"x","server":"h","server_port":443,"uuid":"u"}]}`,
+		"15-awg.json":           `{"outbounds":[{"type":"direct","tag":"awg-x","bind_interface":"t2s0"}]}`,
+		"40-subscriptions.json": `{"outbounds":[{"type":"selector","tag":"sub","outbounds":["sub-x"]}]}`,
+	}
+	mtimes := map[string]int64{}
+	for name, body := range files {
+		p := filepath.Join(configDir, name)
+		_ = os.WriteFile(p, []byte(body), 0644)
+		st, _ := os.Stat(p)
+		mtimes[name] = st.ModTime().UnixNano()
+	}
+
+	// Sleep 10ms so a rewrite would be observable in mtime nanos.
+	time.Sleep(10 * time.Millisecond)
+	stripStrayDirectPlaceholder(configDir)
+
+	for name := range files {
+		st, _ := os.Stat(filepath.Join(configDir, name))
+		if st.ModTime().UnixNano() != mtimes[name] {
+			t.Errorf("%s rewritten despite clean tree", name)
+		}
+	}
+}
+
+// Subdirectories (disabled/, pending/) must be skipped — sing-box does
+// not merge them, so a stray placeholder there is harmless.
+func TestStripStrayDirectPlaceholder_SkipsSubdirectories(t *testing.T) {
+	configDir := t.TempDir()
+	sub := filepath.Join(configDir, "disabled")
+	_ = os.MkdirAll(sub, 0755)
+	staleInDisabled := `{"outbounds":[{"type":"direct","tag":"direct"}]}`
+	_ = os.WriteFile(filepath.Join(sub, "98-old.json"), []byte(staleInDisabled), 0644)
+
+	stripStrayDirectPlaceholder(configDir)
+
+	raw, _ := os.ReadFile(filepath.Join(sub, "98-old.json"))
+	if string(raw) != staleInDisabled {
+		t.Errorf("disabled/ subdir must be untouched, got: %s", raw)
 	}
 }
 
