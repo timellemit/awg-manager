@@ -50,16 +50,6 @@ jobs:
           go install golang.org/dl/go1.23.12@latest
           go1.23.12 download
 
-      - name: Cache Chromium toolchain
-        uses: actions/cache@v4
-        with:
-          key: chromium-toolchain-singbox-${{ hashFiles('internal/singbox/installer/embedded.go') }}
-          path: |
-            ~/cronet-go/naiveproxy/src/third_party/llvm-build/
-            ~/cronet-go/naiveproxy/src/gn/out/
-            ~/cronet-go/naiveproxy/src/chrome/build/pgo_profiles/
-            ~/cronet-go/naiveproxy/src/out/sysroot-build/
-
       - name: Build
         id: build
         run: |
