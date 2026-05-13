@@ -101,6 +101,62 @@ func (a *SingboxAdapter) ApplyDeviceProxyNoReload(ctx context.Context, spec Exte
 	return a.op.ApplyConfigNoReload(ctx, cfg)
 }
 
+// ApplyDeviceProxyInstances persists multiple device-proxy instances via
+// the orchestrator (production) or falls back to the legacy embedded-in-tunnels path.
+func (a *SingboxAdapter) ApplyDeviceProxyInstances(ctx context.Context, specs []ExternalInstanceSpec) error {
+	if a.orch != nil {
+		sbSpecs := make([]singbox.DeviceProxyInstanceSpec, 0, len(specs))
+		for _, spec := range specs {
+			sbSpecs = append(sbSpecs, toSingboxInstanceSpec(spec))
+		}
+
+		data, err := singbox.BuildDeviceProxyInstancesConfig(sbSpecs)
+		if err != nil {
+			return fmt.Errorf("build deviceproxy instances config: %w", err)
+		}
+
+		if err := a.orch.Save(orchestrator.SlotDeviceProxy, data); err != nil {
+			return err
+		}
+
+		enabled := false
+		for _, spec := range specs {
+			if spec.Enabled {
+				enabled = true
+				break
+			}
+		}
+
+		if err := a.orch.SetEnabled(orchestrator.SlotDeviceProxy, enabled); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	if len(specs) == 0 {
+		cfg, err := a.op.LoadCurrentConfig()
+		if err != nil {
+			return err
+		}
+		cfg.RemoveAllDeviceProxyInstances()
+		return a.op.ApplyConfig(ctx, cfg)
+	}
+
+	cfg, err := a.op.LoadCurrentConfig()
+	if err != nil {
+		return err
+	}
+	cfg.RemoveAllDeviceProxyInstances()
+
+	for _, spec := range specs {
+		if err := cfg.EnsureDeviceProxyInstance(toSingboxInstanceSpec(spec)); err != nil {
+			return err
+		}
+	}
+
+	return a.op.ApplyConfig(ctx, cfg)
+}
+
 // GetSelectorActive returns the currently-active member of the named
 // selector. Thin pass-through — see singbox.Operator for the contract.
 func (a *SingboxAdapter) GetSelectorActive(ctx context.Context, selectorTag string) (string, error) {
@@ -123,6 +179,25 @@ func (a *SingboxAdapter) TunnelTags() []string {
 	return tags
 }
 
+// TunnelOutbounds returns standalone sing-box tunnel metadata used by
+// device-proxy outbound list (second detail line in UI).
+func (a *SingboxAdapter) TunnelOutbounds() []TunnelOutboundInfo {
+	tunnels, err := a.op.ListTunnels(context.Background())
+	if err != nil {
+		return nil
+	}
+	out := make([]TunnelOutboundInfo, 0, len(tunnels))
+	for _, t := range tunnels {
+		out = append(out, TunnelOutboundInfo{
+			Tag:      t.Tag,
+			Protocol: t.Protocol,
+			Server:   t.Server,
+			Port:     t.Port,
+		})
+	}
+	return out
+}
+
 func (a *SingboxAdapter) IsRunning() bool {
 	running, _ := a.op.IsRunningPublic()
 	return running
@@ -130,6 +205,26 @@ func (a *SingboxAdapter) IsRunning() bool {
 
 func toSingboxSpec(s ExternalSpec) singbox.DeviceProxySpec {
 	out := singbox.DeviceProxySpec{
+		Enabled:     s.Enabled,
+		ListenAddr:  s.ListenAddr,
+		Port:        s.Port,
+		SelectedTag: s.SelectedTag,
+		SBTags:      s.SBTags,
+	}
+	if s.Auth.Enabled {
+		out.Auth = singbox.DeviceProxyAuth{
+			Enabled:  true,
+			Username: s.Auth.Username,
+			Password: s.Auth.Password,
+		}
+	}
+	out.AWGTags = append([]string(nil), s.AWGTags...)
+	return out
+}
+
+func toSingboxInstanceSpec(s ExternalInstanceSpec) singbox.DeviceProxyInstanceSpec {
+	out := singbox.DeviceProxyInstanceSpec{
+		ID:          s.ID,
 		Enabled:     s.Enabled,
 		ListenAddr:  s.ListenAddr,
 		Port:        s.Port,

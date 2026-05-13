@@ -85,6 +85,7 @@ func TestService_SaveConfig_AppliesToSingbox(t *testing.T) {
 type fakeSingboxOperator struct {
 	running       bool
 	tags          []string
+	tunnelInfos   []TunnelOutboundInfo
 	lastSpec      *ExternalSpec
 	lastSpecNR    *ExternalSpec // ApplyDeviceProxyNoReload call
 	lastSelector  string
@@ -101,6 +102,9 @@ func (f *fakeSingboxOperator) ApplyDeviceProxyNoReload(_ context.Context, spec E
 	return nil
 }
 func (f *fakeSingboxOperator) TunnelTags() []string { return f.tags }
+func (f *fakeSingboxOperator) TunnelOutbounds() []TunnelOutboundInfo {
+	return f.tunnelInfos
+}
 func (f *fakeSingboxOperator) IsRunning() bool      { return f.running }
 func (f *fakeSingboxOperator) SetSelectorDefault(_ context.Context, selector, member string) error {
 	f.lastSelector, f.lastMember = selector, member
@@ -111,6 +115,12 @@ func (f *fakeSingboxOperator) GetSelectorActive(_ context.Context, _ string) (st
 		return "", fmt.Errorf("not running")
 	}
 	return f.runtimeActive, nil
+}
+
+func (f *fakeSingboxOperator) ApplyDeviceProxyInstances(_ context.Context, specs []ExternalInstanceSpec) error {
+	// For tests, we don't need to do anything. Just return nil.
+	// Optionally store specs for assertions if needed.
+	return nil
 }
 
 type fakeNDMSQuery struct{ addr string }
@@ -197,6 +207,29 @@ func TestService_ListOutbounds_IncludesSystemTunnels(t *testing.T) {
 	if !found {
 		t.Fatalf("awg-sys-Wireguard0 not found in outbounds: %+v", out)
 	}
+}
+
+func TestService_ListOutbounds_IncludesSingboxTunnelDetail(t *testing.T) {
+	store := NewStore(filepath.Join(t.TempDir(), "deviceproxy.json"))
+	sb := &fakeSingboxOperator{
+		tags: []string{"vless-1"},
+		tunnelInfos: []TunnelOutboundInfo{
+			{Tag: "vless-1", Protocol: "vless", Server: "example.com", Port: 443},
+		},
+	}
+	s := NewService(Deps{Store: store, Singbox: sb})
+
+	out := s.ListOutbounds(context.Background())
+	for _, ob := range out {
+		if ob.Tag != "vless-1" {
+			continue
+		}
+		if ob.Detail != "VLESS · example.com:443" {
+			t.Fatalf("unexpected detail: %q", ob.Detail)
+		}
+		return
+	}
+	t.Fatalf("vless-1 not found in outbounds: %+v", out)
 }
 
 func TestService_SaveConfig_AppliesToSingbox_SystemTunnels(t *testing.T) {

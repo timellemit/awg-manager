@@ -780,6 +780,11 @@ export interface DeviceProxyConfig {
 	selectedOutbound: string;
 }
 
+export interface DeviceProxyInstance extends DeviceProxyConfig {
+	id: string;
+	name: string;
+}
+
 export type DeviceProxyOutboundKind = 'direct' | 'singbox' | 'awg';
 
 export interface DeviceProxyOutbound {
@@ -793,6 +798,13 @@ export interface DeviceProxyRuntime {
 	alive: boolean;
 	activeTag: string;
 	defaultTag: string;
+}
+
+export interface DeviceProxyInstanceIPCheckResult {
+	directIp: string;
+	proxyIp: string;
+	ipChanged: boolean;
+	service: string;
 }
 
 // #endregion

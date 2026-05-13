@@ -30,6 +30,30 @@ type DeviceProxyConfigData struct {
 	SelectedOutbound string             `json:"selectedOutbound" example:"proxy-01"`
 }
 
+// DeviceProxyInstanceData mirrors deviceproxy.Instance for multi-instance API.
+type DeviceProxyInstanceData struct {
+	ID               string             `json:"id" example:"default"`
+	Name             string             `json:"name" example:"Прокси"`
+	Enabled          bool               `json:"enabled" example:"false"`
+	ListenAll        bool               `json:"listenAll" example:"true"`
+	ListenInterface  string             `json:"listenInterface" example:"br0"`
+	Port             int                `json:"port" example:"1099"`
+	Auth             DeviceProxyAuthDTO `json:"auth"`
+	SelectedOutbound string             `json:"selectedOutbound" example:"proxy-01"`
+}
+
+// ProxyInstancesResponse is the envelope for GET /proxy/instances.
+type ProxyInstancesResponse struct {
+	Success bool                      `json:"success" example:"true"`
+	Data    []DeviceProxyInstanceData `json:"data"`
+}
+
+// ProxyInstanceResponse is the envelope for GET/PUT /proxy/instance.
+type ProxyInstanceResponse struct {
+	Success bool                    `json:"success" example:"true"`
+	Data    DeviceProxyInstanceData `json:"data"`
+}
+
 // ProxyConfigResponse is the envelope for GET /proxy/config.
 type ProxyConfigResponse struct {
 	Success bool                  `json:"success" example:"true"`
@@ -75,6 +99,13 @@ type ProxyListenChoicesResponse struct {
 	Data    ProxyListenChoicesData `json:"data"`
 }
 
+// DeviceProxyInstanceIPCheckResponse is the envelope for
+// GET /proxy/instance/check-ip.
+type DeviceProxyInstanceIPCheckResponse struct {
+	Success bool                              `json:"success" example:"true"`
+	Data    deviceproxy.InstanceIPCheckResult `json:"data"`
+}
+
 // DeviceProxyHandler handles /api/proxy/* endpoints.
 type DeviceProxyHandler struct {
 	svc *deviceproxy.Service
@@ -86,6 +117,42 @@ func NewDeviceProxyHandler(svc *deviceproxy.Service, appLogger logging.AppLogger
 	return &DeviceProxyHandler{
 		svc: svc,
 		log: logging.NewScopedLogger(appLogger, logging.GroupRouting, logging.SubDeviceProxy),
+	}
+}
+
+// toDeviceProxyInstanceData converts internal instance to API DTO.
+func toDeviceProxyInstanceData(in deviceproxy.Instance) DeviceProxyInstanceData {
+	return DeviceProxyInstanceData{
+		ID:              in.ID,
+		Name:            in.Name,
+		Enabled:         in.Enabled,
+		ListenAll:       in.ListenAll,
+		ListenInterface: in.ListenInterface,
+		Port:            in.Port,
+		Auth: DeviceProxyAuthDTO{
+			Enabled:  in.Auth.Enabled,
+			Username: in.Auth.Username,
+			Password: in.Auth.Password,
+		},
+		SelectedOutbound: in.SelectedOutbound,
+	}
+}
+
+// fromDeviceProxyInstanceData converts API DTO to internal instance.
+func fromDeviceProxyInstanceData(in DeviceProxyInstanceData) deviceproxy.Instance {
+	return deviceproxy.Instance{
+		ID:              in.ID,
+		Name:            in.Name,
+		Enabled:         in.Enabled,
+		ListenAll:       in.ListenAll,
+		ListenInterface: in.ListenInterface,
+		Port:            in.Port,
+		Auth: deviceproxy.AuthSpec{
+			Enabled:  in.Auth.Enabled,
+			Username: in.Auth.Username,
+			Password: in.Auth.Password,
+		},
+		SelectedOutbound: in.SelectedOutbound,
 	}
 }
 
@@ -271,4 +338,297 @@ func (h *DeviceProxyHandler) ListenChoices(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	response.Success(w, choices)
+}
+
+// GetInstanceRuntime handles GET /api/proxy/instance/runtime?id=...
+//
+//	@Summary		Get device proxy instance runtime state
+//	@Tags			device-proxy
+//	@Produce		json
+//	@Security		CookieAuth
+//	@Success		200	{object}	ProxyRuntimeResponse
+//	@Failure		400	{object}	APIErrorEnvelope
+//	@Failure		404	{object}	APIErrorEnvelope
+//	@Failure		500	{object}	APIErrorEnvelope
+//	@Router			/proxy/instance/runtime [get]
+func (h *DeviceProxyHandler) GetInstanceRuntime(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		response.MethodNotAllowed(w)
+		return
+	}
+
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		response.Error(w, "missing id", "MISSING_ID")
+		return
+	}
+
+	state, err := h.svc.GetInstanceRuntimeState(r.Context(), id)
+	if err != nil {
+		response.ErrorWithStatus(w, http.StatusNotFound, err.Error(), "INSTANCE_NOT_FOUND")
+		return
+	}
+
+	response.Success(w, state)
+}
+
+// SelectInstanceRuntime handles POST /api/proxy/instance/runtime/select.
+//
+//	@Summary		Select device proxy instance outbound
+//	@Tags			device-proxy
+//	@Accept			json
+//	@Produce		json
+//	@Security		CookieAuth
+//	@Success		200	{object}	ProxyRuntimeResponse
+//	@Failure		400	{object}	APIErrorEnvelope
+//	@Failure		404	{object}	APIErrorEnvelope
+//	@Failure		409	{object}	APIErrorEnvelope
+//	@Failure		500	{object}	APIErrorEnvelope
+//	@Router			/proxy/instance/runtime/select [post]
+func (h *DeviceProxyHandler) SelectInstanceRuntime(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		response.MethodNotAllowed(w)
+		return
+	}
+
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		response.Error(w, "missing id", "MISSING_ID")
+		return
+	}
+
+	var body struct {
+		Tag string `json:"tag"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 1024)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		response.Error(w, "invalid JSON", "INVALID_JSON")
+		return
+	}
+
+	if err := h.svc.SelectInstanceRuntimeOutbound(r.Context(), id, body.Tag); err != nil {
+		if errors.Is(err, deviceproxy.ErrOutboundUnavailable) {
+			response.Error(w, err.Error(), "OUTBOUND_UNAVAILABLE")
+			return
+		}
+		if errors.Is(err, singbox.ErrSingboxNotRunning) {
+			response.ErrorWithStatus(w, http.StatusConflict, err.Error(), "SINGBOX_DOWN")
+			return
+		}
+		response.Error(w, err.Error(), "RUNTIME_SELECT_FAILED")
+		return
+	}
+
+	response.Success(w, map[string]string{"active": body.Tag})
+}
+
+// ListInstances handles GET /api/proxy/instances.
+//
+//	@Summary		List device proxy instances
+//	@Tags			device-proxy
+//	@Produce		json
+//	@Security		CookieAuth
+//	@Success		200	{object}	ProxyInstancesResponse
+//	@Failure		400	{object}	APIErrorEnvelope
+//	@Failure		500	{object}	APIErrorEnvelope
+//	@Router			/proxy/instances [get]
+func (h *DeviceProxyHandler) ListInstances(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		response.MethodNotAllowed(w)
+		return
+	}
+
+	snap := h.svc.GetSnapshot()
+	out := make([]DeviceProxyInstanceData, 0, len(snap.Instances))
+	for _, in := range snap.Instances {
+		out = append(out, toDeviceProxyInstanceData(in))
+	}
+	response.Success(w, out)
+}
+
+// GetInstance handles GET /api/proxy/instance?id=...
+//
+//	@Summary		Get one device proxy instance
+//	@Tags			device-proxy
+//	@Produce		json
+//	@Security		CookieAuth
+//	@Success		200	{object}	ProxyInstanceResponse
+//	@Failure		400	{object}	APIErrorEnvelope
+//	@Failure		404	{object}	APIErrorEnvelope
+//	@Failure		500	{object}	APIErrorEnvelope
+//	@Router			/proxy/instance [get]
+func (h *DeviceProxyHandler) GetInstance(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		response.MethodNotAllowed(w)
+		return
+	}
+
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		response.Error(w, "missing id", "MISSING_ID")
+		return
+	}
+
+	in, ok := h.svc.GetInstance(id)
+	if !ok {
+		response.ErrorWithStatus(w, http.StatusNotFound, "instance not found", "INSTANCE_NOT_FOUND")
+		return
+	}
+
+	response.Success(w, toDeviceProxyInstanceData(in))
+}
+
+// SaveInstance handles PUT /api/proxy/instance.
+//
+//	@Summary		Save one device proxy instance
+//	@Tags			device-proxy
+//	@Accept			json
+//	@Produce		json
+//	@Security		CookieAuth
+//	@Success		200	{object}	ProxyInstanceResponse
+//	@Failure		400	{object}	APIErrorEnvelope
+//	@Failure		500	{object}	APIErrorEnvelope
+//	@Router			/proxy/instance [put]
+func (h *DeviceProxyHandler) SaveInstance(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPut {
+		response.MethodNotAllowed(w)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
+	var body DeviceProxyInstanceData
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		response.Error(w, "invalid JSON", "INVALID_JSON")
+		return
+	}
+	if body.ID == "" {
+		response.Error(w, "missing id", "MISSING_ID")
+		return
+	}
+
+	in := fromDeviceProxyInstanceData(body)
+	if err := h.svc.SaveInstance(r.Context(), in); err != nil {
+		if errors.Is(err, singbox.ErrSingboxNotRunning) {
+			response.ErrorWithStatus(w, http.StatusConflict, err.Error(), "SINGBOX_DOWN")
+			return
+		}
+		response.Error(w, err.Error(), "SAVE_INSTANCE_FAILED")
+		return
+	}
+
+	saved, ok := h.svc.GetInstance(body.ID)
+	if !ok {
+		response.Error(w, "saved instance not found", "INSTANCE_NOT_FOUND")
+		return
+	}
+	response.Success(w, toDeviceProxyInstanceData(saved))
+}
+
+// DeleteInstance handles DELETE /api/proxy/instance?id=...
+//
+//	@Summary		Delete one device proxy instance
+//	@Tags			device-proxy
+//	@Produce		json
+//	@Security		CookieAuth
+//	@Success		200	{object}	APIEnvelope
+//	@Failure		400	{object}	APIErrorEnvelope
+//	@Failure		500	{object}	APIErrorEnvelope
+//	@Router			/proxy/instance [delete]
+func (h *DeviceProxyHandler) DeleteInstance(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		response.MethodNotAllowed(w)
+		return
+	}
+
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		response.Error(w, "missing id", "MISSING_ID")
+		return
+	}
+	if id == "default" {
+		response.Error(w, "default instance cannot be deleted", "DEFAULT_INSTANCE_PROTECTED")
+		return
+	}
+
+	if err := h.svc.DeleteInstance(r.Context(), id); err != nil {
+		if errors.Is(err, singbox.ErrSingboxNotRunning) {
+			response.ErrorWithStatus(w, http.StatusConflict, err.Error(), "SINGBOX_DOWN")
+			return
+		}
+		response.Error(w, err.Error(), "DELETE_INSTANCE_FAILED")
+		return
+	}
+
+	response.Success(w, map[string]bool{"deleted": true})
+}
+
+// ApplyInstances handles POST /api/proxy/instances/apply.
+//
+//	@Summary		Apply all device proxy instances
+//	@Tags			device-proxy
+//	@Produce		json
+//	@Security		CookieAuth
+//	@Success		200	{object}	APIEnvelope
+//	@Failure		400	{object}	APIErrorEnvelope
+//	@Failure		500	{object}	APIErrorEnvelope
+//	@Router			/proxy/instances/apply [post]
+func (h *DeviceProxyHandler) ApplyInstances(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		response.MethodNotAllowed(w)
+		return
+	}
+
+	if err := h.svc.ApplyInstances(r.Context()); err != nil {
+		if errors.Is(err, singbox.ErrSingboxNotRunning) {
+			response.ErrorWithStatus(w, http.StatusConflict, err.Error(), "SINGBOX_DOWN")
+			return
+		}
+		response.Error(w, err.Error(), "APPLY_INSTANCES_FAILED")
+		return
+	}
+
+	response.Success(w, map[string]bool{"applied": true})
+}
+
+// CheckInstanceExternalIP handles GET /api/proxy/instance/check-ip?id=...
+//
+//	@Summary		Check external IP through one device proxy instance
+//	@Tags			device-proxy
+//	@Produce		json
+//	@Security		CookieAuth
+//	@Param			id		query		string	true	"Instance ID"
+//	@Param			service	query		string	false	"Specific IP service URL"
+//	@Success		200		{object}	DeviceProxyInstanceIPCheckResponse
+//	@Failure		400		{object}	APIErrorEnvelope
+//	@Failure		404		{object}	APIErrorEnvelope
+//	@Failure		500		{object}	APIErrorEnvelope
+//	@Router			/proxy/instance/check-ip [get]
+func (h *DeviceProxyHandler) CheckInstanceExternalIP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		response.MethodNotAllowed(w)
+		return
+	}
+
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		response.Error(w, "missing id", "MISSING_ID")
+		return
+	}
+	service := r.URL.Query().Get("service")
+
+	result, err := h.svc.CheckInstanceExternalIP(r.Context(), id, service)
+	if err != nil {
+		if errors.Is(err, deviceproxy.ErrInstanceNotFound) {
+			response.ErrorWithStatus(w, http.StatusNotFound, "instance not found", "INSTANCE_NOT_FOUND")
+			return
+		}
+		if errors.Is(err, singbox.ErrSingboxNotRunning) {
+			response.ErrorWithStatus(w, http.StatusConflict, err.Error(), "SINGBOX_DOWN")
+			return
+		}
+		response.Error(w, err.Error(), "INSTANCE_IP_CHECK_FAILED")
+		return
+	}
+
+	response.Success(w, result)
 }
