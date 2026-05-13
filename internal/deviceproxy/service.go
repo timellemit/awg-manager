@@ -4,11 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"sort"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/hoaxisr/awg-manager/internal/events"
 	"github.com/hoaxisr/awg-manager/internal/logging"
+	"github.com/hoaxisr/awg-manager/internal/sys/exec"
 )
 
 // Deps groups the external collaborators Service needs. Wired once at
@@ -118,6 +123,7 @@ type Service struct {
 // ErrOutboundUnavailable is returned by SelectRuntimeOutbound when the caller
 // requests a tag that is not in the current list of available outbounds.
 var ErrOutboundUnavailable = errors.New("outbound is not available")
+var ErrInstanceNotFound = errors.New("instance not found")
 
 // deviceProxyInstanceSelectorTag returns the selector tag for a given instance.
 // The default instance uses the shared "device-proxy-selector" tag;
@@ -551,6 +557,15 @@ type RuntimeState struct {
 	DefaultTag string `json:"defaultTag"`
 }
 
+// InstanceIPCheckResult contains the direct WAN IP and IP observed through
+// a concrete device-proxy instance.
+type InstanceIPCheckResult struct {
+	DirectIP  string `json:"directIp"`
+	ProxyIP   string `json:"proxyIp"`
+	IPChanged bool   `json:"ipChanged"`
+	Service   string `json:"service"`
+}
+
 // GetRuntimeState returns the current selector.now from Clash API
 // (empty if sing-box is down) plus the persisted default for
 // convenient client-side diffing.
@@ -608,6 +623,19 @@ type Outbound struct {
 	Detail string `json:"detail"` // extra info for UI (kernel iface, protocol, etc)
 }
 
+// TunnelOutboundInfo describes one standalone sing-box tunnel outbound
+// for device-proxy selector UI metadata.
+type TunnelOutboundInfo struct {
+	Tag      string
+	Protocol string
+	Server   string
+	Port     int
+}
+
+type singboxTunnelOutboundsProvider interface {
+	TunnelOutbounds() []TunnelOutboundInfo
+}
+
 // ListOutbounds returns all members that can be assigned as the
 // selector's active outbound — direct + every sb-tunnel tag + every
 // AWG tunnel's awg-<id> tag. Order is deterministic: direct first,
@@ -624,8 +652,27 @@ func (s *Service) listOutboundsLocked(ctx context.Context) []Outbound {
 	if s.d.Singbox != nil {
 		tags := append([]string(nil), s.d.Singbox.TunnelTags()...)
 		sort.Strings(tags)
+
+		byTag := map[string]TunnelOutboundInfo{}
+		if p, ok := s.d.Singbox.(singboxTunnelOutboundsProvider); ok {
+			for _, ti := range p.TunnelOutbounds() {
+				byTag[ti.Tag] = ti
+			}
+		}
+
 		for _, tag := range tags {
-			out = append(out, Outbound{Tag: tag, Kind: "singbox", Label: tag})
+			detail := ""
+			if ti, ok := byTag[tag]; ok {
+				switch {
+				case ti.Protocol != "" && ti.Server != "" && ti.Port > 0:
+					detail = strings.ToUpper(ti.Protocol) + " · " + ti.Server + ":" + fmt.Sprintf("%d", ti.Port)
+				case ti.Server != "" && ti.Port > 0:
+					detail = ti.Server + ":" + fmt.Sprintf("%d", ti.Port)
+				case ti.Protocol != "":
+					detail = strings.ToUpper(ti.Protocol)
+				}
+			}
+			out = append(out, Outbound{Tag: tag, Kind: "singbox", Label: tag, Detail: detail})
 		}
 	}
 
@@ -929,4 +976,110 @@ func (s *Service) HasSelectorReference(tag string) bool {
 		}
 	}
 	return false
+}
+
+const (
+	instanceIPDirectTimeout = 10 * time.Second
+	instanceIPProxyTimeout  = 20 * time.Second
+	instanceIPMaxTimeSec    = 4
+)
+
+var instanceIPCheckServices = []string{
+	"https://api.ipify.org",
+	"https://wtfismyip.com/text",
+	"https://ipinfo.io/ip",
+}
+
+func parseIPResult(stdout string) (string, bool) {
+	ip := strings.TrimSpace(stdout)
+	return ip, net.ParseIP(ip) != nil
+}
+
+func fetchIPViaCurl(ctx context.Context, serviceURL string, extraArgs []string) (string, string, error) {
+	if serviceURL != "" {
+		args := []string{"-s", "--max-time", fmt.Sprintf("%d", instanceIPMaxTimeSec)}
+		args = append(args, extraArgs...)
+		args = append(args, serviceURL)
+		res, err := exec.Run(ctx, "/opt/bin/curl", args...)
+		if err != nil {
+			return "", "", fmt.Errorf("%s: %w", serviceURL, exec.FormatError(res, err))
+		}
+		if ip, ok := parseIPResult(res.Stdout); ok {
+			return ip, serviceURL, nil
+		}
+		return "", "", fmt.Errorf("%s: invalid response %q", serviceURL, strings.TrimSpace(res.Stdout))
+	}
+
+	var lastErr error
+	for _, svcURL := range instanceIPCheckServices {
+		ip, usedService, err := fetchIPViaCurl(ctx, svcURL, extraArgs)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		return ip, usedService, nil
+	}
+	if lastErr != nil {
+		return "", "", lastErr
+	}
+	return "", "", fmt.Errorf("all IP services failed")
+}
+
+// CheckInstanceExternalIP resolves external IP through the selected proxy
+// instance and compares it to direct WAN IP.
+func (s *Service) CheckInstanceExternalIP(ctx context.Context, id, serviceURL string) (InstanceIPCheckResult, error) {
+	if id == "" {
+		return InstanceIPCheckResult{}, fmt.Errorf("instance id is empty")
+	}
+
+	s.mu.Lock()
+	in, ok := s.d.Store.GetInstance(id)
+	s.mu.Unlock()
+	if !ok {
+		return InstanceIPCheckResult{}, fmt.Errorf("%w: %q", ErrInstanceNotFound, id)
+	}
+	if !in.Enabled {
+		return InstanceIPCheckResult{}, fmt.Errorf("instance %q is disabled", id)
+	}
+
+	proxyHost := "127.0.0.1"
+	if !in.ListenAll {
+		if s.d.NDMSQuery == nil {
+			return InstanceIPCheckResult{}, fmt.Errorf("cannot resolve listen interface: NDMS query unavailable")
+		}
+		addr, err := s.d.NDMSQuery.GetInterfaceAddress(ctx, in.ListenInterface)
+		if err != nil || addr == "" {
+			return InstanceIPCheckResult{}, fmt.Errorf("resolve listen interface %q: %w", in.ListenInterface, err)
+		}
+		proxyHost = addr
+	}
+
+	proxyURL := &url.URL{
+		Scheme: "socks5h",
+		Host:   fmt.Sprintf("%s:%d", proxyHost, in.Port),
+	}
+	if in.Auth.Enabled {
+		proxyURL.User = url.UserPassword(in.Auth.Username, in.Auth.Password)
+	}
+
+	directCtx, directCancel := context.WithTimeout(ctx, instanceIPDirectTimeout)
+	defer directCancel()
+	directIP, _, err := fetchIPViaCurl(directCtx, serviceURL, nil)
+	if err != nil {
+		return InstanceIPCheckResult{}, fmt.Errorf("failed to get WAN IP: %w", err)
+	}
+
+	proxyCtx, proxyCancel := context.WithTimeout(ctx, instanceIPProxyTimeout)
+	defer proxyCancel()
+	proxyIP, usedService, err := fetchIPViaCurl(proxyCtx, serviceURL, []string{"--proxy", proxyURL.String()})
+	if err != nil {
+		return InstanceIPCheckResult{}, fmt.Errorf("failed to get IP through proxy instance %q: %w", id, err)
+	}
+
+	return InstanceIPCheckResult{
+		DirectIP:  directIP,
+		ProxyIP:   proxyIP,
+		IPChanged: directIP != proxyIP,
+		Service:   usedService,
+	}, nil
 }

@@ -99,6 +99,13 @@ type ProxyListenChoicesResponse struct {
 	Data    ProxyListenChoicesData `json:"data"`
 }
 
+// DeviceProxyInstanceIPCheckResponse is the envelope for
+// GET /proxy/instance/check-ip.
+type DeviceProxyInstanceIPCheckResponse struct {
+	Success bool                              `json:"success" example:"true"`
+	Data    deviceproxy.InstanceIPCheckResult `json:"data"`
+}
+
 // DeviceProxyHandler handles /api/proxy/* endpoints.
 type DeviceProxyHandler struct {
 	svc *deviceproxy.Service
@@ -581,4 +588,47 @@ func (h *DeviceProxyHandler) ApplyInstances(w http.ResponseWriter, r *http.Reque
 	}
 
 	response.Success(w, map[string]bool{"applied": true})
+}
+
+// CheckInstanceExternalIP handles GET /api/proxy/instance/check-ip?id=...
+//
+//	@Summary		Check external IP through one device proxy instance
+//	@Tags			device-proxy
+//	@Produce		json
+//	@Security		CookieAuth
+//	@Param			id		query		string	true	"Instance ID"
+//	@Param			service	query		string	false	"Specific IP service URL"
+//	@Success		200		{object}	DeviceProxyInstanceIPCheckResponse
+//	@Failure		400		{object}	APIErrorEnvelope
+//	@Failure		404		{object}	APIErrorEnvelope
+//	@Failure		500		{object}	APIErrorEnvelope
+//	@Router			/proxy/instance/check-ip [get]
+func (h *DeviceProxyHandler) CheckInstanceExternalIP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		response.MethodNotAllowed(w)
+		return
+	}
+
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		response.Error(w, "missing id", "MISSING_ID")
+		return
+	}
+	service := r.URL.Query().Get("service")
+
+	result, err := h.svc.CheckInstanceExternalIP(r.Context(), id, service)
+	if err != nil {
+		if errors.Is(err, deviceproxy.ErrInstanceNotFound) {
+			response.ErrorWithStatus(w, http.StatusNotFound, "instance not found", "INSTANCE_NOT_FOUND")
+			return
+		}
+		if errors.Is(err, singbox.ErrSingboxNotRunning) {
+			response.ErrorWithStatus(w, http.StatusConflict, err.Error(), "SINGBOX_DOWN")
+			return
+		}
+		response.Error(w, err.Error(), "INSTANCE_IP_CHECK_FAILED")
+		return
+	}
+
+	response.Success(w, result)
 }

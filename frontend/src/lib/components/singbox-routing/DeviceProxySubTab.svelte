@@ -14,7 +14,12 @@
 	import DeviceProxyClientInfoCard from '$lib/components/deviceproxy/DeviceProxyClientInfoCard.svelte';
 	import { api } from '$lib/api/client';
 	import { notifications } from '$lib/stores/notifications';
-	import type { DeviceProxyConfig, DeviceProxyInstance, DeviceProxyRuntime } from '$lib/types';
+	import type {
+		DeviceProxyConfig,
+		DeviceProxyInstance,
+		DeviceProxyInstanceIPCheckResult,
+		DeviceProxyRuntime
+	} from '$lib/types';
 
 	interface ListenChoices {
 		lanIP: string;
@@ -25,6 +30,10 @@
 	type RuntimeById = Record<string, DeviceProxyRuntime>;
 	type ToggleById = Record<string, boolean>;
 	type CollapsedById = Record<string, boolean>;
+	type ExternalIPById = Record<string, DeviceProxyInstanceIPCheckResult | null>;
+	type ExternalIPErrorById = Record<string, string>;
+	type ExternalIPLoadingById = Record<string, boolean>;
+	type ExternalIPCheckedAtById = Record<string, number>;
 
 	let unsubConfig: (() => void) | null = null;
 	let unsubInstances: (() => void) | null = null;
@@ -39,7 +48,12 @@
 	let deletingId = $state<string | null>(null);
 	let runtimeIdsKey = $state('');
 	let runtimeRefreshKey = $state('');
+	let externalIPInitKey = $state('');
 	let collapsedById = $state<CollapsedById>({});
+	let externalIPById = $state<ExternalIPById>({});
+	let externalIPErrorById = $state<ExternalIPErrorById>({});
+	let externalIPLoadingById = $state<ExternalIPLoadingById>({});
+	let externalIPCheckedAtById = $state<ExternalIPCheckedAtById>({});
 	const collapseStorageKey = 'deviceProxyCollapsedById';
 
 	onMount(() => {
@@ -102,6 +116,19 @@
 	});
 
 	$effect(() => {
+		const enabledIds = instances
+			.filter((in_) => in_.enabled)
+			.map((in_) => in_.id)
+			.sort();
+		const nextKey = enabledIds.join('|');
+		if (!nextKey || nextKey === externalIPInitKey) return;
+		externalIPInitKey = nextKey;
+		for (const id of enabledIds) {
+			void refreshExternalIP(id);
+		}
+	});
+
+	$effect(() => {
 		const nextKey = String(runtimeSnap.lastFetchedAt);
 		if (nextKey === runtimeRefreshKey) return;
 
@@ -127,6 +154,46 @@
 	async function refreshAllRuntimes() {
 		for (const in_ of instances) {
 			await refreshRuntime(in_.id);
+		}
+	}
+
+	function externalIPFor(id: string): DeviceProxyInstanceIPCheckResult | null {
+		return externalIPById[id] ?? null;
+	}
+
+	function externalIPErrorFor(id: string): string {
+		return externalIPErrorById[id] ?? '';
+	}
+
+	function externalIPLoadingFor(id: string): boolean {
+		return !!externalIPLoadingById[id];
+	}
+
+	function externalIPCheckedAtFor(id: string): number | null {
+		return externalIPCheckedAtById[id] ?? null;
+	}
+
+	async function refreshExternalIP(id: string) {
+		externalIPLoadingById = { ...externalIPLoadingById, [id]: true };
+		externalIPErrorById = { ...externalIPErrorById, [id]: '' };
+		try {
+			const data = await api.checkDeviceProxyInstanceExternalIP(id);
+			externalIPById = { ...externalIPById, [id]: data };
+			externalIPCheckedAtById = { ...externalIPCheckedAtById, [id]: Date.now() };
+		} catch (e) {
+			externalIPById = { ...externalIPById, [id]: null };
+			externalIPCheckedAtById = { ...externalIPCheckedAtById, [id]: 0 };
+			externalIPErrorById = { ...externalIPErrorById, [id]: (e as Error).message };
+		} finally {
+			externalIPLoadingById = { ...externalIPLoadingById, [id]: false };
+		}
+	}
+
+	async function refreshExternalIPAfterApply(id: string) {
+		await refreshExternalIP(id);
+		if (externalIPErrorFor(id)) {
+			await new Promise((resolve) => setTimeout(resolve, 1200));
+			await refreshExternalIP(id);
 		}
 	}
 
@@ -284,12 +351,21 @@
 	async function selectRuntime(in_: DeviceProxyInstance, tag: string) {
 		await api.selectDeviceProxyInstanceRuntime(in_.id, tag);
 		await refreshRuntime(in_.id);
+		await refreshExternalIP(in_.id);
 		deviceProxyRuntime.invalidate();
 	}
 
-	async function applyNow() {
+	async function applyNow(in_: DeviceProxyInstance) {
+		const runtime = runtimeFor(in_.id);
+		const active = runtime.activeTag || runtime.defaultTag;
+		if (active && active !== in_.selectedOutbound) {
+			const saved = await api.saveDeviceProxyInstance({ ...in_, selectedOutbound: active });
+			upsertInstanceCache(saved);
+		}
+
 		await api.applyDeviceProxyInstances();
 		await refreshAllRuntimes();
+		await refreshExternalIPAfterApply(in_.id);
 		deviceProxyInstances.invalidate();
 		deviceProxyConfig.invalidate();
 		deviceProxyRuntime.invalidate();
@@ -358,7 +434,21 @@
 						<h3>{in_.name || in_.id}</h3>
 						<div class="instance-meta">
 							<span>{in_.id}</span>
-							<span>{in_.auth.enabled ? 'с паролем' : 'без пароля'}</span>
+							<span class="auth-meta" class:auth-meta-enabled={in_.auth.enabled}>
+								{#if in_.auth.enabled}
+									<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+										<rect x="4" y="11" width="16" height="9" rx="2" ry="2"/>
+										<path d="M8 11V8a4 4 0 0 1 8 0v3"/>
+									</svg>
+									<span>с паролем</span>
+								{:else}
+									<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+										<rect x="4" y="11" width="16" height="9" rx="2" ry="2"/>
+										<path d="M16 11V8a4 4 0 0 0-7.2-2.4"/>
+									</svg>
+									<span>без пароля</span>
+								{/if}
+							</span>
 						</div>
 					</div>
 					<div class="instance-actions">
@@ -401,7 +491,7 @@
 								radioName={`device-proxy-active-tunnel-${in_.id}`}
 								onSwitched={() => handleSwitched(in_)}
 								onSelectRuntime={(tag) => selectRuntime(in_, tag)}
-								onApplyNow={applyNow}
+								onApplyNow={() => applyNow(in_)}
 							/>
 						</div>
 						<div class="dashboard-right">
@@ -409,6 +499,11 @@
 								config={cfg}
 								{resolvedListenIP}
 								{bridgeLabel}
+								externalIP={externalIPFor(in_.id)}
+								externalIPError={externalIPErrorFor(in_.id)}
+								externalIPLoading={externalIPLoadingFor(in_.id)}
+								externalIPCheckedAt={externalIPCheckedAtFor(in_.id)}
+								onRefreshExternalIP={() => refreshExternalIP(in_.id)}
 								onOpenSettings={() => openSettings(in_)}
 							/>
 						</div>
@@ -520,6 +615,16 @@
 		font-family: var(--font-mono);
 		font-size: 0.6875rem;
 		color: var(--color-text-muted);
+	}
+
+	.auth-meta {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.25rem;
+	}
+
+	.auth-meta-enabled {
+		color: var(--color-text-secondary);
 	}
 
 	.instance-actions {

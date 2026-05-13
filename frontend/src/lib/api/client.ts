@@ -58,6 +58,7 @@ import type {
 	DeviceProxyInstance,
 	DeviceProxyOutbound,
 	DeviceProxyRuntime,
+	DeviceProxyInstanceIPCheckResult,
 	AWGTagInfo,
 	TunnelReferencedError,
 	MonitoringSnapshot,
@@ -1404,6 +1405,15 @@ class ApiClient {
 			method: 'POST',
 			body: JSON.stringify({ tag })
 		});
+	}
+
+	async checkDeviceProxyInstanceExternalIP(
+		id: string,
+		serviceURL?: string
+	): Promise<DeviceProxyInstanceIPCheckResult> {
+		let endpoint = `/proxy/instance/check-ip?id=${encodeURIComponent(id)}`;
+		if (serviceURL) endpoint += `&service=${encodeURIComponent(serviceURL)}`;
+		return this.request<DeviceProxyInstanceIPCheckResult>(endpoint);
 	}
 
 	// #endregion

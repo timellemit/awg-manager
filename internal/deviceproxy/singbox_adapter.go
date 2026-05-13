@@ -179,6 +179,25 @@ func (a *SingboxAdapter) TunnelTags() []string {
 	return tags
 }
 
+// TunnelOutbounds returns standalone sing-box tunnel metadata used by
+// device-proxy outbound list (second detail line in UI).
+func (a *SingboxAdapter) TunnelOutbounds() []TunnelOutboundInfo {
+	tunnels, err := a.op.ListTunnels(context.Background())
+	if err != nil {
+		return nil
+	}
+	out := make([]TunnelOutboundInfo, 0, len(tunnels))
+	for _, t := range tunnels {
+		out = append(out, TunnelOutboundInfo{
+			Tag:      t.Tag,
+			Protocol: t.Protocol,
+			Server:   t.Server,
+			Port:     t.Port,
+		})
+	}
+	return out
+}
+
 func (a *SingboxAdapter) IsRunning() bool {
 	running, _ := a.op.IsRunningPublic()
 	return running

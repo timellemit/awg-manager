@@ -736,6 +736,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/proxy/instances/apply", guarded(deviceProxyHandler.ApplyInstances))
 	mux.HandleFunc("/api/proxy/instance/runtime", guarded(deviceProxyHandler.GetInstanceRuntime))
 	mux.HandleFunc("/api/proxy/instance/runtime/select", guarded(deviceProxyHandler.SelectInstanceRuntime))
+	mux.HandleFunc("/api/proxy/instance/check-ip", guarded(deviceProxyHandler.CheckInstanceExternalIP))
 
 	// Logging (protected + boot guarded)
 	mux.HandleFunc("/api/logs", guarded(loggingHandler.GetLogs))

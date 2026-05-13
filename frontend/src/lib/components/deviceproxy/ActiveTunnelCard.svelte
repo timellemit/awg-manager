@@ -37,7 +37,7 @@
 	}
 
 	function isSensitiveOutbound(ob: DeviceProxyOutbound): boolean {
-		return ob.kind === 'singbox' && ob.tag.startsWith('sub-') && hasEndpoint(ob.detail);
+		return ob.kind === 'singbox' && hasEndpoint(ob.detail);
 	}
 
 	function hasEndpoint(detail: string): boolean {
