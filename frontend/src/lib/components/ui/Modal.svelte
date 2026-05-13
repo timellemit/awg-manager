@@ -86,6 +86,7 @@
 
     function handleBackdropClick(e: MouseEvent) {
         if (!closeOnBackdrop) return;
+        if (confirmOpen) return; // ConfirmModal owns dismissal while open
         if (e.target !== backdropEl) return;
         if (!pointerDownOnBackdrop) return;
         pointerDownOnBackdrop = false;

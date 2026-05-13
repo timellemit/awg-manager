@@ -36,7 +36,8 @@
 	const isDirty = $derived(
 		description !== peer.description ||
 		tunnelIP !== peer.tunnelIP ||
-		dns !== (peer.dns || '')
+		dns !== (peer.dns || '') ||
+		useRouterDNS !== (routerIP !== '' && (peer.dns || '') === routerIP)
 	);
 
 	async function handleSave() {

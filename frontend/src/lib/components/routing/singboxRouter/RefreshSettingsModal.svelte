@@ -25,16 +25,21 @@
 	let busy = $state(false);
 	let error = $state('');
 
-	// Snapshot initial state for isDirty detection
+	// Snapshot initial state for isDirty detection. Capture ONCE per mount —
+	// the `settings` prop is SSE-store-derived and could re-emit while the
+	// modal is open, which would silently reset the snapshot to fresh server
+	// values and drop the dirty flag mid-edit, breaking confirm-on-close.
 	let initialRefreshMode: 'interval' | 'daily' = $state('interval');
 	let initialRefreshIntervalHours = $state(24);
 	let initialRefreshDailyTime = $state('03:00');
+	let snapshotTaken = $state(false);
 
-	// Initialize snapshot when modal opens
 	$effect(() => {
+		if (snapshotTaken) return;
 		initialRefreshMode = (settings.refreshMode ?? 'interval') as 'interval' | 'daily';
 		initialRefreshIntervalHours = settings.refreshIntervalHours ?? 24;
 		initialRefreshDailyTime = settings.refreshDailyTime ?? '03:00';
+		snapshotTaken = true;
 	});
 
 	const isDirty = $derived.by(() => {
