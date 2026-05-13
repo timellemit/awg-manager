@@ -1,7 +1,7 @@
 <script lang="ts">
     import { api } from '$lib/api/client';
     import type { StaticRouteList, RoutingTunnel } from '$lib/types';
-    import { Modal, StoreStatusBadge, Button, Dropdown, type DropdownOption } from '$lib/components/ui';
+    import { ConfirmModal, StoreStatusBadge, Button, Dropdown, type DropdownOption } from '$lib/components/ui';
     import { IpRouteCard, IpRouteEditModal, IpRouteImportModal } from '$lib/components/routing';
     import { IconPickerModal } from '$lib/components/dnsroutes';
     import { exportStaticRoutes, type PortableStaticRoute } from '$lib/utils/staticroute-export';
@@ -327,23 +327,23 @@
 
 {#if ipDeleteId}
     {@const routeToDelete = ipRoutes.find(r => r.id === ipDeleteId)}
-    <Modal open={true} title="Удаление" size="sm" onclose={() => ipDeleteId = null}>
-        <p class="confirm-text">Удалить список маршрутов «{routeToDelete?.name ?? ipDeleteId}»?</p>
-        {#snippet actions()}
-            <Button variant="ghost" onclick={() => ipDeleteId = null}>Отмена</Button>
-            <Button variant="danger" onclick={() => deleteIpRoute()}>Удалить</Button>
-        {/snippet}
-    </Modal>
+    <ConfirmModal
+        open={true}
+        title="Удаление"
+        message={`Удалить список маршрутов «${routeToDelete?.name ?? ipDeleteId}»?`}
+        onConfirm={() => deleteIpRoute()}
+        onClose={() => ipDeleteId = null}
+    />
 {/if}
 
 {#if ipBulkDeleteConfirm}
-    <Modal open={true} title="Удаление" size="sm" onclose={() => ipBulkDeleteConfirm = false}>
-        <p class="confirm-text">Удалить {ipSelected.size} IP-маршрутов?</p>
-        {#snippet actions()}
-            <Button variant="ghost" onclick={() => ipBulkDeleteConfirm = false}>Отмена</Button>
-            <Button variant="danger" onclick={bulkIpDelete}>Удалить</Button>
-        {/snippet}
-    </Modal>
+    <ConfirmModal
+        open={true}
+        title="Удаление"
+        message={`Удалить ${ipSelected.size} IP-маршрутов?`}
+        onConfirm={bulkIpDelete}
+        onClose={() => ipBulkDeleteConfirm = false}
+    />
 {/if}
 
 {#if pickingForRoute}

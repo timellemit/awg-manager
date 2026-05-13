@@ -25,6 +25,31 @@
 	let busy = $state(false);
 	let error = $state('');
 
+	// Snapshot initial state for isDirty detection. Capture ONCE per mount —
+	// the `settings` prop is SSE-store-derived and could re-emit while the
+	// modal is open, which would silently reset the snapshot to fresh server
+	// values and drop the dirty flag mid-edit, breaking confirm-on-close.
+	let initialRefreshMode: 'interval' | 'daily' = $state('interval');
+	let initialRefreshIntervalHours = $state(24);
+	let initialRefreshDailyTime = $state('03:00');
+	let snapshotTaken = $state(false);
+
+	$effect(() => {
+		if (snapshotTaken) return;
+		initialRefreshMode = (settings.refreshMode ?? 'interval') as 'interval' | 'daily';
+		initialRefreshIntervalHours = settings.refreshIntervalHours ?? 24;
+		initialRefreshDailyTime = settings.refreshDailyTime ?? '03:00';
+		snapshotTaken = true;
+	});
+
+	const isDirty = $derived.by(() => {
+		return (
+			refreshMode !== initialRefreshMode ||
+			refreshIntervalHours !== initialRefreshIntervalHours ||
+			refreshDailyTime !== initialRefreshDailyTime
+		);
+	});
+
 	async function save(): Promise<void> {
 		busy = true;
 		error = '';
@@ -45,7 +70,7 @@
 	}
 </script>
 
-<Modal open onclose={onClose} title="Настройки автообновления">
+<Modal open onclose={onClose} title="Настройки автообновления" hasUnsavedChanges={() => isDirty}>
 	<div class="form">
 		<label class="field">
 			<div class="label">Режим</div>

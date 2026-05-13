@@ -1,7 +1,7 @@
 <script lang="ts">
     import { api } from '$lib/api/client';
     import type { AccessPolicy, PolicyDevice, PolicyGlobalInterface } from '$lib/types';
-    import { Modal, StoreStatusBadge, Button } from '$lib/components/ui';
+    import { ConfirmModal, StoreStatusBadge, Button } from '$lib/components/ui';
     import { PolicyTable, PolicyCreateModal, PolicyEditView } from '$lib/components/accesspolicy';
     import { notifications } from '$lib/stores/notifications';
     import { accessPoliciesStore, policyDevicesStore, policyInterfacesStore, invalidateAllRouting } from '$lib/stores/routing';
@@ -199,23 +199,23 @@
 
     {#if policyDeleteName}
         {@const pol = accessPolicies.find(p => p.name === policyDeleteName)}
-        <Modal open={true} title="Удаление политики" size="sm" onclose={() => policyDeleteName = null}>
-            <p class="confirm-text">Удалить политику «{pol?.description || policyDeleteName}»?</p>
-            <p class="delete-hint">Все устройства будут отвязаны от этой политики.</p>
-            {#snippet actions()}
-                <Button variant="ghost" onclick={() => policyDeleteName = null}>Отмена</Button>
-                <Button variant="danger" onclick={() => deletePolicy(policyDeleteName!)}>Удалить</Button>
-            {/snippet}
-        </Modal>
+        <ConfirmModal
+            open={true}
+            title="Удаление политики"
+            message={`Удалить политику «${pol?.description || policyDeleteName}»?`}
+            secondary="Все устройства будут отвязаны от этой политики."
+            onConfirm={() => deletePolicy(policyDeleteName!)}
+            onClose={() => policyDeleteName = null}
+        />
     {/if}
 
     {#if policyBulkDeleteConfirm}
-        <Modal open={true} title="Удаление" size="sm" onclose={() => policyBulkDeleteConfirm = false}>
-            <p class="confirm-text">Удалить {policySelected.size} политик? Все устройства будут отвязаны.</p>
-            {#snippet actions()}
-                <Button variant="ghost" onclick={() => policyBulkDeleteConfirm = false}>Отмена</Button>
-                <Button variant="danger" onclick={bulkPolicyDelete}>Удалить</Button>
-            {/snippet}
-        </Modal>
+        <ConfirmModal
+            open={true}
+            title="Удаление"
+            message={`Удалить ${policySelected.size} политик? Все устройства будут отвязаны.`}
+            onConfirm={bulkPolicyDelete}
+            onClose={() => policyBulkDeleteConfirm = false}
+        />
     {/if}
 {/if}

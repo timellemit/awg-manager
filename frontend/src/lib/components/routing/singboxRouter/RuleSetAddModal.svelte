@@ -58,6 +58,62 @@
 	let busy = $state(false);
 	let error = $state('');
 
+	// Snapshot initial state for isDirty detection
+	let initialType: 'remote' | 'local' | 'inline' = $state('remote');
+	let initialFormat: 'binary' | 'source' = $state('binary');
+	let initialTag = $state('');
+	let initialUrl = $state('');
+	let initialUpdateInterval = $state('24h');
+	let initialDownloadDetour = $state('');
+	let initialPath = $state('');
+	let initialRulesJson = $state('');
+
+	// Default rulesJson template for new rule sets (must match $state initializer above)
+	const DEFAULT_RULES_JSON = `[
+  {
+    "domain_suffix": [
+      ".example.com"
+    ]
+  }
+]`;
+
+	// Initialize snapshot when modal opens
+	$effect(() => {
+		if (ruleSet) {
+			initialType = ruleSet.type;
+			initialFormat = ruleSet.format ?? 'binary';
+			initialTag = ruleSet.tag;
+			initialUrl = ruleSet.url ?? '';
+			initialUpdateInterval = ruleSet.update_interval ?? '24h';
+			initialDownloadDetour = ruleSet.download_detour ?? '';
+			initialPath = ruleSet.path ?? '';
+			initialRulesJson = ruleSet.rules?.length ? JSON.stringify(ruleSet.rules, null, 2) : '';
+		} else {
+			initialType = 'remote';
+			initialFormat = 'binary';
+			initialTag = '';
+			initialUrl = '';
+			initialUpdateInterval = '24h';
+			initialDownloadDetour = '';
+			initialPath = '';
+			// Match the default $state value of rulesJson so isDirty starts false
+			initialRulesJson = DEFAULT_RULES_JSON;
+		}
+	});
+
+	const isDirty = $derived.by(() => {
+		return (
+			type !== initialType ||
+			format !== initialFormat ||
+			tag !== initialTag ||
+			url !== initialUrl ||
+			updateInterval !== initialUpdateInterval ||
+			downloadDetour !== initialDownloadDetour ||
+			path !== initialPath ||
+			rulesJson !== initialRulesJson
+		);
+	});
+
 	async function save(): Promise<void> {
 		busy = true;
 		error = '';
@@ -115,7 +171,7 @@
 	}
 </script>
 
-<Modal open onclose={onClose} title={ruleSet ? 'Редактировать rule set' : 'Новый rule set'}>
+<Modal open onclose={onClose} title={ruleSet ? 'Редактировать rule set' : 'Новый rule set'} hasUnsavedChanges={() => isDirty}>
 	<div class="form">
 		<div class="section-label">Тип</div>
 		<div class="segment">

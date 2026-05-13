@@ -1,7 +1,7 @@
 <script lang="ts">
     import { api } from '$lib/api/client';
     import type { ClientRoute, PolicyDevice, RoutingTunnel } from '$lib/types';
-    import { Modal, StoreStatusBadge, Button, Dropdown, type DropdownOption } from '$lib/components/ui';
+    import { ConfirmModal, StoreStatusBadge, Button, Dropdown, type DropdownOption } from '$lib/components/ui';
     import { ClientRouteCard, ClientRouteCreateModal } from '$lib/components/clientroute';
     import { notifications } from '$lib/stores/notifications';
     import { clientRoutesStore } from '$lib/stores/routing';
@@ -229,21 +229,21 @@
 />
 
 {#if clientRouteDeleteId}
-    <Modal open={true} title="Удаление правила" size="sm" onclose={() => clientRouteDeleteId = null}>
-        <p class="confirm-text">Удалить VPN-правило для «{clientRoutes.find(r => r.id === clientRouteDeleteId)?.clientHostname}»?</p>
-        {#snippet actions()}
-            <Button variant="ghost" onclick={() => clientRouteDeleteId = null}>Отмена</Button>
-            <Button variant="danger" onclick={deleteClientRoute}>Удалить</Button>
-        {/snippet}
-    </Modal>
+    <ConfirmModal
+        open={true}
+        title="Удаление правила"
+        message={`Удалить VPN-правило для «${clientRoutes.find(r => r.id === clientRouteDeleteId)?.clientHostname}»?`}
+        onConfirm={deleteClientRoute}
+        onClose={() => clientRouteDeleteId = null}
+    />
 {/if}
 
 {#if clientBulkDeleteConfirm}
-    <Modal open={true} title="Удаление" size="sm" onclose={() => clientBulkDeleteConfirm = false}>
-        <p class="confirm-text">Удалить {clientSelected.size} VPN-правил?</p>
-        {#snippet actions()}
-            <Button variant="ghost" onclick={() => clientBulkDeleteConfirm = false}>Отмена</Button>
-            <Button variant="danger" onclick={bulkClientDelete}>Удалить</Button>
-        {/snippet}
-    </Modal>
+    <ConfirmModal
+        open={true}
+        title="Удаление"
+        message={`Удалить ${clientSelected.size} VPN-правил?`}
+        onConfirm={bulkClientDelete}
+        onClose={() => clientBulkDeleteConfirm = false}
+    />
 {/if}

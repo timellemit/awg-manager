@@ -2,7 +2,7 @@
 <script lang="ts">
 	import type { Connection } from '$lib/types/singboxConnections';
 	import { formatBytes } from '$lib/utils/format';
-	import { Modal } from '$lib/components/ui';
+	import { ConfirmModal } from '$lib/components/ui';
 
 	interface Props {
 		visible: Connection[];
@@ -50,22 +50,18 @@
 {/if}
 
 {#if showModal}
-	<Modal open={showModal} onclose={() => (showModal = false)} title="Подтверждение">
-		<p>Закрыть <strong>{visible.length}</strong> соединений?</p>
-		<p class="muted small">Затронутые outbound'ы:</p>
-		<ul class="outbound-list">
-			{#each outboundCounts as [k, n]}
-				<li><span class="badge">{k}</span> <span class="muted">({n})</span></li>
-			{/each}
-		</ul>
-		<p class="muted small">Это действие необратимо — клиенты переподключатся.</p>
-		<div class="actions">
-			<button type="button" disabled={busy} onclick={() => (showModal = false)}>Отмена</button>
-			<button class="primary" type="button" disabled={busy} onclick={confirm}>
-				{busy ? 'Закрываю…' : 'Закрыть всё'}
-			</button>
-		</div>
-	</Modal>
+	{@const outboundsLine = outboundCounts.map(([k, n]) => `${k} (${n})`).join(', ')}
+	<ConfirmModal
+		open={showModal}
+		title="Подтверждение"
+		message={`Закрыть ${visible.length} соединений?`}
+		secondary={`Затронутые outbound'ы: ${outboundsLine}. Это действие необратимо — клиенты переподключатся.`}
+		confirmLabel="Закрыть всё"
+		variant="danger"
+		{busy}
+		onConfirm={confirm}
+		onClose={() => (showModal = false)}
+	/>
 {/if}
 
 <style>

@@ -3,7 +3,7 @@
     import { api } from '$lib/api/client';
     import type { DnsRoute, RoutingTunnel } from '$lib/types';
     import type { ServicePreset } from '$lib/data/presets';
-    import { Modal, StoreStatusBadge, Button, Dropdown, type DropdownOption } from '$lib/components/ui';
+    import { ConfirmModal, StoreStatusBadge, Button, Dropdown, type DropdownOption } from '$lib/components/ui';
     import { DnsRouteCard, DnsRouteEditModal, DnsRouteImportModal, DnsRoutePresetModal, IconPickerModal } from '$lib/components/dnsroutes';
     import { exportRoutes, downloadJson } from '$lib/utils/dns-export';
     import { notifications } from '$lib/stores/notifications';
@@ -470,23 +470,23 @@
 
 {#if dnsDeleteId}
     {@const routeToDelete = dnsRoutes.find(r => r.id === dnsDeleteId)}
-    <Modal open={true} title="Удалить DNS-маршрут" size="sm" onclose={() => dnsDeleteId = null}>
-        <p class="confirm-text">Удалить DNS-маршрут <strong>{routeToDelete?.name ?? dnsDeleteId}</strong>?</p>
-        {#snippet actions()}
-            <Button variant="secondary" onclick={() => dnsDeleteId = null}>Отмена</Button>
-            <Button variant="danger" onclick={deleteDnsRoute}>Удалить</Button>
-        {/snippet}
-    </Modal>
+    <ConfirmModal
+        open={true}
+        title="Удалить DNS-маршрут"
+        message={`Удалить DNS-маршрут «${routeToDelete?.name ?? dnsDeleteId}»?`}
+        onConfirm={deleteDnsRoute}
+        onClose={() => dnsDeleteId = null}
+    />
 {/if}
 
 {#if dnsBulkDeleteConfirm}
-    <Modal open={true} title="Удаление" size="sm" onclose={() => dnsBulkDeleteConfirm = false}>
-        <p class="confirm-text">Удалить {dnsSelected.size} DNS-маршрутов?</p>
-        {#snippet actions()}
-            <Button variant="ghost" onclick={() => dnsBulkDeleteConfirm = false}>Отмена</Button>
-            <Button variant="danger" onclick={bulkDnsDelete}>Удалить</Button>
-        {/snippet}
-    </Modal>
+    <ConfirmModal
+        open={true}
+        title="Удаление"
+        message={`Удалить ${dnsSelected.size} DNS-маршрутов?`}
+        onConfirm={bulkDnsDelete}
+        onClose={() => dnsBulkDeleteConfirm = false}
+    />
 {/if}
 
 {#if pickingForRoute}

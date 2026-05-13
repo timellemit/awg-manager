@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { api } from '$lib/api/client';
 	import type { GeoFileEntry } from '$lib/types';
-	import { Modal, Button, Dropdown } from '$lib/components/ui';
+	import { ConfirmModal, Button, Dropdown } from '$lib/components/ui';
 	import { geoDownloadProgress } from '$lib/stores/geoDownload';
 
 	interface Props {
@@ -268,24 +268,15 @@
 
 {#if pendingDelete}
 	{@const pd = pendingDelete}
-	<Modal open={true} title="Удалить гео-файл" size="sm" onclose={() => (pendingDelete = null)}>
-		<p class="confirm-text">
-			Удалить <strong>{fileName(pd.path)}</strong>?
-		</p>
-		<p class="confirm-hint">
-			Файл удалится с диска и пропадёт из
-			<code>{pd.type === 'geosite' ? 'GeoSiteFile' : 'GeoIPFile'}=</code> в hrneo.conf.
-			Правила, использующие теги из этого файла, перестанут резолвиться.
-		</p>
-		{#snippet actions()}
-			<Button variant="secondary" onclick={() => (pendingDelete = null)} disabled={busy === pd.path}>
-				Отмена
-			</Button>
-			<Button variant="danger" onclick={confirmRemove} loading={busy === pd.path}>
-				Удалить
-			</Button>
-		{/snippet}
-	</Modal>
+	<ConfirmModal
+		open={true}
+		title="Удалить гео-файл"
+		message={`Удалить «${fileName(pd.path)}»?`}
+		secondary={`Файл удалится с диска и пропадёт из ${pd.type === 'geosite' ? 'GeoSiteFile=' : 'GeoIPFile='} в hrneo.conf. Правила, использующие теги из этого файла, перестанут резолвиться.`}
+		busy={busy === pd.path}
+		onConfirm={confirmRemove}
+		onClose={() => (pendingDelete = null)}
+	/>
 {/if}
 
 <style>
