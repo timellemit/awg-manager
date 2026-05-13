@@ -68,6 +68,15 @@
 	let initialPath = $state('');
 	let initialRulesJson = $state('');
 
+	// Default rulesJson template for new rule sets (must match $state initializer above)
+	const DEFAULT_RULES_JSON = `[
+  {
+    "domain_suffix": [
+      ".example.com"
+    ]
+  }
+]`;
+
 	// Initialize snapshot when modal opens
 	$effect(() => {
 		if (ruleSet) {
@@ -87,7 +96,8 @@
 			initialUpdateInterval = '24h';
 			initialDownloadDetour = '';
 			initialPath = '';
-			initialRulesJson = '';
+			// Match the default $state value of rulesJson so isDirty starts false
+			initialRulesJson = DEFAULT_RULES_JSON;
 		}
 	});
 

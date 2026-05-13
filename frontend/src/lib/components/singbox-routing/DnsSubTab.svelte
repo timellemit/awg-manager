@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { api } from '$lib/api/client';
 	import { notifications } from '$lib/stores/notifications';
 	import { singboxRouter } from '$lib/stores/singboxRouter';
@@ -34,6 +35,12 @@
 	async function refresh(): Promise<void> {
 		await singboxRouter.loadAll();
 	}
+
+	// Bootstrap data on mount in case this sub-tab is the first one visited
+	// (e.g. direct navigation to ?sub=dns skips EngineSubTab.onMount).
+	onMount(() => {
+		void refresh();
+	});
 
 	// ── Globals (final + strategy) ────────────────────────────────
 	const STRATEGY_OPTIONS: DropdownOption<SingboxRouterDNSStrategy>[] = [
