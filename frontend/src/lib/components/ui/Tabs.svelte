@@ -43,6 +43,16 @@
     let visibleCount = $state(Infinity);
     let dropdownOpen = $state(false);
 
+    // Gates the outbound URL writer until the inbound effect has had a chance
+    // to apply (or rule out) the value from the URL. Conditional tabs whose
+    // visibility depends on async stores ($systemInfo.isOS5,
+    // $systemInfo.singbox.installed, hydrarouteInstalled) arrive AFTER mount,
+    // so a deep-linked `?tab=policy` may not yet match any known tab on the
+    // first inbound run. Without this flag, the outbound effect would
+    // overwrite `?tab=policy` with the default tab's empty URL before the
+    // conditional tab appears, losing the deep-link value.
+    let urlConsumed = $state(false);
+
     function writeUrl(id: string) {
         if (!urlParam) return;
         const url = new URL($page.url);
@@ -70,20 +80,27 @@
     // otherwise on a click the inbound effect would race the outbound one
     // (declaration order: inbound first), see stale URL, and override the
     // user's selection by calling onchange with the previous tab.
+    //
+    // Sets urlConsumed in every terminal branch except "tab not yet known" —
+    // that branch leaves urlConsumed=false so outbound holds off until
+    // `tabs` updates (effect re-fires on the tabs.find dependency).
     $effect(() => {
-        if (!urlParam) return;
+        if (!urlParam) { urlConsumed = true; return; }
         const fromUrl = $page.url.searchParams.get(urlParam);
-        if (fromUrl == null) return;
-        if (fromUrl === untrack(() => active)) return;
+        if (fromUrl == null) { urlConsumed = true; return; }
+        if (fromUrl === untrack(() => active)) { urlConsumed = true; return; }
         if (!tabs.find((t) => t.id === fromUrl)) return;
+        urlConsumed = true;
         onchange(fromUrl);
     });
 
     // Outbound sync: active prop → URL. Catches programmatic changes
     // (e.g. parent bouncing off a hidden tab). No-op when URL already
-    // matches via writeUrl's own guard.
+    // matches via writeUrl's own guard. Holds off until inbound has
+    // consumed the URL value to avoid clobbering deep links to async tabs.
     $effect(() => {
         if (!urlParam) return;
+        if (!urlConsumed) return;
         writeUrl(active);
     });
 
