@@ -1630,7 +1630,7 @@ export interface RestoreOptions {
 export interface RestoreOutcome {
 	name: string;
 	newName?: string;
-	action: 'created' | 'merged' | 'renamed' | 'skipped' | 'conflict' | 'failed';
+	action: 'created' | 'merged' | 'renamed' | 'conflict' | 'failed';
 	addedPeers?: number;
 	conflicts?: string[];
 	error?: string;

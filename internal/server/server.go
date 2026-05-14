@@ -784,6 +784,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	if s.managedServiceImpl != nil {
 		managedBackupHandler := api.NewManagedServerBackupHandler(s.managedServiceImpl)
+		managedBackupHandler.SetEventBus(s.bus)
 		mux.HandleFunc("/api/managed/export", guarded(managedBackupHandler.Export))
 		mux.HandleFunc("/api/managed/import", guarded(managedBackupHandler.Import))
 		mux.HandleFunc("/api/managed/drift", guarded(managedBackupHandler.Drift))
