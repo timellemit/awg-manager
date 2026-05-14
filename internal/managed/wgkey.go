@@ -23,18 +23,6 @@ func realWgRunner(ctx context.Context, name string, args ...string) (string, err
 	return result.Stdout, nil
 }
 
-// readKernelPrivateKey reads the WireGuard private key for the given kernel
-// interface name (e.g. "nwg0") via `wg show <iface> private-key`. The
-// output is a single base64-encoded line ending in '='; trailing newline is
-// trimmed.
-//
-// NDMS-managed Wireguard<N> interfaces appear in the kernel as nwg<N>;
-// query.InterfaceStore.ResolveSystemName performs that mapping. This helper
-// receives the resolved name and never speaks NDMS itself.
-func readKernelPrivateKey(ctx context.Context, kernelName string) (string, error) {
-	return readKernelPrivateKeyWith(ctx, kernelName, realWgRunner)
-}
-
 func readKernelPrivateKeyWith(ctx context.Context, kernelName string, run wgRunner) (string, error) {
 	if kernelName == "" {
 		return "", fmt.Errorf("readKernelPrivateKey: empty kernel name")
