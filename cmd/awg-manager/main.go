@@ -76,7 +76,16 @@ import (
 const (
 	defaultDataDir = "/opt/etc/awg-manager"
 	defaultWebRoot = "/opt/share/www/awg-manager"
-	pidFile        = "/opt/var/run/awg-manager.pid"
+	// pidFile lives on the system tmpfs (cleared on every boot) so an
+	// unclean reboot can never leave a stale PID pointing at whatever
+	// process eventually inherits that PID slot on the next uptime.
+	// /var/run is FHS-canonical and always tmpfs on Keenetic; /opt/var/run
+	// is Entware-persistent storage and was the source of the stale-PID
+	// startup-block bug.
+	pidFile = "/var/run/awg-manager.pid"
+	// legacyPidFile is the pre-move location; one-shot cleanup on startup
+	// removes it after an upgrade so the old file does not linger.
+	legacyPidFile = "/opt/var/run/awg-manager.pid"
 )
 
 // version is set via ldflags at build time
@@ -199,6 +208,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Failed to create data dir: %v\n", err)
 		os.Exit(1)
 	}
+
+	// One-shot cleanup of the pre-move PID file. Older awgm wrote it to
+	// /opt/var/run/awg-manager.pid (persistent Entware storage); after
+	// the move to /var/run we never reference that path again, so remove
+	// it so a stale upgrade artifact does not linger.
+	_ = os.Remove(legacyPidFile)
 
 	// Record the exact moment main() enters the daemon path so BootHealth
 	// can compute uptime accurately. Must happen before any goroutines start.
@@ -1455,8 +1470,9 @@ func serviceStart(dataDir, webRoot string) {
 
 	fmt.Println("Starting AWG Manager...")
 
-	// Ensure directories
-	os.MkdirAll("/opt/var/run", 0755)
+	// Ensure directories. /var/run is system tmpfs and always exists,
+	// but MkdirAll is idempotent so harmless to call.
+	os.MkdirAll("/var/run", 0755)
 	os.MkdirAll("/opt/var/log", 0755)
 	os.MkdirAll(dataDir, 0755)
 
