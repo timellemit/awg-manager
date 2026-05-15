@@ -61,6 +61,14 @@ func All() []Preset {
 		simpleGeosite("reddit", "Reddit", CatSocial, "reddit"),
 	)
 
+	// Developer
+	out = append(out,
+		simpleGeosite("github", "GitHub", CatDeveloper, "github"),
+		simpleGeosite("gitlab", "GitLab", CatDeveloper, "gitlab"),
+		simpleGeosite("docker", "Docker", CatDeveloper, "docker"),
+		vernetteGeosite("linkedin", "LinkedIn", CatDeveloper, "linkedin", "linkedin"),
+	)
+
 	// Стриминг / медиа
 	out = append(out,
 		vernetteGeosite("netflix", "Netflix", CatMedia, "netflix", "netflix"),
@@ -101,16 +109,9 @@ func All() []Preset {
 		// slot. vernette publishes it as "claude.srs", but we keep our
 		// user-facing ID as "anthropic" for continuity.
 		vernetteGeosite("anthropic", "Anthropic / Claude", CatAI, "anthropic", "claude"),
-		// SagerNet upstream slug is "google-gemini"; our user-facing ID
-		// stays "gemini" so the URL path is the only place the dash
-		// appears.
-		Preset{
-			ID: "gemini", Name: "Gemini",
-			Category: CatAI,
-			IconSlug: "googlegemini",
-			RuleSets: []RuleRef{{Tag: "geosite-google-gemini", URL: sagerNetSiteRoot + "geosite-google-gemini.srs"}},
-			Rules:    []RuleLink{{RuleSetRef: "geosite-google-gemini", ActionTarget: "tunnel"}},
-		},
+		vernetteGeosite("gemini", "Gemini", CatAI, "googlegemini", "gemini"),
+		vernetteGeosite("copilot", "GitHub Copilot", CatAI, "githubcopilot", "copilot"),
+		vernetteGeosite("grok", "Grok (xAI)", CatAI, "x", "grok"),
 		simpleGeosite("perplexity", "Perplexity", CatAI, "perplexity"),
 		Preset{
 			ID: "category-ai", Name: "Все AI сервисы",
@@ -120,13 +121,6 @@ func All() []Preset {
 			Rules:    []RuleLink{{RuleSetRef: "geosite-category-ai-!cn", ActionTarget: "tunnel"}},
 			Notice:   "ChatGPT, Claude, Gemini, Perplexity и другие (кроме китайских)",
 		},
-	)
-
-	// Developer
-	out = append(out,
-		simpleGeosite("github", "GitHub", CatDeveloper, "github"),
-		simpleGeosite("gitlab", "GitLab", CatDeveloper, "gitlab"),
-		simpleGeosite("docker", "Docker", CatDeveloper, "docker"),
 	)
 
 	// Cloud / enterprise
@@ -151,7 +145,8 @@ func All() []Preset {
 		simpleGeosite("steam", "Steam", CatGaming, "steam"),
 		simpleGeosite("playstation", "PlayStation", CatGaming, "playstation"),
 		simpleGeosite("xbox", "Xbox", CatGaming, "xbox"),
-		simpleGeosite("roblox", "Roblox", CatGaming, "roblox"),
+		vernetteGeosite("roblox", "Roblox", CatGaming, "roblox", "roblox"),
+		vernetteGeosite("nintendo", "Nintendo", CatGaming, "nintendoswitch", "nintendo"),
 	)
 
 	// Блокировка (action: reject)
@@ -164,6 +159,12 @@ func All() []Preset {
 			Rules:    []RuleLink{{RuleSetRef: "geosite-category-ads-all", ActionTarget: "reject"}},
 			Notice:   "Блокирует рекламу и трекеры через action:reject — выбор outbound не требуется",
 		},
+	)
+
+	// Региональные обходы блокировок
+	out = append(out,
+		vernetteGeosite("rkn", "Заблокировано в РФ", CatBlock, "lucide-shield-off", "rkn"),
+		vernetteGeosite("unavailable-in-russia", "Недоступно из РФ", CatBlock, "lucide-globe-lock", "unavailable-in-russia"),
 	)
 
 	// Sensitive (hidden by default; Category empty since the gallery

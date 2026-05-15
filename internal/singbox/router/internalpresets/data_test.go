@@ -28,11 +28,14 @@ func TestAll_ExpectedIDs(t *testing.T) {
 		"openai":         true,
 		"anthropic":      true,
 		"gemini":         true,
+		"copilot":        true,
+		"grok":           true,
 		"perplexity":     true,
 		"category-ai":    true,
 		"github":         true,
 		"gitlab":         true,
 		"docker":         true,
+		"linkedin":       true,
 		"cloudflare":     true,
 		"akamai":         true,
 		"aws":            true,
@@ -43,7 +46,10 @@ func TestAll_ExpectedIDs(t *testing.T) {
 		"playstation":    true,
 		"xbox":           true,
 		"roblox":         true,
+		"nintendo":       true,
 		"ads":            true,
+		"rkn":            true,
+		"unavailable-in-russia": true,
 		"porn":           true,
 	}
 
@@ -99,6 +105,41 @@ func TestAll_CategoryConstantsOnly(t *testing.T) {
 		}
 		if !valid[p.Category] {
 			t.Errorf("preset %q: Category=%q is not one of the seven exported constants", p.ID, p.Category)
+		}
+	}
+}
+
+func TestAll_NewPresets(t *testing.T) {
+	newPresets := map[string]struct {
+		file     string
+		category string
+	}{
+		"roblox":                {"roblox", CatGaming},
+		"nintendo":              {"nintendo", CatGaming},
+		"linkedin":              {"linkedin", CatDeveloper},
+		"copilot":               {"copilot", CatAI},
+		"gemini":                {"gemini", CatAI},
+		"grok":                  {"grok", CatAI},
+		"rkn":                   {"rkn", CatBlock},
+		"unavailable-in-russia": {"unavailable-in-russia", CatBlock},
+	}
+	presets := All()
+	byID := make(map[string]Preset, len(presets))
+	for _, p := range presets {
+		byID[p.ID] = p
+	}
+	for id, want := range newPresets {
+		p, ok := byID[id]
+		if !ok {
+			t.Errorf("new preset %q missing from All()", id)
+			continue
+		}
+		if p.Category != want.category {
+			t.Errorf("preset %q category: got %s, want %s", id, p.Category, want.category)
+		}
+		wantURL := vernetteSRSRoot + want.file + ".srs"
+		if len(p.RuleSets) == 0 || p.RuleSets[0].URL != wantURL {
+			t.Errorf("preset %q URL: got %v, want %s", id, p.RuleSets, wantURL)
 		}
 	}
 }
