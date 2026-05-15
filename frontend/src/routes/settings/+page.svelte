@@ -403,8 +403,8 @@ onMount(() => {
 	}
 
 	afterNavigate(async ({ to, from }) => {
-		if (!to || to.url.pathname !== "/settings") return;
-		if (!from || from.url.pathname !== "/settings") {
+		if (!to?.url || to.url.pathname !== "/settings") return;
+		if (!from?.url || from.url.pathname !== "/settings") {
 			await fetchSystemInfo(true);
 		}
 	});
@@ -461,9 +461,9 @@ onMount(() => {
 				highlighted={expandUsageLevel}
 			/>
 
-				{#if $usageLevel === "expert"}
-					<ThemeSchemeCard />
-				{/if}
+			{#if $usageLevel === "advanced" || $usageLevel === "expert"}
+				<ThemeSchemeCard />
+			{/if}
 
 				<div class="card">
 					<div class="section-label">Доступ</div>
