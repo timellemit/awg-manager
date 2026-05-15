@@ -13,6 +13,7 @@
 		TUNNEL_MOBILE_LAYOUT_MAX_WIDTH_PX,
 		type SingboxLayoutMode,
 	} from '$lib/constants/singboxLayout';
+	import { isMockDevMode } from '$lib/env';
 
 	// Poll Clash for the live "now" pointer this often when on members tab in urltest
 	// mode. 5s balances responsiveness with Clash API load.
@@ -56,18 +57,35 @@
 
 	function loadStream(): void {
 		if (!id) return;
+		const isMockDev = isMockDevMode();
 		progressLoaded = 0;
 		progressTotal = 0;
 		loading = true;
 		error = '';
 		subscription = null;
 		evtSrc?.close();
+		if (isMockDev) {
+			void (async () => {
+				try {
+					const sub = await api.getSubscription(id);
+					subscription = sub;
+					progressTotal = sub.memberTags?.length ?? sub.members?.length ?? 0;
+					progressLoaded = progressTotal;
+				} catch {
+					error = 'Не удалось загрузить подписку';
+				} finally {
+					loading = false;
+				}
+			})();
+			return;
+		}
 		evtSrc = new EventSource(
 			`/api/singbox/subscriptions/get-stream?id=${encodeURIComponent(id)}`,
 		);
 		// Guard against onerror firing right after a clean done — browser emits
 		// onerror on the closed connection, but we treat that as success.
 		let streamDone = false;
+		let fallbackTried = false;
 
 		evtSrc.addEventListener('meta', (e) => {
 			const meta = JSON.parse((e as MessageEvent).data);
@@ -101,8 +119,26 @@
 			evtSrc = null;
 		});
 
-		evtSrc.onerror = () => {
+		evtSrc.onerror = async () => {
 			if (streamDone) return; // already completed cleanly — ignore connection-close error
+			// Prism mock backend does not emulate SSE streaming events reliably.
+			// Fall back to the regular subscription GET so local mock UI remains usable.
+			if (isMockDev && !fallbackTried && progressLoaded === 0) {
+				fallbackTried = true;
+				try {
+					const sub = await api.getSubscription(id);
+					subscription = sub;
+					progressTotal = sub.memberTags?.length ?? sub.members?.length ?? 0;
+					progressLoaded = progressTotal;
+					loading = false;
+					error = '';
+					evtSrc?.close();
+					evtSrc = null;
+					return;
+				} catch {
+					// Keep default error handling below.
+				}
+			}
 			// Browser fires onerror on connection drop. Surface partial state
 			// if we got members, generic error otherwise.
 			if (progressLoaded > 0 && progressTotal > 0) {
