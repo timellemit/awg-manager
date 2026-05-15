@@ -69,9 +69,15 @@
 	);
 
 	// Aggregate preview: unique rule_set tags + flat rules list across all selected.
-	const previewRuleSets = $derived(
-		Array.from(new Map(presets.flatMap((p) => p.ruleSets.map((rs) => [rs.tag, rs])).values()).values()),
-	);
+	const previewRuleSets = $derived.by(() => {
+		const map = new Map<string, { tag: string; url: string }>();
+		for (const p of presets) {
+			for (const rs of p.ruleSets) {
+				if (!map.has(rs.tag)) map.set(rs.tag, rs);
+			}
+		}
+		return Array.from(map.values());
+	});
 	const previewRules = $derived(
 		presets.flatMap((p) => p.rules.map((r) => ({ ...r, presetName: p.name }))),
 	);
