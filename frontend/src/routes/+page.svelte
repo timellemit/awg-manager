@@ -33,6 +33,7 @@
 	import SubscriptionActiveCard from '$lib/components/subscriptions/SubscriptionActiveCard.svelte';
 	import type { ExternalTunnel, Subscription, SubscriptionMember, SystemTunnel, TunnelListItem } from '$lib/types';
 	import { formatBitRate, formatBytes, formatDuration, formatRelativeTime, secondsSince } from '$lib/utils/format';
+	import { resolveSubscriptionMemberTag } from '$lib/utils/subscriptionMember';
 	import {
 		SINGBOX_LAYOUT_STORAGE_KEY,
 		TUNNEL_MOBILE_LAYOUT_MAX_WIDTH_PX,
@@ -404,10 +405,7 @@
 			}
 		}
 		for (const sub of subscriptionsListRows) {
-			const tag =
-				sub.activeMember && sub.memberTags.includes(sub.activeMember)
-					? sub.activeMember
-					: sub.memberTags[0] ?? '';
+			const tag = resolveSubscriptionMemberTag(sub, liveActives[sub.id] || null);
 			if (!tag) continue;
 			const tr = map.get(tag);
 			if (tr) {
@@ -1666,6 +1664,7 @@
 								{#each subscriptionsListRows as sub (sub.id)}
 									<SubscriptionCard
 										subscription={sub}
+										liveActiveMember={liveActives[sub.id] || null}
 										layout="list"
 										ondelete={requestSubscriptionDelete}
 									/>
@@ -1693,6 +1692,7 @@
 								{#each subscriptionsListRows as sub (sub.id)}
 									<SubscriptionCard
 										subscription={sub}
+										liveActiveMember={liveActives[sub.id] || null}
 										layout="grid"
 										ondelete={requestSubscriptionDelete}
 									/>

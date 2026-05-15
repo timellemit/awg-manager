@@ -7,22 +7,19 @@
 	import { getTrafficRates, subscribeTraffic, loadHistory } from '$lib/stores/traffic';
 	import { TrafficSparkline } from '$lib/components/ui';
 	import { formatBytes } from '$lib/utils/format';
+	import { resolveSubscriptionMemberTag } from '$lib/utils/subscriptionMember';
 
 	interface Props {
 		subscription: Subscription;
+		liveActiveMember?: string | null;
 		layout?: SingboxLayoutMode;
 		ondelete?: (id: string) => void;
 	}
-	let { subscription, layout = 'grid', ondelete }: Props = $props();
+	let { subscription, liveActiveMember = null, layout = 'grid', ondelete }: Props = $props();
 
-	const latencyTag = $derived.by(() => {
-		if (subscription.activeMember && subscription.memberTags.includes(subscription.activeMember)) {
-			return subscription.activeMember;
-		}
-		return subscription.memberTags[0] ?? '';
-	});
+	const resolvedMemberTag = $derived(resolveSubscriptionMemberTag(subscription, liveActiveMember));
 
-	const history = $derived($singboxDelayHistory.get(latencyTag) ?? []);
+	const history = $derived($singboxDelayHistory.get(resolvedMemberTag) ?? []);
 	const latest = $derived(history.length > 0 ? history[history.length - 1] : -1);
 	const hasConsecutiveTimeout = $derived(
 		history.length >= 2 &&
@@ -34,7 +31,7 @@
 	const DELAY_SLOW = 500;
 
 	const delayState = $derived.by((): 'ok' | 'slow' | 'fail' | 'unknown' => {
-		if (!latencyTag) return 'unknown';
+		if (!resolvedMemberTag) return 'unknown';
 		if (latest < 0) return 'unknown';
 		if (latest <= 0) return hasConsecutiveTimeout ? 'fail' : 'slow';
 		if (latest < DELAY_OK) return 'ok';
@@ -42,14 +39,14 @@
 		return 'slow';
 	});
 	const delayText = $derived.by(() => {
-		if (!latencyTag) return '—';
+		if (!resolvedMemberTag) return '—';
 		if (delayState === 'unknown') return '—';
 		if (delayState === 'fail') return 'timeout';
 		if (latest <= 0) return '…';
 		return `${latest}ms`;
 	});
 
-	const traffic = $derived(latencyTag ? $singboxTraffic.get(latencyTag) : undefined);
+	const traffic = $derived(resolvedMemberTag ? $singboxTraffic.get(resolvedMemberTag) : undefined);
 
 	const trafficSparkData = $derived.by(() => {
 		const n = Math.min(rxRates.length, txRates.length);
@@ -64,7 +61,7 @@
 
 	let rxRates = $state<number[]>([]);
 	let txRates = $state<number[]>([]);
-	let trafficTag = $derived(latencyTag);
+	let trafficTag = $derived(resolvedMemberTag);
 
 	$effect(() => {
 		const tag = trafficTag;
@@ -93,10 +90,10 @@
 
 	async function runDelayCheck(e?: MouseEvent | KeyboardEvent): Promise<void> {
 		e?.stopPropagation();
-		if (!latencyTag || testingDelay) return;
+		if (!resolvedMemberTag || testingDelay) return;
 		testingDelay = true;
 		try {
-			await triggerDelayCheck(latencyTag);
+			await triggerDelayCheck(resolvedMemberTag);
 		} finally {
 			testingDelay = false;
 		}
@@ -160,7 +157,7 @@
 						<span class="delay-inline-err mono" title={subscription.lastError}>
 							{subscription.lastError}
 						</span>
-					{:else if latencyTag}
+					{:else if resolvedMemberTag}
 						<button
 							type="button"
 							class="lat-btn {delayState}"
@@ -189,7 +186,7 @@
 				<div class="list-cell list-cell-traffic" data-label="Трафик">
 					{#if subscription.lastError}
 						<span class="delay-dash">—</span>
-					{:else if latencyTag}
+					{:else if resolvedMemberTag}
 						<div class="traffic-row-list">
 							<TrafficSparkline
 								data={trafficSparkData}
@@ -209,7 +206,7 @@
 				<div class="list-cell list-cell-ping" data-label="Ping">
 					{#if subscription.lastError}
 						<span class="delay-dash">—</span>
-					{:else if latencyTag}
+					{:else if resolvedMemberTag}
 						<div
 							class="spark-mini {delayState}"
 							role="button"
