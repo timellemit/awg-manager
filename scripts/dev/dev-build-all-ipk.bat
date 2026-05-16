@@ -87,8 +87,8 @@ if not defined BASH (
 
 echo Using bash: !BASH!
 
-:: Корень проекта – на уровень выше папки scripts, где лежит этот bat
-set "PROJECT=%~dp0.."
+:: Корень проекта – на два уровня выше текущего bat (scripts\dev\ -> repo root)
+set "PROJECT=%~dp0..\.."
 pushd "%PROJECT%"
 set "PROJECT=%CD%"
 popd

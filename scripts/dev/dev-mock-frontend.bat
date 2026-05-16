@@ -2,9 +2,9 @@
 setlocal
 
 rem Usage:
-rem   scripts\dev-mock-frontend.bat [FRONT_PORT] [PRISM_PORT] [MOCK_PROXY_PORT]
+rem   scripts\dev\dev-mock-frontend.bat [FRONT_PORT] [PRISM_PORT] [MOCK_PROXY_PORT]
 rem Example:
-rem   scripts\dev-mock-frontend.bat 4173 8080 8081
+rem   scripts\dev\dev-mock-frontend.bat 4173 8080 8081
 
 set "FRONT_PORT=%~1"
 if "%FRONT_PORT%"=="" set "FRONT_PORT=4173"
@@ -15,7 +15,7 @@ if "%MOCK_PORT%"=="" set "MOCK_PORT=8080"
 set "MOCK_PROXY_PORT=%~3"
 if "%MOCK_PROXY_PORT%"=="" set "MOCK_PROXY_PORT=8081"
 
-for %%I in ("%~dp0..") do set "ROOT=%%~fI"
+for %%I in ("%~dp0..\..") do set "ROOT=%%~fI"
 set "FRONTEND_DIR=%ROOT%\frontend"
 set "SWAGGER=%ROOT%\internal\openapi\swagger.yaml"
 

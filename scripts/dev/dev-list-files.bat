@@ -4,9 +4,9 @@ setlocal EnableExtensions EnableDelayedExpansion
 rem Этот скрипт формирует tree.md со структурой файлов репозитория.
 rem Нужен, чтобы передать структуру проекта в чат-агент для быстрой навигации по коду.
 
-rem Resolve repo root as parent of this script directory.
+rem Resolve repo root as two levels up from this script directory.
 
-pushd "%~dp0.." >nul || (
+pushd "%~dp0..\.." >nul || (
   echo Failed to resolve repository root.
   exit /b 1
 )
