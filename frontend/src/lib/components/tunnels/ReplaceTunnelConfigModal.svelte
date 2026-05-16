@@ -1,5 +1,6 @@
 <script lang="ts">
     import { Modal, Button } from '$lib/components/ui';
+    import AmneziaConfEditor from './AmneziaConfEditor.svelte';
     import { api } from '$lib/api/client';
     import { notifications } from '$lib/stores/notifications';
     import { decodeVpnLink, isVpnLink } from '$lib/utils/vpnlink';
@@ -218,11 +219,11 @@
                 {/if}
             </div>
         {:else if activeTab === 'paste'}
-            <textarea
-                class="config-textarea"
+            <AmneziaConfEditor
                 bind:value={importContent}
+                variant="modal"
                 placeholder={"[Interface]\nPrivateKey = ...\nAddress = 10.0.0.2/32\n\n[Peer]\nPublicKey = ...\nEndpoint = vpn.example.com:51820\nAllowedIPs = 0.0.0.0/0"}
-            ></textarea>
+            />
         {:else if activeTab === 'link'}
             <textarea
                 class="config-textarea link-input"
@@ -234,7 +235,7 @@
                 <p class="link-error">{linkError}</p>
             {/if}
             {#if linkPreview}
-                <textarea class="config-textarea link-preview" readonly value={linkPreview}></textarea>
+                <AmneziaConfEditor bind:value={linkPreview} variant="modal-preview" readonly />
             {/if}
         {/if}
     </div>

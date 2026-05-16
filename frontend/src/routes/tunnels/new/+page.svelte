@@ -5,6 +5,7 @@
 	import { notifications } from '$lib/stores/notifications';
 	import { PageContainer } from '$lib/components/layout';
 	import { Button } from '$lib/components/ui';
+	import AmneziaConfEditor from '$lib/components/tunnels/AmneziaConfEditor.svelte';
 	import { decodeVpnLink, isVpnLink } from '$lib/utils/vpnlink';
 	import { api } from '$lib/api/client';
 	import type { SystemInfo } from '$lib/types';
@@ -294,9 +295,9 @@
 				{/if}
 			</div>
 		{:else if activeTab === 'paste'}
-			<textarea
-				class="config-textarea"
+			<AmneziaConfEditor
 				bind:value={importContent}
+				variant="page"
 				placeholder="[Interface]
 PrivateKey = ...
 Address = 10.0.0.2/32
@@ -305,7 +306,7 @@ Address = 10.0.0.2/32
 PublicKey = ...
 Endpoint = vpn.example.com:51820
 AllowedIPs = 0.0.0.0/0"
-			></textarea>
+			/>
 		{:else if activeTab === 'link'}
 			<textarea
 				class="config-textarea link-input"
@@ -317,11 +318,7 @@ AllowedIPs = 0.0.0.0/0"
 				<p class="link-error">{linkError}</p>
 			{/if}
 			{#if linkPreview}
-				<textarea
-					class="config-textarea link-preview"
-					readonly
-					value={linkPreview}
-				></textarea>
+				<AmneziaConfEditor bind:value={linkPreview} variant="preview" readonly />
 			{/if}
 		{/if}
 	</div>
