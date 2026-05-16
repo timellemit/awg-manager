@@ -169,7 +169,12 @@ class ApiClient {
 		}
 
 		if (!response.ok || data.error) {
-			throw new Error(data.message || `Ошибка запроса (${response.status})`);
+			const err: Error & { status?: number; body?: unknown } = new Error(
+				data.message || `Ошибка запроса (${response.status})`
+			);
+			err.status = response.status;
+			err.body = data;
+			throw err;
 		}
 
 		return data.data as T;
