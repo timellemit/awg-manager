@@ -10,6 +10,7 @@ import (
 	"github.com/hoaxisr/awg-manager/internal/events"
 	"github.com/hoaxisr/awg-manager/internal/managed"
 	"github.com/hoaxisr/awg-manager/internal/response"
+	"github.com/hoaxisr/awg-manager/internal/storage"
 )
 
 // ManagedServerBackupHandler exposes Export / Import / Drift / RestoreDrift.
@@ -27,12 +28,34 @@ func NewManagedServerBackupHandler(svc *managed.Service) *ManagedServerBackupHan
 	return &ManagedServerBackupHandler{svc: svc}
 }
 
+// ManagedServerBackupDTO mirrors storage.ManagedServer for backup/restore
+// transport. Exists in api/ (rather than reusing managed.ManagedServerExport
+// directly) so swag can resolve it without crossing package boundaries —
+// matches the existing ManagedServerDTO pattern but includes the secret
+// fields (PrivateKey, I1, I2) needed for full restore.
+type ManagedServerBackupDTO struct {
+	InterfaceName string           `json:"interfaceName" example:"Wireguard1"`
+	Description   string           `json:"description,omitempty" example:"My VPN"`
+	Address       string           `json:"address" example:"10.10.0.1"`
+	Mask          string           `json:"mask" example:"255.255.255.0"`
+	ListenPort    int              `json:"listenPort" example:"51821"`
+	Endpoint      string           `json:"endpoint,omitempty" example:"vpn.example.com:51821"`
+	DNS           string           `json:"dns,omitempty" example:"8.8.8.8"`
+	MTU           int              `json:"mtu,omitempty" example:"1420"`
+	NATEnabled    bool             `json:"natEnabled,omitempty" example:"true"`
+	PrivateKey    string           `json:"privateKey,omitempty" example:"oA..."`
+	Policy        string           `json:"policy" example:"none"`
+	Peers         []ManagedPeerDTO `json:"peers"`
+	I1            string           `json:"i1,omitempty"`
+	I2            string           `json:"i2,omitempty"`
+}
+
 // ManagedServerBackupFile is the on-disk JSON shape.
 type ManagedServerBackupFile struct {
-	Version        int                           `json:"version"`
-	Type           string                        `json:"type"`
-	ExportedAt     time.Time                     `json:"exportedAt"`
-	ManagedServers []managed.ManagedServerExport `json:"managedServers"`
+	Version        int                      `json:"version"`
+	Type           string                   `json:"type"`
+	ExportedAt     time.Time                `json:"exportedAt"`
+	ManagedServers []ManagedServerBackupDTO `json:"managedServers"`
 }
 
 const (
@@ -40,27 +63,154 @@ const (
 	backupFileVersion = 1
 )
 
+// RestoreOptionsDTO mirrors managed.RestoreOptions on the wire. Defined
+// in api/ so swag resolves it without crossing package boundaries.
+type RestoreOptionsDTO struct {
+	AllowRenumber bool `json:"allowRenumber" example:"false"`
+}
+
+// RestoreOutcomeDTO mirrors managed.RestoreOutcome on the wire.
+type RestoreOutcomeDTO struct {
+	Name       string   `json:"name" example:"Wireguard1"`
+	NewName    string   `json:"newName,omitempty" example:"Wireguard2"`
+	Action     string   `json:"action" example:"created"`
+	AddedPeers int      `json:"addedPeers,omitempty" example:"2"`
+	Conflicts  []string `json:"conflicts,omitempty"`
+	Error      string   `json:"error,omitempty"`
+}
+
 // ManagedServerImportRequest is the body of POST /api/managed/import.
 type ManagedServerImportRequest struct {
-	ManagedServers []managed.ManagedServerExport `json:"managedServers"`
-	Options        managed.RestoreOptions        `json:"options"`
-	Version        int                           `json:"version,omitempty"`
-	Type           string                        `json:"type,omitempty"`
+	ManagedServers []ManagedServerBackupDTO `json:"managedServers"`
+	Options        RestoreOptionsDTO        `json:"options"`
+	Version        int                      `json:"version,omitempty"`
+	Type           string                   `json:"type,omitempty"`
 }
 
 // ManagedServerRestoreDriftRequest is the body of POST /api/managed/restore-drift.
 type ManagedServerRestoreDriftRequest struct {
-	Options managed.RestoreOptions `json:"options"`
+	Options RestoreOptionsDTO `json:"options"`
 }
 
 // ManagedServerRestoreResponse is the response of /import and /restore-drift.
 type ManagedServerRestoreResponse struct {
-	Outcomes []managed.RestoreOutcome `json:"outcomes"`
+	Outcomes []RestoreOutcomeDTO `json:"outcomes"`
 }
 
 // ManagedServerDriftResponse is the response of GET /api/managed/drift.
 type ManagedServerDriftResponse struct {
-	Drift []managed.ManagedServerExport `json:"drift"`
+	Drift []ManagedServerBackupDTO `json:"drift"`
+}
+
+// ── Wire envelopes (swag-only) ──
+// response.Success() wraps inner data in {success, data: <inner>} on the
+// wire. The envelope types below carry that wire shape so swag annotations
+// match what the daemon actually serves and Prism mocks return realistic
+// payloads. Handlers continue to write the inner types via response.Success.
+
+// ManagedServerExportEnvelope is the wire shape of GET /api/managed/export.
+type ManagedServerExportEnvelope struct {
+	Success bool                    `json:"success" example:"true"`
+	Data    ManagedServerBackupFile `json:"data"`
+}
+
+// ManagedServerImportEnvelope is the wire shape of POST /api/managed/import
+// and POST /api/managed/restore-drift.
+type ManagedServerImportEnvelope struct {
+	Success bool                         `json:"success" example:"true"`
+	Data    ManagedServerRestoreResponse `json:"data"`
+}
+
+// ManagedServerDriftEnvelope is the wire shape of GET /api/managed/drift.
+type ManagedServerDriftEnvelope struct {
+	Success bool                       `json:"success" example:"true"`
+	Data    ManagedServerDriftResponse `json:"data"`
+}
+
+// managedServerToBackupDTO converts a storage entry to its wire form.
+func managedServerToBackupDTO(s storage.ManagedServer) ManagedServerBackupDTO {
+	peers := make([]ManagedPeerDTO, len(s.Peers))
+	for i, p := range s.Peers {
+		peers[i] = ManagedPeerDTO{
+			PublicKey:    p.PublicKey,
+			PrivateKey:   p.PrivateKey,
+			PresharedKey: p.PresharedKey,
+			Description:  p.Description,
+			TunnelIP:     p.TunnelIP,
+			DNS:          p.DNS,
+			Enabled:      p.Enabled,
+		}
+	}
+	return ManagedServerBackupDTO{
+		InterfaceName: s.InterfaceName,
+		Description:   s.Description,
+		Address:       s.Address,
+		Mask:          s.Mask,
+		ListenPort:    s.ListenPort,
+		Endpoint:      s.Endpoint,
+		DNS:           s.DNS,
+		MTU:           s.MTU,
+		NATEnabled:    s.NATEnabled,
+		PrivateKey:    s.PrivateKey,
+		Policy:        s.Policy,
+		Peers:         peers,
+		I1:            s.I1,
+		I2:            s.I2,
+	}
+}
+
+// restoreOptionsFromDTO converts the wire form to managed.RestoreOptions.
+func restoreOptionsFromDTO(d RestoreOptionsDTO) managed.RestoreOptions {
+	return managed.RestoreOptions{AllowRenumber: d.AllowRenumber}
+}
+
+// outcomesToDTO converts a slice of restore outcomes to wire form.
+func outcomesToDTO(in []managed.RestoreOutcome) []RestoreOutcomeDTO {
+	out := make([]RestoreOutcomeDTO, len(in))
+	for i, o := range in {
+		out[i] = RestoreOutcomeDTO{
+			Name:       o.Name,
+			NewName:    o.NewName,
+			Action:     o.Action,
+			AddedPeers: o.AddedPeers,
+			Conflicts:  o.Conflicts,
+			Error:      o.Error,
+		}
+	}
+	return out
+}
+
+// backupDTOToManagedServer converts wire form back to a storage entry,
+// used on import before handing off to managed.Service.Restore.
+func backupDTOToManagedServer(d ManagedServerBackupDTO) storage.ManagedServer {
+	peers := make([]storage.ManagedPeer, len(d.Peers))
+	for i, p := range d.Peers {
+		peers[i] = storage.ManagedPeer{
+			PublicKey:    p.PublicKey,
+			PrivateKey:   p.PrivateKey,
+			PresharedKey: p.PresharedKey,
+			Description:  p.Description,
+			TunnelIP:     p.TunnelIP,
+			DNS:          p.DNS,
+			Enabled:      p.Enabled,
+		}
+	}
+	return storage.ManagedServer{
+		InterfaceName: d.InterfaceName,
+		Description:   d.Description,
+		Address:       d.Address,
+		Mask:          d.Mask,
+		ListenPort:    d.ListenPort,
+		Endpoint:      d.Endpoint,
+		DNS:           d.DNS,
+		MTU:           d.MTU,
+		NATEnabled:    d.NATEnabled,
+		PrivateKey:    d.PrivateKey,
+		Policy:        d.Policy,
+		Peers:         peers,
+		I1:            d.I1,
+		I2:            d.I2,
+	}
 }
 
 // Export handles GET /api/managed/export.
@@ -70,7 +220,7 @@ type ManagedServerDriftResponse struct {
 //	@Tags			managed
 //	@Produce		json
 //	@Security		CookieAuth
-//	@Success		200	{object}	ManagedServerBackupFile
+//	@Success		200	{object}	ManagedServerExportEnvelope
 //	@Failure		500	{object}	APIErrorEnvelope
 //	@Router			/managed/export [get]
 func (h *ManagedServerBackupHandler) Export(w http.ResponseWriter, r *http.Request) {
@@ -83,12 +233,15 @@ func (h *ManagedServerBackupHandler) Export(w http.ResponseWriter, r *http.Reque
 		response.InternalError(w, "export: "+err.Error())
 		return
 	}
-	now := time.Now().UTC()
+	dtos := make([]ManagedServerBackupDTO, len(servers))
+	for i, s := range servers {
+		dtos[i] = managedServerToBackupDTO(s)
+	}
 	response.Success(w, ManagedServerBackupFile{
 		Version:        backupFileVersion,
 		Type:           backupFileType,
-		ExportedAt:     now,
-		ManagedServers: servers,
+		ExportedAt:     time.Now().UTC(),
+		ManagedServers: dtos,
 	})
 }
 
@@ -101,7 +254,7 @@ func (h *ManagedServerBackupHandler) Export(w http.ResponseWriter, r *http.Reque
 //	@Produce		json
 //	@Security		CookieAuth
 //	@Param			body	body		ManagedServerImportRequest	true	"backup contents + options"
-//	@Success		200		{object}	ManagedServerRestoreResponse
+//	@Success		200		{object}	ManagedServerImportEnvelope
 //	@Failure		400		{object}	APIErrorEnvelope
 //	@Failure		500		{object}	APIErrorEnvelope
 //	@Router			/managed/import [post]
@@ -123,8 +276,12 @@ func (h *ManagedServerBackupHandler) Import(w http.ResponseWriter, r *http.Reque
 		response.Error(w, fmt.Sprintf("unsupported version %d (only %d)", req.Version, backupFileVersion), "INVALID_REQUEST")
 		return
 	}
-	outcomes := h.svc.Restore(r.Context(), req.ManagedServers, req.Options)
-	response.Success(w, ManagedServerRestoreResponse{Outcomes: outcomes})
+	servers := make([]storage.ManagedServer, len(req.ManagedServers))
+	for i, d := range req.ManagedServers {
+		servers[i] = backupDTOToManagedServer(d)
+	}
+	outcomes := h.svc.Restore(r.Context(), servers, restoreOptionsFromDTO(req.Options))
+	response.Success(w, ManagedServerRestoreResponse{Outcomes: outcomesToDTO(outcomes)})
 	if hasActionableMutation(outcomes) {
 		publishInvalidated(h.bus, ResourceServers, "managed-restore")
 	}
@@ -137,7 +294,7 @@ func (h *ManagedServerBackupHandler) Import(w http.ResponseWriter, r *http.Reque
 //	@Tags			managed
 //	@Produce		json
 //	@Security		CookieAuth
-//	@Success		200	{object}	ManagedServerDriftResponse
+//	@Success		200	{object}	ManagedServerDriftEnvelope
 //	@Failure		500	{object}	APIErrorEnvelope
 //	@Router			/managed/drift [get]
 func (h *ManagedServerBackupHandler) Drift(w http.ResponseWriter, r *http.Request) {
@@ -150,7 +307,11 @@ func (h *ManagedServerBackupHandler) Drift(w http.ResponseWriter, r *http.Reques
 		response.InternalError(w, "drift: "+err.Error())
 		return
 	}
-	response.Success(w, ManagedServerDriftResponse{Drift: drift})
+	dtos := make([]ManagedServerBackupDTO, len(drift))
+	for i, s := range drift {
+		dtos[i] = managedServerToBackupDTO(s)
+	}
+	response.Success(w, ManagedServerDriftResponse{Drift: dtos})
 }
 
 // RestoreDrift handles POST /api/managed/restore-drift.
@@ -162,7 +323,7 @@ func (h *ManagedServerBackupHandler) Drift(w http.ResponseWriter, r *http.Reques
 //	@Produce		json
 //	@Security		CookieAuth
 //	@Param			body	body		ManagedServerRestoreDriftRequest	false	"options"
-//	@Success		200		{object}	ManagedServerRestoreResponse
+//	@Success		200		{object}	ManagedServerImportEnvelope
 //	@Failure		500		{object}	APIErrorEnvelope
 //	@Router			/managed/restore-drift [post]
 func (h *ManagedServerBackupHandler) RestoreDrift(w http.ResponseWriter, r *http.Request) {
@@ -180,8 +341,8 @@ func (h *ManagedServerBackupHandler) RestoreDrift(w http.ResponseWriter, r *http
 		response.InternalError(w, "drift: "+err.Error())
 		return
 	}
-	outcomes := h.svc.Restore(r.Context(), drift, req.Options)
-	response.Success(w, ManagedServerRestoreResponse{Outcomes: outcomes})
+	outcomes := h.svc.Restore(r.Context(), drift, restoreOptionsFromDTO(req.Options))
+	response.Success(w, ManagedServerRestoreResponse{Outcomes: outcomesToDTO(outcomes)})
 	if hasActionableMutation(outcomes) {
 		publishInvalidated(h.bus, ResourceServers, "managed-restore-drift")
 	}

@@ -1195,6 +1195,63 @@ definitions:
         example: 1048576
         type: integer
     type: object
+  api.ManagedServerBackupDTO:
+    properties:
+      address:
+        example: 10.10.0.1
+        type: string
+      description:
+        example: My VPN
+        type: string
+      dns:
+        example: 8.8.8.8
+        type: string
+      endpoint:
+        example: vpn.example.com:51821
+        type: string
+      i1:
+        type: string
+      i2:
+        type: string
+      interfaceName:
+        example: Wireguard1
+        type: string
+      listenPort:
+        example: 51821
+        type: integer
+      mask:
+        example: 255.255.255.0
+        type: string
+      mtu:
+        example: 1420
+        type: integer
+      natEnabled:
+        example: true
+        type: boolean
+      peers:
+        items:
+          $ref: '#/definitions/api.ManagedPeerDTO'
+        type: array
+      policy:
+        example: none
+        type: string
+      privateKey:
+        example: oA...
+        type: string
+    type: object
+  api.ManagedServerBackupFile:
+    properties:
+      exportedAt:
+        type: string
+      managedServers:
+        items:
+          $ref: '#/definitions/api.ManagedServerBackupDTO'
+        type: array
+      type:
+        type: string
+      version:
+        type: integer
+    type: object
   api.ManagedServerDTO:
     properties:
       address:
@@ -1229,6 +1286,50 @@ definitions:
         example: default
         type: string
     type: object
+  api.ManagedServerDriftEnvelope:
+    properties:
+      data:
+        $ref: '#/definitions/api.ManagedServerDriftResponse'
+      success:
+        example: true
+        type: boolean
+    type: object
+  api.ManagedServerDriftResponse:
+    properties:
+      drift:
+        items:
+          $ref: '#/definitions/api.ManagedServerBackupDTO'
+        type: array
+    type: object
+  api.ManagedServerExportEnvelope:
+    properties:
+      data:
+        $ref: '#/definitions/api.ManagedServerBackupFile'
+      success:
+        example: true
+        type: boolean
+    type: object
+  api.ManagedServerImportEnvelope:
+    properties:
+      data:
+        $ref: '#/definitions/api.ManagedServerRestoreResponse'
+      success:
+        example: true
+        type: boolean
+    type: object
+  api.ManagedServerImportRequest:
+    properties:
+      managedServers:
+        items:
+          $ref: '#/definitions/api.ManagedServerBackupDTO'
+        type: array
+      options:
+        $ref: '#/definitions/api.RestoreOptionsDTO'
+      type:
+        type: string
+      version:
+        type: integer
+    type: object
   api.ManagedServerResponse:
     properties:
       data:
@@ -1236,6 +1337,18 @@ definitions:
       success:
         example: true
         type: boolean
+    type: object
+  api.ManagedServerRestoreDriftRequest:
+    properties:
+      options:
+        $ref: '#/definitions/api.RestoreOptionsDTO'
+    type: object
+  api.ManagedServerRestoreResponse:
+    properties:
+      outcomes:
+        items:
+          $ref: '#/definitions/api.RestoreOutcomeDTO'
+        type: array
     type: object
   api.ManagedServerStatsDTO:
     properties:
@@ -1744,6 +1857,94 @@ definitions:
         items:
           type: string
         type: array
+    type: object
+  api.RestoreOptionsDTO:
+    properties:
+      allowRenumber:
+        example: false
+        type: boolean
+    type: object
+  api.RestoreOutcomeDTO:
+    properties:
+      action:
+        example: created
+        type: string
+      addedPeers:
+        example: 2
+        type: integer
+      conflicts:
+        items:
+          type: string
+        type: array
+      error:
+        type: string
+      name:
+        example: Wireguard1
+        type: string
+      newName:
+        example: Wireguard2
+        type: string
+    type: object
+  api.RouterDetails:
+    properties:
+      architecture:
+        type: string
+      bootSlot:
+        type: string
+      cpuModel:
+        type: string
+      cpuTempC:
+        type: integer
+      featureComponents:
+        items:
+          type: string
+        type: array
+      firmwareBuildDate:
+        type: string
+      firmwareRelease:
+        type: string
+      firmwareSandbox:
+        type: string
+      firmwareTitle:
+        type: string
+      hardwareId:
+        type: string
+      loadAverage:
+        type: string
+      memoryTotalMB:
+        type: integer
+      memoryUsedMB:
+        type: integer
+      memoryUsedPercent:
+        type: integer
+      meshMembers:
+        items:
+          type: string
+        type: array
+      model:
+        type: string
+      modelDisplay:
+        type: string
+      opkgStorage:
+        type: string
+      portedBuild:
+        type: boolean
+      region:
+        type: string
+      storageComponents:
+        items:
+          type: string
+        type: array
+      uptimeHuman:
+        type: string
+      vpnComponents:
+        items:
+          type: string
+        type: array
+      wifi5TempC:
+        type: integer
+      wifi24TempC:
+        type: integer
     type: object
   api.RouterInterfaceDTO:
     properties:
@@ -3161,6 +3362,8 @@ definitions:
       kernelModuleVersion:
         example: ""
         type: string
+      routerDetails:
+        $ref: '#/definitions/api.RouterDetails'
       routerIP:
         example: 192.168.1.1
         type: string
@@ -6094,6 +6297,106 @@ paths:
       summary: Suggest managed-server address
       tags:
       - managed-servers
+  /managed/drift:
+    get:
+      description: Returns settings.json entries whose NDMS interface is absent.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.ManagedServerDriftEnvelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.APIErrorEnvelope'
+      security:
+      - CookieAuth: []
+      summary: List managed servers missing from NDMS
+      tags:
+      - managed
+  /managed/export:
+    get:
+      description: Returns a JSON backup file with every managed server including
+        private keys.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.ManagedServerExportEnvelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.APIErrorEnvelope'
+      security:
+      - CookieAuth: []
+      summary: Export all managed servers
+      tags:
+      - managed
+  /managed/import:
+    post:
+      consumes:
+      - application/json
+      description: Restores managed servers from a backup file. Per-server atomic
+        with pre-flight conflict detection.
+      parameters:
+      - description: backup contents + options
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/api.ManagedServerImportRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.ManagedServerImportEnvelope'
+        "400":
+          description: Bad Request
+          schema:
+            $ref: '#/definitions/api.APIErrorEnvelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.APIErrorEnvelope'
+      security:
+      - CookieAuth: []
+      summary: Import a managed-server backup
+      tags:
+      - managed
+  /managed/restore-drift:
+    post:
+      consumes:
+      - application/json
+      description: Detects drift internally then runs Restore on it. Convenience entry
+        for the boot-time banner.
+      parameters:
+      - description: options
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/api.ManagedServerRestoreDriftRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.ManagedServerImportEnvelope'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/api.APIErrorEnvelope'
+      security:
+      - CookieAuth: []
+      summary: Restore drifted managed servers
+      tags:
+      - managed
   /monitoring/history:
     get:
       description: Returns up to `limit` (default 60) most-recent samples for a single
