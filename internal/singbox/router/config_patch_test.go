@@ -224,6 +224,53 @@ func TestEnsureSystemRules(t *testing.T) {
 	}
 }
 
+func TestEnsureSystemRules_PrivateBypassMustComeAfterHijack(t *testing.T) {
+	// Critical ordering invariant: ip_is_private MUST come AFTER hijack-dns,
+	// not before. If it's prepended in front, DNS to router LAN IP matches
+	// ip_is_private first and routes `direct` — bypassing hijack-dns
+	// entirely. DNS hijacking for in-policy clients breaks silently.
+	//
+	// This case is the common-on-upgrade one: an EXISTING config that
+	// already has sniff and hijack-dns from a prior version, plus our
+	// new code now adding ip_is_private. The naive "prepend all missing
+	// system rules" approach puts ip_is_private at position 0, ahead of
+	// the existing hijack-dns. Test pins the correct order.
+	cfg := NewEmptyConfig()
+	cfg.Route.Rules = []Rule{
+		{Action: "sniff"},
+		{
+			Type: "logical", Mode: "or",
+			Rules:  []Rule{{Protocol: "dns"}, {Port: []int{53}}},
+			Action: "hijack-dns",
+		},
+	}
+	cfg.EnsureSystemRules()
+
+	hijackPos, privatePos := -1, -1
+	for i, r := range cfg.Route.Rules {
+		if r.Action == "hijack-dns" && hijackPos == -1 {
+			hijackPos = i
+		}
+		if r.IPIsPrivate != nil && *r.IPIsPrivate && privatePos == -1 {
+			privatePos = i
+		}
+	}
+	if hijackPos < 0 {
+		t.Fatal("hijack-dns missing after EnsureSystemRules")
+	}
+	if privatePos < 0 {
+		t.Fatal("ip_is_private missing after EnsureSystemRules")
+	}
+	if privatePos <= hijackPos {
+		t.Errorf("ip_is_private (pos=%d) MUST come after hijack-dns (pos=%d) — DNS hijack breaks otherwise. Rules: %+v",
+			privatePos, hijackPos, cfg.Route.Rules)
+	}
+	if privatePos != hijackPos+1 {
+		t.Errorf("ip_is_private should be inserted immediately after hijack-dns (expected pos %d, got %d)",
+			hijackPos+1, privatePos)
+	}
+}
+
 func TestEnsureSystemRules_PreservesCustomPrivateBypass(t *testing.T) {
 	// If the user has authored their own ip_is_private rule (e.g. they
 	// want private destinations to go through a specific direct-LAN

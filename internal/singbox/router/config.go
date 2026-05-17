@@ -189,7 +189,13 @@ func (c *RouterConfig) EnsureSystemRules() {
 	hasSniff := false
 	hasHijack := false
 	hasPrivateBypass := false
-	for _, r := range c.Route.Rules {
+	// Track existing hijack-dns position. ip_is_private MUST be inserted
+	// right after hijack-dns; if we prepend it to position 0 instead,
+	// LAN-IP DNS matches ip_is_private first and routes `direct`,
+	// bypassing the hijack entirely and breaking DNS for in-policy
+	// clients.
+	hijackIdx := -1
+	for i, r := range c.Route.Rules {
 		if r.Action == "sniff" && !r.hasAnyMatcher() {
 			hasSniff = true
 		}
@@ -200,6 +206,9 @@ func (c *RouterConfig) EnsureSystemRules() {
 		if r.Action == "hijack-dns" {
 			if r.Protocol == "dns" || (r.Type == "logical" && r.Mode == "or") {
 				hasHijack = true
+				if hijackIdx == -1 {
+					hijackIdx = i
+				}
 			}
 		}
 		// Any user-authored ip_is_private rule wins over the system
@@ -210,7 +219,10 @@ func (c *RouterConfig) EnsureSystemRules() {
 			hasPrivateBypass = true
 		}
 	}
-	prepend := make([]Rule, 0, 3)
+
+	// Phase 1: prepend sniff + hijack-dns to front if missing.
+	// Predictable order inside the prepend block is [sniff, hijack-dns].
+	prepend := make([]Rule, 0, 2)
 	if !hasSniff {
 		prepend = append(prepend, Rule{Action: "sniff"})
 	}
@@ -229,7 +241,20 @@ func (c *RouterConfig) EnsureSystemRules() {
 			},
 			Action: "hijack-dns",
 		})
+		// Newly-prepended hijack ends up at the last slot of the
+		// prepend block (after the optional sniff).
+		hijackIdx = len(prepend) - 1
+	} else {
+		// Existing hijack shifts right by len(prepend) once prepend is
+		// stitched in front.
+		hijackIdx += len(prepend)
 	}
+	if len(prepend) > 0 {
+		c.Route.Rules = append(prepend, c.Route.Rules...)
+	}
+
+	// Phase 2: insert ip_is_private at hijackIdx+1 — directly after the
+	// hijack-dns rule, whether it was just prepended or already present.
 	if !hasPrivateBypass {
 		// Defense-in-depth: any packet that slips into sing-box with a
 		// private destination (RFC1918, loopback, link-local, CGNAT,
@@ -241,13 +266,13 @@ func (c *RouterConfig) EnsureSystemRules() {
 		// reply, client sees timeout). Mirrors SKeen example config
 		// (`reference/SKeen/examples/config.json:115`).
 		truePtr := true
-		prepend = append(prepend, Rule{
-			IPIsPrivate: &truePtr,
-			Outbound:    "direct",
-		})
-	}
-	if len(prepend) > 0 {
-		c.Route.Rules = append(prepend, c.Route.Rules...)
+		privateRule := Rule{IPIsPrivate: &truePtr, Outbound: "direct"}
+		insertPos := hijackIdx + 1
+		newRules := make([]Rule, 0, len(c.Route.Rules)+1)
+		newRules = append(newRules, c.Route.Rules[:insertPos]...)
+		newRules = append(newRules, privateRule)
+		newRules = append(newRules, c.Route.Rules[insertPos:]...)
+		c.Route.Rules = newRules
 	}
 }
 
