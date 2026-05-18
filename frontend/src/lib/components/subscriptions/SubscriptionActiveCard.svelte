@@ -3,7 +3,8 @@
     import { goto } from '$app/navigation';
     import { browser } from '$app/environment';
     import { api } from '$lib/api/client';
-    import { Button, Modal, TrafficChart, TrafficSparkline } from '$lib/components/ui';
+    import { Button, Modal, TrafficChart, TrafficSparkline, PingButton } from '$lib/components/ui';
+    import { singboxDelayFromHistory } from '$lib/utils/singboxDelay';
     import { getTrafficRates, subscribeTraffic, loadHistory } from '$lib/stores/traffic';
     import {
         singboxDelayHistory,
@@ -60,16 +61,9 @@
             : undefined,
     );
 
-    const DELAY_OK = 200;
-    const DELAY_SLOW = 500;
-
     const history = $derived($singboxDelayHistory.get(activeMember.tag) ?? []);
-    const latest = $derived(history.length > 0 ? history[history.length - 1] : -1);
-    const hasConsecutiveTimeout = $derived(
-        history.length >= 2 &&
-            history[history.length - 1] <= 0 &&
-            history[history.length - 2] <= 0,
-    );
+    const delayPresentation = $derived(singboxDelayFromHistory(history));
+    const latest = $derived(delayPresentation.latest ?? -1);
     const traffic = $derived($singboxTraffic.get(activeMember.tag));
 
     const trafficSparkSeries = $derived.by(() => {
@@ -127,20 +121,8 @@
         subscription.lastFetched ? formatRelativeTime(subscription.lastFetched) : '—',
     );
 
-    type State = 'ok' | 'slow' | 'fail' | 'unknown';
-    const cardState: State = $derived.by(() => {
-        if (latest < 0) return 'unknown';
-        if (latest <= 0) return hasConsecutiveTimeout ? 'fail' : 'slow';
-        if (latest < DELAY_OK) return 'ok';
-        if (latest < DELAY_SLOW) return 'slow';
-        return 'slow';
-    });
-    const latText = $derived.by(() => {
-        if (cardState === 'unknown') return '—';
-        if (cardState === 'fail') return 'timeout';
-        if (latest <= 0) return 'проверка...';
-        return `${latest}ms`;
-    });
+    const cardState = $derived(delayPresentation.state);
+    const latText = $derived(delayPresentation.label);
     const protocolLabel = $derived.by(() => {
         switch (activeMember.protocol) {
             case 'vless':         return 'VLESS';
@@ -251,23 +233,15 @@
                     </span>
                 {:else}
                     <span class="dot {cardState}" aria-hidden="true"></span>
-                    <button
-                        type="button"
-                        class="lat-btn {cardState}"
-                        class:checking
+                    <PingButton
+                        label={latText}
+                        state={cardState}
+                        {checking}
                         onclick={(e) => {
                             e.stopPropagation();
                             void triggerCheck(e);
                         }}
-                        title="Обновить delay"
-                        disabled={checking}
-                    >
-                        <span>{checking ? '...' : latText}</span>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                            <path d="M23 4v6h-6M1 20v-6h6" />
-                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-                        </svg>
-                    </button>
+                    />
                 {/if}
             </div>
             <div class="lc lc-name" data-label="Подписка">
@@ -428,19 +402,7 @@
 >
     <div class="led-wrap">
         <span class="dot {cardState}" aria-hidden="true"></span>
-        <button
-            class="lat-btn {cardState}"
-            class:checking
-            onclick={triggerCheck}
-            title="Обновить delay"
-            disabled={checking}
-        >
-            <span>{checking ? '...' : latText}</span>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                <path d="M23 4v6h-6M1 20v-6h6" />
-                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-            </svg>
-        </button>
+        <PingButton label={latText} state={cardState} {checking} onclick={triggerCheck} />
     </div>
 
     <div class="title-row">
@@ -717,45 +679,6 @@
     .dot.ok      { background: var(--latency-color-ok); box-shadow: 0 0 6px var(--latency-dot-ok-shadow); }
     .dot.slow    { background: var(--latency-color-slow); box-shadow: 0 0 6px var(--latency-dot-slow-shadow); }
     .dot.fail    { background: var(--latency-color-fail); box-shadow: 0 0 6px var(--latency-dot-fail-shadow); }
-    .lat-btn {
-        padding: 0.15rem 0.5rem;
-        border-radius: 4px;
-        background: var(--color-bg-tertiary);
-        color: var(--color-text-muted);
-        border: 1px solid var(--color-border);
-        font: inherit;
-        font-size: 0.7rem;
-        font-family: var(--font-mono, ui-monospace, monospace);
-        cursor: pointer;
-        display: inline-flex;
-        align-items: center;
-        gap: 5px;
-        font-variant-numeric: tabular-nums;
-    }
-    .lat-btn svg {
-        width: 11px;
-        height: 11px;
-        opacity: 0.5;
-        flex-shrink: 0;
-        transition: opacity 0.15s, transform 0.3s;
-    }
-    .lat-btn:hover:not(:disabled) svg {
-        opacity: 1;
-    }
-    .lat-btn:disabled {
-        opacity: 0.5;
-    }
-    .lat-btn.checking svg {
-        animation: lat-spin 1s linear infinite;
-    }
-    @keyframes lat-spin {
-        to {
-            transform: rotate(360deg);
-        }
-    }
-    .lat-btn.ok   { color: var(--latency-color-ok); }
-    .lat-btn.slow { color: var(--latency-color-slow); }
-    .lat-btn.fail { color: var(--latency-color-fail); }
     .title-row {
         display: flex;
         align-items: center;

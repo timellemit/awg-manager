@@ -1,7 +1,9 @@
 <script lang="ts">
 	import type { SubscriptionMember } from '$lib/types';
 	import type { SingboxLayoutMode } from '$lib/constants/singboxLayout';
+	import { PingButton } from '$lib/components/ui';
 	import { singboxDelayHistory, triggerDelayCheck } from '$lib/stores/singbox';
+	import { singboxDelayFromHistory } from '$lib/utils/singboxDelay';
 
 	interface Props {
 		member: SubscriptionMember;
@@ -14,12 +16,8 @@
 	let { member, active, switching, disabled, onclick, layout = 'grid' }: Props = $props();
 
 	const history = $derived($singboxDelayHistory.get(member.tag) ?? []);
-	const latest = $derived(history.length > 0 ? history[history.length - 1] : -1);
-	const hasConsecutiveTimeout = $derived(
-		history.length >= 2 &&
-			history[history.length - 1] <= 0 &&
-			history[history.length - 2] <= 0
-	);
+	const delayPresentation = $derived(singboxDelayFromHistory(history));
+	const latest = $derived(delayPresentation.latest ?? -1);
 
 	let testing = $state(false);
 
@@ -33,29 +31,14 @@
 			testing = false;
 		}
 	}
-	function onTestKeydown(e: KeyboardEvent): void {
+	function onSparkKeydown(e: KeyboardEvent): void {
 		if (e.key === 'Enter' || e.key === ' ') {
 			e.preventDefault();
-			runTest(e);
+			void runTest(e);
 		}
 	}
-
-	const DELAY_OK = 200;
-	const DELAY_SLOW = 500;
-
-	const delayState = $derived.by((): 'ok' | 'slow' | 'fail' | 'unknown' => {
-		if (latest < 0) return 'unknown';
-		if (latest <= 0) return hasConsecutiveTimeout ? 'fail' : 'slow';
-		if (latest < DELAY_OK) return 'ok';
-		if (latest < DELAY_SLOW) return 'slow';
-		return 'slow';
-	});
-	const delayText = $derived.by(() => {
-		if (delayState === 'unknown') return '—';
-		if (delayState === 'fail') return 'timeout';
-		if (latest <= 0) return 'проверка...';
-		return `${latest}ms`;
-	});
+	const delayState = $derived(delayPresentation.state);
+	const delayText = $derived(delayPresentation.label);
 
 	const protocolLabel = $derived.by(() => {
 		switch (member.protocol) {
@@ -74,20 +57,14 @@
 {#if layout === 'list'}
 	<div class="mbr-flatten">
 		<div class="c c-delay" data-label="Delay">
-			<span
-				role="button"
-				tabindex="0"
-				class="delay-btn {delayState}"
-				class:is-disabled={testing}
+			<PingButton
+				label={delayText}
+				state={delayState}
+				checking={testing}
+				size="mid"
+				forceBorder
 				onclick={runTest}
-				onkeydown={onTestKeydown}
-			>
-				<span>{testing ? '...' : delayText}</span>
-				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-					<path d="M23 4v6h-6M1 20v-6h6" />
-					<path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-				</svg>
-			</span>
+			/>
 		</div>
 		<div class="c c-name" data-label="Сервер">
 			<span class="n1" title={heading}>{heading}</span>
@@ -110,7 +87,7 @@
 				role="button"
 				tabindex="0"
 				onclick={(e) => runTest(e)}
-				onkeydown={onTestKeydown}
+				onkeydown={onSparkKeydown}
 				title="Клик — обновить delay"
 			>
 				{#if history.length === 0}
@@ -170,22 +147,15 @@
 		</div>
 	{/if}
 	<div class="delay-row">
-		<span
-			role="button"
-			tabindex="0"
-			class="delay-btn {delayState}"
-			class:is-disabled={testing}
-			aria-disabled={testing}
-			onclick={runTest}
-			onkeydown={onTestKeydown}
+		<PingButton
+			label={delayText}
+			state={delayState}
+			checking={testing}
+			size="mid"
+			forceBorder
 			title="Проверить delay"
-		>
-			<span>{testing ? '...' : delayText}</span>
-			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-				<path d="M23 4v6h-6M1 20v-6h6" />
-				<path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-			</svg>
-		</span>
+			onclick={runTest}
+		/>
 		<div class="spark {delayState}">
 			{#if history.length === 0}
 				{#each Array(6) as _, i (i)}<div class="bar empty"></div>{/each}
@@ -301,46 +271,6 @@
 		gap: 0.5rem;
 		margin-top: 0.4rem;
 	}
-	.delay-btn {
-		padding: 0.15rem 0.5rem;
-		border-radius: 4px;
-		background: var(--color-bg-tertiary);
-		color: var(--color-text-muted);
-		border: 1px solid var(--color-border);
-		font: inherit;
-		font-size: 0.7rem;
-		font-family: var(--font-mono, ui-monospace, monospace);
-		cursor: pointer;
-		display: inline-flex;
-		align-items: center;
-		gap: 5px;
-		font-variant-numeric: tabular-nums;
-	}
-	.delay-btn svg {
-		width: 11px;
-		height: 11px;
-		opacity: 0.5;
-		flex-shrink: 0;
-		transition: opacity 0.15s, transform 0.3s;
-	}
-	.delay-btn:hover:not(.is-disabled) svg {
-		opacity: 1;
-	}
-	.delay-btn.is-disabled {
-		opacity: 0.5;
-		cursor: wait;
-	}
-	.delay-btn.is-disabled svg {
-		animation: delay-spin 1s linear infinite;
-	}
-	@keyframes delay-spin {
-		to {
-			transform: rotate(360deg);
-		}
-	}
-	.delay-btn.ok    { color: var(--latency-color-ok); }
-	.delay-btn.slow  { color: var(--latency-color-slow); }
-	.delay-btn.fail  { color: var(--latency-color-fail); }
 	.spark {
 		flex: 1;
 		display: flex;

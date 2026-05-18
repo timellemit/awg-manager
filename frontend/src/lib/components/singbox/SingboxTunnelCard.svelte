@@ -10,8 +10,9 @@
 		triggerDelayCheck,
 	} from '$lib/stores/singbox';
 	import { onMount, untrack } from 'svelte';
-	import { Modal, Button, TrafficChart, TrafficSparkline } from '$lib/components/ui';
+	import { Modal, Button, TrafficChart, TrafficSparkline, PingButton } from '$lib/components/ui';
 	import { getTrafficRates, subscribeTraffic, loadHistory } from '$lib/stores/traffic';
+	import { singboxDelayFromHistory } from '$lib/utils/singboxDelay';
 	import type { SingboxLayoutMode } from '$lib/constants/singboxLayout';
 	import TunnelDiagnosticsModal from '$lib/components/testing/TunnelDiagnosticsModal.svelte';
 
@@ -37,16 +38,11 @@
 	let showServer = $state(false);
 	let checking = $state(false);
 
-	const DELAY_OK = 200;
-	const DELAY_SLOW = 500;
-
 	const history = $derived($singboxDelayHistory.get(tunnel.tag) ?? []);
-	const latest = $derived(history.length > 0 ? history[history.length - 1] : undefined);
-	const hasConsecutiveTimeout = $derived(
-		history.length >= 2 &&
-			history[history.length - 1] <= 0 &&
-			history[history.length - 2] <= 0,
+	const delayPresentation = $derived(
+		singboxDelayFromHistory(history, { running: tunnel.running !== false }),
 	);
+	const latest = $derived(delayPresentation.latest);
 	const positiveHistory = $derived(history.filter((v) => v > 0));
 	const avg = $derived(
 		positiveHistory.length > 0
@@ -66,27 +62,8 @@
 		};
 	});
 
-	type State = 'ok' | 'slow' | 'fail' | 'unknown' | 'stopped';
-	const cardState: State = $derived.by(() => {
-		// Runtime truth takes priority over delay history: if the process
-		// is dead or the TUN is missing, recent latency numbers are stale
-		// noise. Show 'stopped' so the user knows to restart the daemon
-		// instead of debugging a timeout that isn't actually a timeout.
-		if (tunnel.running === false) return 'stopped';
-		if (latest === undefined) return 'unknown';
-		if (latest <= 0) return hasConsecutiveTimeout ? 'fail' : 'slow';
-		if (latest < DELAY_OK) return 'ok';
-		if (latest < DELAY_SLOW) return 'slow';
-		return 'slow';
-	});
-
-	const latText = $derived.by(() => {
-		if (cardState === 'stopped') return 'stopped';
-		if (cardState === 'unknown') return '—';
-		if (cardState === 'fail') return 'timeout';
-		if (latest !== undefined && latest <= 0) return 'проверка...';
-		return `${latest}ms`;
-	});
+	const cardState = $derived(delayPresentation.state);
+	const latText = $derived(delayPresentation.label);
 
 	const protocolLabel = $derived.by(() => {
 		switch (tunnel.protocol) {
@@ -203,20 +180,12 @@
 	>
 		<div class="list-cell list-cell-delay" data-label="Delay">
 			<span class="dot {cardState}" aria-hidden="true"></span>
-			<button
-				type="button"
-				class="lat-btn {cardState}"
-				class:checking
+			<PingButton
+				label={latText}
+				state={cardState}
+				{checking}
 				onclick={triggerCheck}
-				title="Обновить delay"
-				disabled={checking}
-			>
-				<span>{checking ? '...' : latText}</span>
-				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-					<path d="M23 4v6h-6M1 20v-6h6" />
-					<path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-				</svg>
-			</button>
+			/>
 		</div>
 		<div class="list-cell list-cell-name" data-label="Туннель">
 			<button type="button" class="name-btn" onclick={edit}>{tunnel.tag}</button>
@@ -361,19 +330,7 @@
 <div class="card" class:ok={cardState === 'ok'} class:slow={cardState === 'slow'} class:fail={cardState === 'fail'} class:unknown={cardState === 'unknown'} class:stopped={cardState === 'stopped'}>
 	<div class="led-wrap">
 		<span class="dot {cardState}" aria-hidden="true"></span>
-		<button
-			class="lat-btn {cardState}"
-			class:checking
-			onclick={triggerCheck}
-			title="Обновить delay"
-			disabled={checking}
-		>
-			<span>{latText}</span>
-			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-				<path d="M23 4v6h-6M1 20v-6h6"/>
-				<path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-			</svg>
-		</button>
+		<PingButton label={latText} state={cardState} {checking} onclick={triggerCheck} />
 	</div>
 
 	<h3 class="title">{tunnel.tag}</h3>
@@ -590,40 +547,6 @@
 	.dot.slow { background: var(--latency-color-slow); box-shadow: 0 0 6px var(--latency-dot-slow-shadow); }
 	.dot.fail { background: var(--latency-color-fail); box-shadow: 0 0 6px var(--latency-dot-fail-shadow); }
 	.dot.stopped { background: var(--color-text-muted); }
-
-	.lat-btn {
-		background: none;
-		border: 1px solid transparent;
-		color: var(--text-muted);
-		font-family: inherit;
-		font-size: 12px;
-		font-weight: 500;
-		padding: 2px 8px;
-		border-radius: 4px;
-		cursor: pointer;
-		display: inline-flex;
-		align-items: center;
-		gap: 5px;
-		font-variant-numeric: tabular-nums;
-		transition: background 0.15s, border-color 0.15s;
-	}
-	.lat-btn:hover:not(:disabled) {
-		background: var(--bg-tertiary);
-		border-color: var(--border);
-	}
-	.lat-btn.ok   { color: var(--latency-color-ok); }
-	.lat-btn.slow { color: var(--latency-color-slow); }
-	.lat-btn.fail { color: var(--latency-color-fail); }
-	.lat-btn.stopped { color: var(--color-text-muted); }
-	.lat-btn svg {
-		width: 11px;
-		height: 11px;
-		opacity: 0.5;
-		transition: opacity 0.15s, transform 0.3s;
-	}
-	.lat-btn:hover:not(:disabled) svg { opacity: 1; }
-	.lat-btn.checking svg { animation: spin 1s linear infinite; }
-	@keyframes spin { to { transform: rotate(360deg); } }
 
 	.title {
 		margin: 0 0 3px;

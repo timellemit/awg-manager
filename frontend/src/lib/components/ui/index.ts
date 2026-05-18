@@ -34,5 +34,6 @@ export type { VersionBadgeKind, BackendValue, AwgValue } from './VersionBadge.sv
 export { default as StatRow } from './StatRow.svelte';
 export type { StatTile, StatTileAccent } from './StatRow.svelte';
 export { default as LatencySparkline } from './LatencySparkline.svelte';
+export { default as PingButton } from './PingButton.svelte';
 export { default as BackLink } from './BackLink.svelte';
 export { default as GridListToggle } from './GridListToggle.svelte';

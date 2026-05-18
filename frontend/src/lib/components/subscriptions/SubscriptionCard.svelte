@@ -5,7 +5,8 @@
 	import { untrack } from 'svelte';
 	import { singboxDelayHistory, singboxTraffic, triggerDelayCheck } from '$lib/stores/singbox';
 	import { getTrafficRates, subscribeTraffic, loadHistory } from '$lib/stores/traffic';
-	import { TrafficSparkline } from '$lib/components/ui';
+	import { TrafficSparkline, PingButton } from '$lib/components/ui';
+	import { singboxDelayFromHistory } from '$lib/utils/singboxDelay';
 	import { formatBytes } from '$lib/utils/format';
 	import { resolveSubscriptionMemberTag } from '$lib/utils/subscriptionMember';
 	import TunnelDiagnosticsModal from '$lib/components/testing/TunnelDiagnosticsModal.svelte';
@@ -21,32 +22,15 @@
 
 	const resolvedMemberTag = $derived(resolveSubscriptionMemberTag(subscription, liveActiveMember));
 
-	const history = $derived($singboxDelayHistory.get(resolvedMemberTag) ?? []);
-	const latest = $derived(history.length > 0 ? history[history.length - 1] : -1);
-	const hasConsecutiveTimeout = $derived(
-		history.length >= 2 &&
-			history[history.length - 1] <= 0 &&
-			history[history.length - 2] <= 0,
+	const history = $derived(
+		resolvedMemberTag ? ($singboxDelayHistory.get(resolvedMemberTag) ?? []) : [],
 	);
-
-	const DELAY_OK = 200;
-	const DELAY_SLOW = 500;
-
-	const delayState = $derived.by((): 'ok' | 'slow' | 'fail' | 'unknown' => {
-		if (!resolvedMemberTag) return 'unknown';
-		if (latest < 0) return 'unknown';
-		if (latest <= 0) return hasConsecutiveTimeout ? 'fail' : 'slow';
-		if (latest < DELAY_OK) return 'ok';
-		if (latest < DELAY_SLOW) return 'slow';
-		return 'slow';
-	});
-	const delayText = $derived.by(() => {
-		if (!resolvedMemberTag) return '—';
-		if (delayState === 'unknown') return '—';
-		if (delayState === 'fail') return 'timeout';
-		if (latest <= 0) return '…';
-		return `${latest}ms`;
-	});
+	const delayPresentation = $derived(
+		resolvedMemberTag ? singboxDelayFromHistory(history) : { state: 'unknown' as const, label: '—', latest: undefined },
+	);
+	const delayState = $derived(delayPresentation.state);
+	const delayText = $derived(delayPresentation.label);
+	const latest = $derived(delayPresentation.latest ?? -1);
 
 	const traffic = $derived(resolvedMemberTag ? $singboxTraffic.get(resolvedMemberTag) : undefined);
 
@@ -100,14 +84,6 @@
 			testingDelay = false;
 		}
 	}
-	function onDelayKeydown(e: KeyboardEvent): void {
-		if (e.key === 'Enter' || e.key === ' ') {
-			e.preventDefault();
-			e.stopPropagation();
-			void runDelayCheck(e);
-		}
-	}
-
 	function isNestedActionEvent(e: Event): boolean {
 		const target = e.target;
 		if (!(target instanceof HTMLElement)) return false;
@@ -191,21 +167,13 @@
 							{subscription.lastError}
 						</span>
 					{:else if resolvedMemberTag}
-						<button
-							type="button"
-							class="lat-btn {delayState}"
-							class:is-checking={testingDelay}
-							disabled={testingDelay}
+						<PingButton
+							label={delayText}
+							state={delayState}
+							checking={testingDelay}
+							size="sm"
 							onclick={runDelayCheck}
-							onkeydown={onDelayKeydown}
-							title="Обновить delay"
-						>
-							<span>{testingDelay ? '...' : delayText}</span>
-							<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-								<path d="M23 4v6h-6M1 20v-6h6" />
-								<path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-							</svg>
-						</button>
+						/>
 					{:else}
 						<span class="delay-dash">—</span>
 					{/if}
@@ -478,52 +446,6 @@
 	.delay-dash {
 		font-size: 0.8125rem;
 		color: var(--color-text-muted);
-	}
-	.lat-btn {
-		padding: 0.15rem 0.45rem;
-		border-radius: 4px;
-		background: var(--color-bg-tertiary);
-		color: var(--color-text-muted);
-		border: 1px solid var(--color-border);
-		font: inherit;
-		font-size: 0.72rem;
-		font-family: var(--font-mono, ui-monospace, monospace);
-		cursor: pointer;
-		display: inline-flex;
-		align-items: center;
-		gap: 5px;
-		font-variant-numeric: tabular-nums;
-	}
-	.lat-btn svg {
-		width: 11px;
-		height: 11px;
-		opacity: 0.5;
-		flex-shrink: 0;
-		transition: opacity 0.15s, transform 0.3s;
-	}
-	.lat-btn:hover:not(:disabled) svg {
-		opacity: 1;
-	}
-	.lat-btn.is-checking {
-		opacity: 0.55;
-		cursor: wait;
-	}
-	.lat-btn.is-checking svg {
-		animation: lat-spin 1s linear infinite;
-	}
-	@keyframes lat-spin {
-		to {
-			transform: rotate(360deg);
-		}
-	}
-	.lat-btn.ok {
-		color: var(--latency-color-ok);
-	}
-	.lat-btn.slow {
-		color: var(--latency-color-slow);
-	}
-	.lat-btn.fail {
-		color: var(--latency-color-fail);
 	}
 	.spark-mini {
 		display: flex;

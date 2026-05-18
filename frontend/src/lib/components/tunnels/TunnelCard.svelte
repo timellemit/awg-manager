@@ -14,7 +14,7 @@
 	import { getTrafficRates, subscribeTraffic, loadHistory } from '$lib/stores/traffic';
 	import ConnectivitySettingsModal from './ConnectivitySettingsModal.svelte';
 import TunnelDiagnosticsModal from '$lib/components/testing/TunnelDiagnosticsModal.svelte';
-import PingButton from './PingButton.svelte';
+import { PingButton } from '$lib/components/ui';
 
 	interface Props {
 		tunnel: TunnelListItem;
@@ -1018,7 +1018,7 @@ import PingButton from './PingButton.svelte';
 		display: flex;
 		flex-wrap: nowrap;
 		align-items: center;
-		margin-top: 4px;
+		margin-top: 3px;
 		gap: 3px;
 		min-width: 0;
 		overflow: hidden;
