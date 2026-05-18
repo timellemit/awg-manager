@@ -30,6 +30,7 @@ type Report struct {
 	WAN            WANInfo            `json:"wan"`
 	BootHealth     BootHealth         `json:"bootHealth"`
 	AWGProxyModule AWGProxyModule     `json:"awgProxyModule"`
+	SingboxConfig  *SingboxConfigInfo `json:"singboxConfig,omitempty"`
 	Tunnels        []TunnelInfo       `json:"tunnels"`
 	Tests          []TestResult       `json:"tests"`
 	Logs           []logging.LogEntry `json:"logs"`
@@ -98,6 +99,13 @@ type AWGProxyModule struct {
 	EndpointCount int      `json:"endpointCount"`
 	RawList       string   `json:"rawList,omitempty"`
 	DmesgLines    []string `json:"dmesgLines,omitempty"`
+}
+
+// SingboxConfigInfo holds the merged sing-box config (sanitized) in the report.
+type SingboxConfigInfo struct {
+	Available bool           `json:"available"`
+	Error     string         `json:"error,omitempty"`
+	Config    map[string]any `json:"config,omitempty"`
 }
 
 // TunnelInfo contains per-tunnel diagnostics.
@@ -379,18 +387,19 @@ type SingboxSubMember struct {
 
 // Deps holds all dependencies needed by the diagnostics runner.
 type Deps struct {
-	TunnelService     TunnelServiceForDiag
-	NDMSQueries       *query.Queries
-	NDMSTransport     *transport.Client
-	Backend           backend.Backend
-	KmodLoader        *kmod.Loader
-	TunnelStore       *storage.AWGTunnelStore
-	LogService        LogServiceForDiag
-	AppVersion        string
-	PingCheckFacade   PingCheckForDiag
-	Singbox           SingboxForDiag
-	SingboxSubMembers func() []SingboxSubMember
-	AppLogger         logging.AppLogger
+	TunnelService        TunnelServiceForDiag
+	NDMSQueries          *query.Queries
+	NDMSTransport        *transport.Client
+	Backend              backend.Backend
+	KmodLoader           *kmod.Loader
+	TunnelStore          *storage.AWGTunnelStore
+	LogService           LogServiceForDiag
+	AppVersion           string
+	PingCheckFacade      PingCheckForDiag
+	Singbox              SingboxForDiag
+	SingboxSubMembers    func() []SingboxSubMember
+	SingboxConfigPreview func() (string, error)
+	AppLogger            logging.AppLogger
 }
 
 // Runner executes diagnostic runs.
@@ -614,6 +623,9 @@ func (r *Runner) executeStream(ctx context.Context) {
 
 		r.emitPhase("collect_proxy_module", "Состояние awg-proxy...")
 		report.AWGProxyModule = r.collectAWGProxyModule(ctx)
+
+		r.emitPhase("collect_singbox_config", "Сбор sing-box config...")
+		report.SingboxConfig = r.collectSingboxConfig()
 	}
 
 	// AWG tunnel collection: needed for full runs and single AWG-tunnel probes.

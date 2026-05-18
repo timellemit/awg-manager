@@ -77,50 +77,51 @@ type Config struct {
 
 // Server is the HTTP server for awg-manager.
 type Server struct {
-	config                Config
-	log                   *logger.Logger
-	tunnelService         api.TunnelService
-	externalService       api.ExternalTunnelService
-	testingService        *testing.Service
-	keenetic              *auth.KeeneticClient
-	sessions              *auth.SessionStore
-	settings              *storage.SettingsStore
-	tunnels               *storage.AWGTunnelStore
-	pingCheckService      api.PingCheckService
-	loggingService        *logging.Service
-	activeBackend         backend.Backend
-	kmodLoader            *kmod.Loader
-	updaterService        *updater.Service
-	ndmsQueries           *ndmsquery.Queries
-	trafficHistory        *traffic.History
-	dnsRouteService       api.DNSRouteService
-	staticRouteService    api.StaticRouteService
-	systemTunnelService   systemtunnel.Service
-	managedService        managed.ManagedServerService
-	nwgOp                 *nwg.OperatorNativeWG
-	terminalManager       terminal.Manager
-	accessPolicyService   accesspolicy.Service
-	clientRouteService    clientroute.Service
-	catalog               routing.Catalog
-	hydraService          *hydraroute.Service
-	orch                  *orchestrator.Orchestrator
-	bus                   *events.Bus
-	singboxHandler        *api.SingboxHandler
-	singboxConnsHandler   *api.SingboxConnectionsHandler
-	singboxRouterHandler  *api.SingboxRouterHandler
-	singboxConfigHandler  *api.SingboxConfigHandler
-	singboxProxiesHandler *api.SingboxProxiesHandler
-	awgOutboundsHandler   *api.AWGOutboundsHandler
-	subscriptionHandler   *api.SubscriptionHandler
-	clashProxy            *api.ClashProxy
-	singboxOp             *singbox.Operator
-	deviceProxySvc        *deviceproxy.Service
-	monitoringService     *monitoring.Service
-	singboxSubMembersFn   func() []diagnostics.SingboxSubMember
-	dnsCheckService       *dnscheck.Service
-	authMiddleware        *auth.Middleware
-	httpServer            *http.Server
-	loopbackListener      net.Listener // optional loopback listener for reverse proxy
+	config                 Config
+	log                    *logger.Logger
+	tunnelService          api.TunnelService
+	externalService        api.ExternalTunnelService
+	testingService         *testing.Service
+	keenetic               *auth.KeeneticClient
+	sessions               *auth.SessionStore
+	settings               *storage.SettingsStore
+	tunnels                *storage.AWGTunnelStore
+	pingCheckService       api.PingCheckService
+	loggingService         *logging.Service
+	activeBackend          backend.Backend
+	kmodLoader             *kmod.Loader
+	updaterService         *updater.Service
+	ndmsQueries            *ndmsquery.Queries
+	trafficHistory         *traffic.History
+	dnsRouteService        api.DNSRouteService
+	staticRouteService     api.StaticRouteService
+	systemTunnelService    systemtunnel.Service
+	managedService         managed.ManagedServerService
+	nwgOp                  *nwg.OperatorNativeWG
+	terminalManager        terminal.Manager
+	accessPolicyService    accesspolicy.Service
+	clientRouteService     clientroute.Service
+	catalog                routing.Catalog
+	hydraService           *hydraroute.Service
+	orch                   *orchestrator.Orchestrator
+	bus                    *events.Bus
+	singboxHandler         *api.SingboxHandler
+	singboxConnsHandler    *api.SingboxConnectionsHandler
+	singboxRouterHandler   *api.SingboxRouterHandler
+	singboxConfigHandler   *api.SingboxConfigHandler
+	singboxProxiesHandler  *api.SingboxProxiesHandler
+	awgOutboundsHandler    *api.AWGOutboundsHandler
+	subscriptionHandler    *api.SubscriptionHandler
+	clashProxy             *api.ClashProxy
+	singboxOp              *singbox.Operator
+	deviceProxySvc         *deviceproxy.Service
+	monitoringService      *monitoring.Service
+	singboxSubMembersFn    func() []diagnostics.SingboxSubMember
+	singboxConfigPreviewFn func() (string, error)
+	dnsCheckService        *dnscheck.Service
+	authMiddleware         *auth.Middleware
+	httpServer             *http.Server
+	loopbackListener       net.Listener // optional loopback listener for reverse proxy
 
 	ndmsDispatcher api.HookDispatcher
 	ndmsTransport  *ndmstransport.Client
@@ -146,38 +147,39 @@ type Server struct {
 // via the existing post-construction Set*Handler() / SetSingboxOperator()
 // setters — see SetSingboxRouterHandler etc. below in this file.
 type Deps struct {
-	Log                 *logger.Logger
-	TunnelService       api.TunnelService
-	ExternalService     api.ExternalTunnelService
-	TestingService      *testing.Service
-	Keenetic            *auth.KeeneticClient
-	Sessions            *auth.SessionStore
-	Settings            *storage.SettingsStore
-	Tunnels             *storage.AWGTunnelStore
-	PingCheckService    api.PingCheckService
-	LoggingService      *logging.Service
-	ActiveBackend       backend.Backend
-	KmodLoader          *kmod.Loader
-	UpdaterService      *updater.Service
-	NdmsQueries         *ndmsquery.Queries
-	TrafficHistory      *traffic.History
-	DnsRouteService     api.DNSRouteService
-	StaticRouteService  api.StaticRouteService
-	SystemTunnelService systemtunnel.Service
-	ManagedService      managed.ManagedServerService
-	NwgOp               *nwg.OperatorNativeWG
-	TerminalManager     terminal.Manager
-	AccessPolicySvc     accesspolicy.Service
-	ClientRouteSvc      clientroute.Service
-	Catalog             routing.Catalog
-	Orch                *orchestrator.Orchestrator
-	Bus                 *events.Bus
-	HydraService        *hydraroute.Service
-	SingboxHandler      *api.SingboxHandler
-	ClashProxy          *api.ClashProxy
-	SingboxConnsHandler *api.SingboxConnectionsHandler
-	MonitoringService   *monitoring.Service
-	SingboxSubMembers   func() []diagnostics.SingboxSubMember
+	Log                  *logger.Logger
+	TunnelService        api.TunnelService
+	ExternalService      api.ExternalTunnelService
+	TestingService       *testing.Service
+	Keenetic             *auth.KeeneticClient
+	Sessions             *auth.SessionStore
+	Settings             *storage.SettingsStore
+	Tunnels              *storage.AWGTunnelStore
+	PingCheckService     api.PingCheckService
+	LoggingService       *logging.Service
+	ActiveBackend        backend.Backend
+	KmodLoader           *kmod.Loader
+	UpdaterService       *updater.Service
+	NdmsQueries          *ndmsquery.Queries
+	TrafficHistory       *traffic.History
+	DnsRouteService      api.DNSRouteService
+	StaticRouteService   api.StaticRouteService
+	SystemTunnelService  systemtunnel.Service
+	ManagedService       managed.ManagedServerService
+	NwgOp                *nwg.OperatorNativeWG
+	TerminalManager      terminal.Manager
+	AccessPolicySvc      accesspolicy.Service
+	ClientRouteSvc       clientroute.Service
+	Catalog              routing.Catalog
+	Orch                 *orchestrator.Orchestrator
+	Bus                  *events.Bus
+	HydraService         *hydraroute.Service
+	SingboxHandler       *api.SingboxHandler
+	ClashProxy           *api.ClashProxy
+	SingboxConnsHandler  *api.SingboxConnectionsHandler
+	MonitoringService    *monitoring.Service
+	SingboxSubMembers    func() []diagnostics.SingboxSubMember
+	SingboxConfigPreview func() (string, error)
 }
 
 // New creates a new server instance.
@@ -186,41 +188,42 @@ func New(cfg Config, deps Deps) *Server {
 	deps.Log.Infof("Server instance: %s", id)
 
 	return &Server{
-		config:              cfg,
-		log:                 deps.Log,
-		tunnelService:       deps.TunnelService,
-		externalService:     deps.ExternalService,
-		testingService:      deps.TestingService,
-		keenetic:            deps.Keenetic,
-		sessions:            deps.Sessions,
-		settings:            deps.Settings,
-		tunnels:             deps.Tunnels,
-		pingCheckService:    deps.PingCheckService,
-		loggingService:      deps.LoggingService,
-		activeBackend:       deps.ActiveBackend,
-		kmodLoader:          deps.KmodLoader,
-		updaterService:      deps.UpdaterService,
-		ndmsQueries:         deps.NdmsQueries,
-		trafficHistory:      deps.TrafficHistory,
-		dnsRouteService:     deps.DnsRouteService,
-		staticRouteService:  deps.StaticRouteService,
-		systemTunnelService: deps.SystemTunnelService,
-		managedService:      deps.ManagedService,
-		nwgOp:               deps.NwgOp,
-		terminalManager:     deps.TerminalManager,
-		accessPolicyService: deps.AccessPolicySvc,
-		clientRouteService:  deps.ClientRouteSvc,
-		catalog:             deps.Catalog,
-		hydraService:        deps.HydraService,
-		orch:                deps.Orch,
-		bus:                 deps.Bus,
-		singboxHandler:      deps.SingboxHandler,
-		singboxConnsHandler: deps.SingboxConnsHandler,
-		clashProxy:          deps.ClashProxy,
-		monitoringService:   deps.MonitoringService,
-		singboxSubMembersFn: deps.SingboxSubMembers,
-		authMiddleware:      auth.NewMiddleware(deps.Sessions, deps.Settings, deps.Log),
-		instanceID:          id,
+		config:                 cfg,
+		log:                    deps.Log,
+		tunnelService:          deps.TunnelService,
+		externalService:        deps.ExternalService,
+		testingService:         deps.TestingService,
+		keenetic:               deps.Keenetic,
+		sessions:               deps.Sessions,
+		settings:               deps.Settings,
+		tunnels:                deps.Tunnels,
+		pingCheckService:       deps.PingCheckService,
+		loggingService:         deps.LoggingService,
+		activeBackend:          deps.ActiveBackend,
+		kmodLoader:             deps.KmodLoader,
+		updaterService:         deps.UpdaterService,
+		ndmsQueries:            deps.NdmsQueries,
+		trafficHistory:         deps.TrafficHistory,
+		dnsRouteService:        deps.DnsRouteService,
+		staticRouteService:     deps.StaticRouteService,
+		systemTunnelService:    deps.SystemTunnelService,
+		managedService:         deps.ManagedService,
+		nwgOp:                  deps.NwgOp,
+		terminalManager:        deps.TerminalManager,
+		accessPolicyService:    deps.AccessPolicySvc,
+		clientRouteService:     deps.ClientRouteSvc,
+		catalog:                deps.Catalog,
+		hydraService:           deps.HydraService,
+		orch:                   deps.Orch,
+		bus:                    deps.Bus,
+		singboxHandler:         deps.SingboxHandler,
+		singboxConnsHandler:    deps.SingboxConnsHandler,
+		clashProxy:             deps.ClashProxy,
+		monitoringService:      deps.MonitoringService,
+		singboxSubMembersFn:    deps.SingboxSubMembers,
+		singboxConfigPreviewFn: deps.SingboxConfigPreview,
+		authMiddleware:         auth.NewMiddleware(deps.Sessions, deps.Settings, deps.Log),
+		instanceID:             id,
 	}
 }
 
@@ -542,18 +545,19 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	updateHandler := api.NewUpdateHandler(s.updaterService, appLog)
 	dnsRouteHandler := api.NewDNSRouteHandler(s.dnsRouteService, appLog)
 	diagRunner := diagnostics.NewRunner(diagnostics.Deps{
-		TunnelService:     s.tunnelService,
-		NDMSQueries:       s.ndmsQueries,
-		NDMSTransport:     s.ndmsTransport,
-		Backend:           s.activeBackend,
-		KmodLoader:        s.kmodLoader,
-		TunnelStore:       s.tunnels,
-		LogService:        &diagLogAdapter{svc: s.loggingService},
-		AppVersion:        s.config.Version,
-		PingCheckFacade:   s.pingCheckService,
-		Singbox:           s.singboxOp,
-		SingboxSubMembers: s.singboxSubMembersFn,
-		AppLogger:         s.loggingService,
+		TunnelService:        s.tunnelService,
+		NDMSQueries:          s.ndmsQueries,
+		NDMSTransport:        s.ndmsTransport,
+		Backend:              s.activeBackend,
+		KmodLoader:           s.kmodLoader,
+		TunnelStore:          s.tunnels,
+		LogService:           &diagLogAdapter{svc: s.loggingService},
+		AppVersion:           s.config.Version,
+		PingCheckFacade:      s.pingCheckService,
+		Singbox:              s.singboxOp,
+		SingboxSubMembers:    s.singboxSubMembersFn,
+		SingboxConfigPreview: s.singboxConfigPreviewFn,
+		AppLogger:            s.loggingService,
 	})
 	diagHandler := api.NewDiagnosticsHandler(diagRunner)
 

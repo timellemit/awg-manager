@@ -271,6 +271,16 @@ func (a *anonymizer) registerFromReport(report *Report) {
 		a.registerWGKeysFromOutput(line)
 	}
 
+	// Sing-box config may contain server UUIDs, REALITY keys, short IDs, hostnames.
+	if report.SingboxConfig != nil && report.SingboxConfig.Config != nil {
+		if b, err := json.Marshal(report.SingboxConfig.Config); err == nil {
+			raw := string(b)
+			a.registerPublicIPsFromOutput(raw)
+			a.registerMACsFromOutput(raw)
+			a.registerWGKeysFromOutput(raw)
+		}
+	}
+
 	// Log entries may contain MACs or WG keys in target or message fields.
 	for _, entry := range report.Logs {
 		a.registerPublicIPsFromOutput(entry.Target)

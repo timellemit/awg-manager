@@ -47,6 +47,7 @@ import (
 	"github.com/hoaxisr/awg-manager/internal/server"
 	"github.com/hoaxisr/awg-manager/internal/singbox"
 	"github.com/hoaxisr/awg-manager/internal/singbox/awgoutbounds"
+	singboxcfg "github.com/hoaxisr/awg-manager/internal/singbox/configmerge"
 	"github.com/hoaxisr/awg-manager/internal/singbox/installer"
 	singboxorch "github.com/hoaxisr/awg-manager/internal/singbox/orchestrator"
 	"github.com/hoaxisr/awg-manager/internal/singbox/router"
@@ -918,6 +919,9 @@ func main() {
 					}
 				}
 				return out
+			},
+			SingboxConfigPreview: func() (string, error) {
+				return singboxcfg.MergeDir(sbOrch.ConfigDir())
 			},
 		},
 	)
