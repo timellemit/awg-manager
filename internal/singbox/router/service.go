@@ -1,6 +1,7 @@
 package router
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -315,6 +316,70 @@ func (s *ServiceImpl) loadRouterConfig() (*RouterConfig, error) {
 	return LoadConfig(activePath) // returns NewEmptyConfig per contract
 }
 
+// persistConfigDirect writes the router config straight to active/ —
+// skipping the staging pipeline that persistConfig uses for user-driven
+// edits. Intended for system-initiated paths (Enable, Disable cleanup,
+// healTProxyInbound) where there is no user "Apply" expected and the
+// pending-file → banner UX would be a phantom on every router reboot.
+//
+// Byte-equal short-circuit: when the marshalled bytes already match the
+// active file we return without writing. This is the common boot-recovery
+// case (Reconcile detects iptables gone, dispatches to Enable, Enable
+// regenerates the identical config) and the no-op skips a spurious
+// SIGHUP plus avoids touching mtime.
+//
+// Caller must have already arranged for the slot to be enabled in the
+// orchestrator (so orch.Save targets the active path, not disabled/) —
+// Enable does that via SetEnabled(true) earlier in the flow.
+func (s *ServiceImpl) persistConfigDirect(ctx context.Context, cfg *RouterConfig) error {
+	if s.deps.Orch == nil {
+		// Test-only legacy fallback: reuse the in-place writer.
+		return s.persistConfig(ctx, cfg)
+	}
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal router config: %w", err)
+	}
+	activePath := filepath.Join(s.deps.Orch.ConfigDir(), "20-router.json")
+	if existing, err := os.ReadFile(activePath); err == nil && bytes.Equal(existing, data) {
+		return nil
+	}
+	if err := s.deps.Orch.Save(orchestrator.SlotRouter, data); err != nil {
+		return err
+	}
+	return nil
+}
+
+// waitForSingbox polls SingboxController.IsRunning until it reports true
+// or the deadline expires. Used by Enable after SetEnabled triggers the
+// orchestrator's debounced cold-start so iptables redirects don't land
+// on a TPROXY port that nothing is listening on yet.
+//
+// Returns nil immediately if sing-box is already running. Returns ctx.Err
+// on cancellation, or a timeout error after the deadline; callers can
+// treat the timeout as soft (proceed with iptables and accept the brief
+// race) or hard at their discretion.
+func (s *ServiceImpl) waitForSingbox(ctx context.Context, timeout time.Duration) error {
+	if s.deps.Singbox == nil {
+		return nil
+	}
+	deadline := time.Now().Add(timeout)
+	const pollInterval = 100 * time.Millisecond
+	for {
+		if running, _ := s.deps.Singbox.IsRunning(); running {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("sing-box did not come up within %s", timeout)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(pollInterval):
+		}
+	}
+}
+
 func (s *ServiceImpl) persistConfig(ctx context.Context, cfg *RouterConfig) error {
 	if s.deps.Orch != nil {
 		// Orchestrator path — write to pending/ (staging). The draft will
@@ -433,13 +498,11 @@ func (s *ServiceImpl) Enable(ctx context.Context) error {
 	}
 	cfg.EnsureRouteWAN(sr.WANAutoDetect, sr.WANInterface)
 
-	if err := s.persistConfig(ctx, cfg); err != nil {
-		return err
-	}
-	// Promote SlotRouter to active so the orchestrator's reload picks
-	// up 20-router.json. The orchestrator handles starting sing-box if
-	// it isn't already running. When orch is unwired (tests), we keep
-	// the legacy explicit Start call.
+	// Promote SlotRouter to active FIRST so persistConfigDirect's
+	// orch.Save targets the active path (it keys on the slot's enabled
+	// flag). SetEnabled also triggers the orchestrator's debounced cold-
+	// start — sing-box will read the active config we are about to write.
+	// Legacy fallback (tests) keeps the explicit Start call.
 	if s.deps.Orch != nil {
 		if err := s.deps.Orch.SetEnabled(orchestrator.SlotRouter, true); err != nil {
 			return fmt.Errorf("orchestrator enable router: %w", err)
@@ -450,6 +513,23 @@ func (s *ServiceImpl) Enable(ctx context.Context) error {
 				return fmt.Errorf("sing-box start: %w", err)
 			}
 		}
+	}
+	// Direct write — no staging. Byte-equal short-circuit makes boot
+	// recovery (Reconcile→Enable with iptables gone but active config
+	// already on disk) a no-op write, which is what kills the phantom
+	// "Несохранённые правки" banner that used to follow every reboot.
+	if err := s.persistConfigDirect(ctx, cfg); err != nil {
+		return err
+	}
+
+	// Wait for sing-box to be listening before iptables start redirecting
+	// traffic to its TPROXY/REDIRECT ports — otherwise packets fall on a
+	// not-yet-bound socket and get RST/dropped for the start-up window.
+	// Soft timeout: log and proceed if sing-box is slow; the alternative
+	// (refusing to install iptables) leaves the router with no routing
+	// at all, which is worse than a brief packet-drop blip.
+	if err := s.waitForSingbox(ctx, 15*time.Second); err != nil {
+		s.deps.Log.Warnf("router: sing-box not ready before iptables install: %v", err)
 	}
 
 	// Collect WAN IPs BEFORE Install: the router's own public-IP
@@ -489,7 +569,7 @@ func (s *ServiceImpl) Enable(ctx context.Context) error {
 			_ = s.deps.Orch.SetEnabled(orchestrator.SlotRouter, false)
 		} else {
 			cfg.Inbounds = filterTProxyInbound(cfg.Inbounds)
-			_ = s.persistConfig(ctx, cfg)
+			_ = s.persistConfigDirect(ctx, cfg)
 		}
 		return fmt.Errorf("iptables install: %w", err)
 	}
@@ -531,7 +611,8 @@ func (s *ServiceImpl) healTProxyInbound(ctx context.Context) error {
 		}
 	}
 	cfg.Inbounds = ensureTProxyInbound(cfg.Inbounds)
-	return s.persistConfig(ctx, cfg)
+	// System self-heal — direct write, no staging UI.
+	return s.persistConfigDirect(ctx, cfg)
 }
 
 // ensureTProxyInbound enforces the SKeen-style split: tproxy-in
@@ -713,7 +794,7 @@ func (s *ServiceImpl) Disable(ctx context.Context) error {
 	} else {
 		// Legacy fallback: strip the tproxy inbound in place so
 		// the running sing-box stops accepting on the TPROXY port
-		// after the persistConfig reload.
+		// after the persistConfigDirect reload.
 		cfg, err := s.loadRouterConfig()
 		if err == nil && cfg != nil {
 			filtered := make([]Inbound, 0, len(cfg.Inbounds))
@@ -723,7 +804,7 @@ func (s *ServiceImpl) Disable(ctx context.Context) error {
 				}
 			}
 			cfg.Inbounds = filtered
-			_ = s.persistConfig(ctx, cfg)
+			_ = s.persistConfigDirect(ctx, cfg)
 		}
 	}
 

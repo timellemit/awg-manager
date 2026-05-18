@@ -97,12 +97,23 @@ func newTestIPTables(fe *fakeExec) *IPTables {
 
 // fakeSingbox is a minimal SingboxController stub for tests that need
 // ConfigDir to not panic (Disable calls loadRouterConfig).
+//
+// isRunningFn is an optional override for IsRunning(); nil keeps the
+// historical default (false, 0). Tests that need to model "sing-box
+// comes up after a few polls" or "sing-box never comes up" can supply
+// their own callback without touching the rest of the stub.
 type fakeSingbox struct {
-	dir string
+	dir         string
+	isRunningFn func() (bool, int)
 }
 
-func (f *fakeSingbox) Reload() error                              { return nil }
-func (f *fakeSingbox) IsRunning() (bool, int)                    { return false, 0 }
+func (f *fakeSingbox) Reload() error { return nil }
+func (f *fakeSingbox) IsRunning() (bool, int) {
+	if f.isRunningFn != nil {
+		return f.isRunningFn()
+	}
+	return false, 0
+}
 func (f *fakeSingbox) Start() error                              { return nil }
 func (f *fakeSingbox) ValidateConfigDir(_ context.Context) error { return nil }
 func (f *fakeSingbox) ConfigDir() string                         { return f.dir }
