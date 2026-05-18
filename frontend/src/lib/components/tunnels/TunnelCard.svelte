@@ -12,6 +12,12 @@
 		formatBitRate,
 	} from '$lib/utils/format';
 	import { getTrafficRates, subscribeTraffic, loadHistory } from '$lib/stores/traffic';
+	import {
+		awgConnectivityDown,
+		awgListShowsPingButton,
+		awgPingStatusNote,
+		awgShowConnectivityRow,
+	} from '$lib/utils/awgPingStatus';
 	import ConnectivitySettingsModal from './ConnectivitySettingsModal.svelte';
 import TunnelDiagnosticsModal from '$lib/components/testing/TunnelDiagnosticsModal.svelte';
 import { PingButton } from '$lib/components/ui';
@@ -44,23 +50,6 @@ import { PingButton } from '$lib/components/ui';
 	let isOn = $derived(['running', 'starting', 'broken'].includes(tunnel.status));
 	let toggleDisabled = $derived(toggleLoading || tunnel.hasAddressConflict === true);
 
-	let ledColor = $derived.by(() => {
-		switch (tunnel.status) {
-			case 'running':
-				return tunnel.pingCheck.status === 'recovering' ? 'orange' : 'green';
-			case 'starting':
-			case 'needs_start':
-			case 'needs_stop': return 'yellow';
-			case 'broken': return 'orange';
-			default: return 'gray';
-		}
-	});
-
-	let ledPulse = $derived(
-		['starting', 'needs_start', 'needs_stop', 'broken'].includes(tunnel.status) ||
-		(tunnel.status === 'running' && tunnel.pingCheck.status === 'recovering')
-	);
-
 	let statusHint = $derived.by(() => {
 		switch (tunnel.status) {
 			case 'starting': return 'Запуск...';
@@ -70,7 +59,7 @@ import { PingButton } from '$lib/components/ui';
 			case 'running':
 				if (tunnel.pingCheck.status === 'recovering') {
 					const n = tunnel.pingCheck.restartCount;
-					return n > 0 ? `Восстановление (попытка ${n})` : 'Проверка связи...';
+					return n > 0 ? `Восстановление (${n})` : 'Проверка связи...';
 				}
 				return '';
 			default: return '';
@@ -95,6 +84,26 @@ import { PingButton } from '$lib/components/ui';
 		return connData.connected ? 'connected' : 'disconnected';
 	});
 	let latencyMs = $derived(connData?.latency ?? null);
+	let connectivityDown = $derived(awgConnectivityDown(tunnel, connData));
+
+	let ledColor = $derived.by(() => {
+		switch (tunnel.status) {
+			case 'running':
+				if (tunnel.pingCheck.status === 'recovering') return 'orange';
+				if (connectivityDown) return 'red';
+				return 'green';
+			case 'starting':
+			case 'needs_start':
+			case 'needs_stop': return 'yellow';
+			case 'broken': return 'orange';
+			default: return 'gray';
+		}
+	});
+
+	let ledPulse = $derived(
+		['starting', 'needs_start', 'needs_stop', 'broken'].includes(tunnel.status) ||
+		(tunnel.status === 'running' && tunnel.pingCheck.status === 'recovering')
+	);
 
 	let manualChecking = $state(false);
 	async function checkConnectivityManual(): Promise<void> {
@@ -222,9 +231,13 @@ import { PingButton } from '$lib/components/ui';
 	});
 
 	// ─── Card border class hook (status-tinted) ─────────────────────
-	let borderState = $derived.by<'running' | 'recovering' | 'broken' | 'transitional' | 'disabled' | 'idle'>(() => {
+	let borderState = $derived.by<
+		'running' | 'recovering' | 'unreachable' | 'broken' | 'transitional' | 'disabled' | 'idle'
+	>(() => {
 		if (tunnel.status === 'running') {
-			return tunnel.pingCheck?.status === 'recovering' ? 'recovering' : 'running';
+			if (tunnel.pingCheck?.status === 'recovering') return 'recovering';
+			if (connectivityDown) return 'unreachable';
+			return 'running';
 		}
 		if (tunnel.status === 'broken') return 'broken';
 		if (['starting', 'needs_start', 'needs_stop'].includes(tunnel.status)) return 'transitional';
@@ -232,8 +245,27 @@ import { PingButton } from '$lib/components/ui';
 		return 'idle';
 	});
 
-	/** Ping only when tunnel is up, stable, and connectivity check is enabled. */
-	let showPingButton = $derived(!isCheckDisabled && borderState === 'running');
+	let isDenseCard = $derived(view === 'cards');
+	let isListCard = $derived(view === 'list');
+	let pingStatusNote = $derived(
+		isListCard ? null : awgPingStatusNote(tunnel, isDenseCard ? 'short' : 'full'),
+	);
+	let showConnectivityRow = $derived(awgShowConnectivityRow(tunnel.status));
+	let toggleStarting = $derived(tunnel.status === 'starting');
+	/** Hide header hint when the same state is shown in the ping row (normal / compact cards). */
+	let headerStatusHint = $derived(
+		!isDenseCard && !isListCard && pingStatusNote ? '' : statusHint,
+	);
+	/** Ping row: transitional note or live connectivity when check is enabled. */
+	let showPingButton = $derived(
+		isListCard
+			? awgListShowsPingButton(tunnel, connData)
+			: pingStatusNote !== null ||
+					(!isCheckDisabled &&
+						(borderState === 'running' ||
+							borderState === 'recovering' ||
+							borderState === 'unreachable')),
+	);
 
 </script>
 
@@ -281,6 +313,8 @@ import { PingButton } from '$lib/components/ui';
 				<span class="list-status-text">{listStatusText}</span>
 		<span
 			class:toggle-recovering={borderState === 'recovering'}
+			class:toggle-starting={toggleStarting}
+			class:toggle-unreachable={borderState === 'unreachable'}
 			title={tunnel.hasAddressConflict ? 'Конфликт адресов — другой туннель с таким же IP уже запущен' : undefined}
 		>
 			<Toggle
@@ -296,12 +330,14 @@ import { PingButton } from '$lib/components/ui';
 		{#if statusHint}
 			<div class="list-note list-status-hint" class:recovering={borderState === 'recovering'}>{statusHint}</div>
 		{/if}
-	{#if tunnel.status === 'running' || tunnel.status === 'broken'}
-		<div class="connectivity-row" class:recovering={borderState === 'recovering'}>
+	{#if showConnectivityRow}
+		<div class="connectivity-row" class:recovering={pingStatusNote?.tone === 'recovering'}>
 			{#if showPingButton}
 				<PingButton
 					{connectivity}
 					{latencyMs}
+					statusNote={pingStatusNote?.text}
+					statusNoteTone={pingStatusNote?.tone}
 					checking={manualChecking}
 					onclick={checkConnectivityManual}
 				/>
@@ -445,6 +481,8 @@ import { PingButton } from '$lib/components/ui';
 					<span class="led led-{ledColor}" class:led-pulse={ledPulse}></span>
 				<span
 					class:toggle-recovering={borderState === 'recovering'}
+			class:toggle-starting={toggleStarting}
+			class:toggle-unreachable={borderState === 'unreachable'}
 					title={tunnel.hasAddressConflict ? 'Конфликт адресов — другой туннель с таким же IP уже запущен' : undefined}
 				>
 					<Toggle
@@ -458,12 +496,14 @@ import { PingButton } from '$lib/components/ui';
 				</span>
 				</div>
 			<!-- row 2: ping + gear (only when running) -->
-			{#if tunnel.status === 'running' || tunnel.status === 'broken'}
-		<div class="dense-toolbar-bottom" class:recovering={borderState === 'recovering'}>
+			{#if showConnectivityRow}
+		<div class="dense-toolbar-bottom" class:recovering={pingStatusNote?.tone === 'recovering'}>
 					{#if showPingButton}
 						<PingButton
 							{connectivity}
 							{latencyMs}
+							statusNote={pingStatusNote?.text}
+							statusNoteTone={pingStatusNote?.tone}
 							checking={manualChecking}
 							size="sm"
 							onclick={checkConnectivityManual}
@@ -503,8 +543,8 @@ import { PingButton } from '$lib/components/ui';
 							<VersionBadge kind="awg" value={tunnel.awgVersion} />
 						{/if}
 					</div>
-					{#if view === 'compact' && statusHint}
-						<span class="status-hint status-hint-left">{statusHint}</span>
+					{#if view === 'compact' && headerStatusHint}
+						<span class="status-hint status-hint-left">{headerStatusHint}</span>
 					{/if}
 				</div>
 
@@ -516,6 +556,8 @@ import { PingButton } from '$lib/components/ui';
 						></span>
 					<span
 						class:toggle-recovering={borderState === 'recovering'}
+						class:toggle-starting={toggleStarting}
+						class:toggle-unreachable={borderState === 'unreachable'}
 						title={tunnel.hasAddressConflict ? 'Конфликт адресов — другой туннель с таким же IP уже запущен' : undefined}
 					>
 						<Toggle
@@ -527,15 +569,17 @@ import { PingButton } from '$lib/components/ui';
 						/>
 					</span>
 					</div>
-				{#if view !== 'compact' && statusHint}
-					<span class="status-hint">{statusHint}</span>
+				{#if view !== 'compact' && headerStatusHint}
+					<span class="status-hint">{headerStatusHint}</span>
 				{/if}
-			{#if tunnel.status === 'running' || tunnel.status === 'broken'}
-				<div class="connectivity-row" class:recovering={borderState === 'recovering'}>
+			{#if showConnectivityRow}
+				<div class="connectivity-row" class:recovering={pingStatusNote?.tone === 'recovering'}>
 					{#if showPingButton}
 						<PingButton
 							{connectivity}
 							{latencyMs}
+							statusNote={pingStatusNote?.text}
+							statusNoteTone={pingStatusNote?.tone}
 							checking={manualChecking}
 							onclick={checkConnectivityManual}
 						/>
@@ -795,11 +839,12 @@ import { PingButton } from '$lib/components/ui';
 
 	.card.border-running { border-color: var(--color-success-border); }
 	.card.border-recovering { border-color: var(--color-broken-border); }
+	.card.border-unreachable { border-color: var(--color-error-border); }
 	.card.border-broken { border-color: var(--color-broken-border); }
 	.card.border-transitional { border-color: var(--color-warning-border); }
 	.card.border-disabled { border-color: var(--color-text-muted); }
 
-	/* Toggle orange tint when recovering */
+	/* Toggle tint when recovering (orange) or starting (yellow) */
 	.toggle-recovering :global(.toggle-container.flip input:checked + .flip-track),
 	.toggle-recovering :global(.toggle-container.sm.flip input:checked + .flip-track) {
 		background: color-mix(in srgb, var(--color-broken) 18%, var(--color-bg-tertiary));
@@ -819,6 +864,50 @@ import { PingButton } from '$lib/components/ui';
 		box-shadow:
 			0 1px 3px rgba(0, 0, 0, 0.3),
 			0 0 5px color-mix(in srgb, var(--color-broken) 45%, transparent);
+		transition: background 0.4s ease, box-shadow 0.4s ease, transform 0.2s ease;
+	}
+
+	.toggle-starting :global(.toggle-container.flip input:checked + .flip-track),
+	.toggle-starting :global(.toggle-container.sm.flip input:checked + .flip-track) {
+		background: color-mix(in srgb, var(--color-warning) 18%, var(--color-bg-tertiary));
+		box-shadow:
+			inset 2px 0 4px rgba(0, 0, 0, 0.18),
+			0 0 6px color-mix(in srgb, var(--color-warning) 35%, transparent);
+		transition: background 0.4s ease, box-shadow 0.4s ease;
+	}
+
+	.toggle-starting :global(.toggle-container.flip input:checked + .flip-track .flip-lever),
+	.toggle-starting :global(.toggle-container.sm.flip input:checked + .flip-track .flip-lever) {
+		background: linear-gradient(
+			to bottom,
+			color-mix(in srgb, var(--color-warning) 75%, white),
+			var(--color-warning)
+		);
+		box-shadow:
+			0 1px 3px rgba(0, 0, 0, 0.3),
+			0 0 5px color-mix(in srgb, var(--color-warning) 45%, transparent);
+		transition: background 0.4s ease, box-shadow 0.4s ease, transform 0.2s ease;
+	}
+
+	.toggle-unreachable :global(.toggle-container.flip input:checked + .flip-track),
+	.toggle-unreachable :global(.toggle-container.sm.flip input:checked + .flip-track) {
+		background: color-mix(in srgb, var(--color-error) 18%, var(--color-bg-tertiary));
+		box-shadow:
+			inset 2px 0 4px rgba(0, 0, 0, 0.18),
+			0 0 6px color-mix(in srgb, var(--color-error) 35%, transparent);
+		transition: background 0.4s ease, box-shadow 0.4s ease;
+	}
+
+	.toggle-unreachable :global(.toggle-container.flip input:checked + .flip-track .flip-lever),
+	.toggle-unreachable :global(.toggle-container.sm.flip input:checked + .flip-track .flip-lever) {
+		background: linear-gradient(
+			to bottom,
+			color-mix(in srgb, var(--color-error) 75%, white),
+			var(--color-error)
+		);
+		box-shadow:
+			0 1px 3px rgba(0, 0, 0, 0.3),
+			0 0 5px color-mix(in srgb, var(--color-error) 45%, transparent);
 		transition: background 0.4s ease, box-shadow 0.4s ease, transform 0.2s ease;
 	}
 
@@ -878,6 +967,10 @@ import { PingButton } from '$lib/components/ui';
 
 	.card.border-recovering .list-status-text {
 		color: var(--color-broken);
+	}
+
+	.card.border-unreachable .list-status-text {
+		color: var(--color-error);
 	}
 
 	.list-status-hint.recovering {
@@ -1290,6 +1383,11 @@ import { PingButton } from '$lib/components/ui';
 		box-shadow: 0 0 6px var(--color-broken);
 	}
 
+	.led-red {
+		background: var(--color-error);
+		box-shadow: 0 0 6px var(--color-error);
+	}
+
 	.led-gray {
 		background: var(--color-text-muted);
 		box-shadow: none;
@@ -1312,6 +1410,10 @@ import { PingButton } from '$lib/components/ui';
 
 	.card.border-recovering .status-hint {
 		color: var(--color-broken);
+	}
+
+	.card.border-unreachable .status-hint {
+		color: var(--color-error);
 	}
 
 	.status-hint-left {

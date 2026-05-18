@@ -42,6 +42,11 @@
 	import SubscriptionActiveCard from '$lib/components/subscriptions/SubscriptionActiveCard.svelte';
 	import type { ExternalTunnel, Subscription, SubscriptionMember, SystemTunnel, TunnelListItem } from '$lib/types';
 	import { formatBitRate, formatBytes, formatDuration, formatRelativeTime, secondsSince } from '$lib/utils/format';
+	import {
+		awgConnectivityDown,
+		awgListShowsPingButton,
+		awgShowConnectivityRow,
+	} from '$lib/utils/awgPingStatus';
 	import { resolveSubscriptionMemberTag } from '$lib/utils/subscriptionMember';
 	import {
 		SINGBOX_LAYOUT_STORAGE_KEY,
@@ -857,16 +862,19 @@
 		return ['running', 'starting', 'broken'].includes(tunnel.status);
 	}
 
-	function showManagedPing(tunnel: TunnelListItem): boolean {
-		return (
-			tunnel.status === 'running' &&
-			tunnel.pingCheck.status !== 'recovering' &&
-			(tunnel.connectivityCheck?.method ?? 'http') !== 'disabled'
-		);
+	function showManagedPing(
+		tunnel: TunnelListItem,
+		connectivity: { connected: boolean; latency: number | null } | undefined,
+	): boolean {
+		return awgListShowsPingButton(tunnel, connectivity);
 	}
 
-	function managedStatusVariant(tunnel: TunnelListItem): 'success' | 'error' | 'warning' | 'muted' {
+	function managedStatusVariant(
+		tunnel: TunnelListItem,
+		connectivity?: { connected: boolean; latency: number | null },
+	): 'success' | 'error' | 'warning' | 'muted' {
 		if (tunnel.hasAddressConflict) return 'error';
+		if (awgConnectivityDown(tunnel, connectivity)) return 'error';
 		switch (tunnelStatusBucket(tunnel.status)) {
 			case 'running':
 				return tunnel.pingCheck.status === 'recovering' ? 'warning' : 'success';
@@ -879,8 +887,12 @@
 		}
 	}
 
-	function managedStatusLabel(tunnel: TunnelListItem): string {
+	function managedStatusLabel(
+		tunnel: TunnelListItem,
+		connectivity?: { connected: boolean; latency: number | null },
+	): string {
 		if (tunnel.hasAddressConflict) return 'Конфликт IP';
+		if (awgConnectivityDown(tunnel, connectivity)) return 'Нет связи';
 		switch (tunnel.status) {
 			case 'running':
 				return tunnel.pingCheck.status === 'recovering' ? 'Восстанавливается' : 'Активен';
@@ -1279,11 +1291,14 @@
 					{@const connState = !isActive ? 'idle'
 						: connectivity === undefined ? 'checking'
 						: connectivity.connected ? 'connected' : 'disconnected'}
-					{@const showPing = showManagedPing(tunnel)}
+					{@const showPing = showManagedPing(tunnel, connectivity)}
+					{@const showConnectivityRow = awgShowConnectivityRow(tunnel.status)}
 						<div class="awg-list-row">
 						<div
 							class="awg-list-cell awg-list-cell-toggle"
 							class:awg-toggle-recovering={tunnel.status === 'running' && tunnel.pingCheck.status === 'recovering'}
+							class:awg-toggle-starting={tunnel.status === 'starting'}
+							class:awg-toggle-unreachable={awgConnectivityDown(tunnel, connectivity)}
 							data-label="Старт"
 						>
 							<Toggle
@@ -1326,15 +1341,15 @@
 								<div class="awg-list-status-stack">
 									<div class="awg-list-status-line">
 									<StatusDot
-										variant={managedStatusVariant(tunnel)}
+										variant={managedStatusVariant(tunnel, connectivity)}
 										pulse={tunnel.status === 'running' && tunnel.pingCheck.status === 'recovering'}
-										ariaLabel={managedStatusLabel(tunnel)}
+										ariaLabel={managedStatusLabel(tunnel, connectivity)}
 									/>
-									<span class="awg-list-status-text">{managedStatusLabel(tunnel)}</span>
+									<span class="awg-list-status-text">{managedStatusLabel(tunnel, connectivity)}</span>
 									</div>
 									{#if tunnel.hasAddressConflict}
 								<div class="awg-list-sub awg-list-sub--error">Дублирует адрес уже запущенного туннеля</div>
-							{:else if tunnel.status === 'running' || tunnel.status === 'broken'}
+							{:else if showConnectivityRow}
 								<div
 									class="awg-list-connectivity-row"
 									class:recovering={tunnel.status === 'running' && tunnel.pingCheck.status === 'recovering'}
@@ -2376,7 +2391,7 @@
 		color: var(--color-error);
 	}
 
-	/* recovering toggle */
+	/* recovering / starting toggle tint */
 	.awg-toggle-recovering :global(.toggle-container.sm.flip input:checked + .flip-track) {
 		background: color-mix(in srgb, var(--color-broken) 18%, var(--color-bg-tertiary));
 		box-shadow:
@@ -2394,6 +2409,46 @@
 		box-shadow:
 			0 1px 3px rgba(0, 0, 0, 0.3),
 			0 0 5px color-mix(in srgb, var(--color-broken) 45%, transparent);
+		transition: background 0.4s ease, box-shadow 0.4s ease, transform 0.2s ease;
+	}
+
+	.awg-toggle-starting :global(.toggle-container.sm.flip input:checked + .flip-track) {
+		background: color-mix(in srgb, var(--color-warning) 18%, var(--color-bg-tertiary));
+		box-shadow:
+			inset 2px 0 4px rgba(0, 0, 0, 0.18),
+			0 0 6px color-mix(in srgb, var(--color-warning) 35%, transparent);
+		transition: background 0.4s ease, box-shadow 0.4s ease;
+	}
+
+	.awg-toggle-starting :global(.toggle-container.sm.flip input:checked + .flip-track .flip-lever) {
+		background: linear-gradient(
+			to bottom,
+			color-mix(in srgb, var(--color-warning) 75%, white),
+			var(--color-warning)
+		);
+		box-shadow:
+			0 1px 3px rgba(0, 0, 0, 0.3),
+			0 0 5px color-mix(in srgb, var(--color-warning) 45%, transparent);
+		transition: background 0.4s ease, box-shadow 0.4s ease, transform 0.2s ease;
+	}
+
+	.awg-toggle-unreachable :global(.toggle-container.sm.flip input:checked + .flip-track) {
+		background: color-mix(in srgb, var(--color-error) 18%, var(--color-bg-tertiary));
+		box-shadow:
+			inset 2px 0 4px rgba(0, 0, 0, 0.18),
+			0 0 6px color-mix(in srgb, var(--color-error) 35%, transparent);
+		transition: background 0.4s ease, box-shadow 0.4s ease;
+	}
+
+	.awg-toggle-unreachable :global(.toggle-container.sm.flip input:checked + .flip-track .flip-lever) {
+		background: linear-gradient(
+			to bottom,
+			color-mix(in srgb, var(--color-error) 75%, white),
+			var(--color-error)
+		);
+		box-shadow:
+			0 1px 3px rgba(0, 0, 0, 0.3),
+			0 0 5px color-mix(in srgb, var(--color-error) 45%, transparent);
 		transition: background 0.4s ease, box-shadow 0.4s ease, transform 0.2s ease;
 	}
 

@@ -148,7 +148,7 @@ const MOCK_AWG_TUNNELS = [
 		id: 'awg-demo-4',
 		name: 'SE Stockholm',
 		type: 'amneziawg',
-		status: 'running',
+		status: 'starting',
 		enabled: true,
 		defaultRoute: false,
 		resolvedIspInterface: 'ISP2',
@@ -157,15 +157,15 @@ const MOCK_AWG_TUNNELS = [
 		address: '10.40.0.2/32',
 		interfaceName: 'awg3',
 		ndmsName: 'Wireguard3',
-		rxBytes: 19_202_812,
-		txBytes: 8_441_003,
-		lastHandshake: new Date(Date.now() - 240_000).toISOString(),
+		rxBytes: 0,
+		txBytes: 0,
+		lastHandshake: '',
 		awgVersion: 'awg1.5',
 		mtu: 1380,
-		startedAt: new Date(Date.now() - 1_200_000).toISOString(),
+		startedAt: '',
 		backend: 'nativewg',
 		connectivityCheck: { method: 'http' },
-		pingCheck: { status: 'recovering', restartCount: 2, failCount: 2, failThreshold: 3 },
+		pingCheck: { status: 'alive', restartCount: 0, failCount: 0, failThreshold: 3 },
 	},
 	{
 		id: 'awg-demo-5',
@@ -213,7 +213,34 @@ const MOCK_AWG_TUNNELS = [
 		connectivityCheck: { method: 'http' },
 		pingCheck: { status: 'alive', restartCount: 0, failCount: 0, failThreshold: 3 },
 	},
+	// Running + handshake, but HTTP self-check fails → «Нет связи» on the ping chip (like real Fin).
+	{
+		id: 'awg-demo-fin',
+		name: 'Fin',
+		type: 'amneziawg',
+		status: 'running',
+		enabled: true,
+		defaultRoute: true,
+		resolvedIspInterface: 'ppp0',
+		resolvedIspInterfaceLabel: 'Dom.Ru',
+		endpoint: '66.234.150.50:9911',
+		address: '100.87.200.173/32',
+		interfaceName: 'nwg5',
+		ndmsName: 'Wireguard5',
+		rxBytes: 6636,
+		txBytes: 15568,
+		lastHandshake: new Date(Date.now() - 90_000).toISOString(),
+		awgVersion: 'awg1.5',
+		mtu: 1280,
+		startedAt: new Date(Date.now() - 120_000).toISOString(),
+		backend: 'nativewg',
+		connectivityCheck: { method: 'http' },
+		pingCheck: { status: 'disabled', restartCount: 0, failCount: 0, failThreshold: 0 },
+	},
 ];
+
+/** AWG tunnels where monitoring self-check is down while status stays running. */
+const MOCK_AWG_SELF_CHECK_FAIL = new Set(['awg-demo-fin']);
 
 const MOCK_SYSTEM_TUNNELS = [
 	{
@@ -704,16 +731,19 @@ function buildAwgSnapshot() {
 const AWG_BASE_LATENCY = (() => {
 	// Spread tunnels across latency tiers for a useful demo:
 	// good (<80ms): awg-demo-1, awg-demo-3
-	// warn (80-199ms): awg-demo-2 (recovering), awg-demo-4 (recovering)
+	// warn (80-199ms): awg-demo-2 (recovering)
+	// starting: awg-demo-4 (SE Stockholm) → no latency until running
 	// bad (≥200ms): awg-demo-6
+	// self-check fail: awg-demo-fin → «Нет связи»
 	// stopped/failed: awg-demo-5 → no latency
 	const ranges = {
 		'awg-demo-1': [15, 75],
 		'awg-demo-2': [80, 170],
 		'awg-demo-3': [20, 79],
-		'awg-demo-4': [80, 195],
+		'awg-demo-4': null,
 		'awg-demo-5': null,
 		'awg-demo-6': [190, 250],
+		'awg-demo-fin': null,
 	};
 	const map = {};
 	for (const [id, range] of Object.entries(ranges)) {
@@ -733,10 +763,11 @@ function buildConnectivityMatrixEvent() {
 		const base = AWG_BASE_LATENCY[t.id] ?? null;
 		const isActive = t.status === 'running' || t.status === 'broken';
 		const pingFailed = t.pingCheck?.status === 'failed';
+		const selfCheckFail = MOCK_AWG_SELF_CHECK_FAIL.has(t.id);
 
 		// Add small jitter (±12ms) so the value visibly fluctuates
 		const jitter = Math.floor(Math.random() * 25) - 12;
-		const latency = base !== null && isActive && !pingFailed
+		const latency = base !== null && isActive && !pingFailed && !selfCheckFail
 			? Math.max(10, Math.min(300, base + jitter))
 			: null;
 
@@ -744,7 +775,7 @@ function buildConnectivityMatrixEvent() {
 			targetId: selfTarget.id,
 			tunnelId: t.id,
 			latencyMs: latency,
-			ok: isActive && !pingFailed,
+			ok: isActive && !pingFailed && !selfCheckFail,
 			activeForRestart: false,
 			isSelf: true,
 			ts: nowIso,
@@ -3120,6 +3151,49 @@ const server = http.createServer(async (req, res) => {
 		} else {
 			send(res, 404, { success: false, error: 'system tunnel not found' });
 		}
+		return;
+	}
+
+	if (req.method === 'GET' && path === '/test/connectivity') {
+		const id = url.searchParams.get('id') ?? '';
+		const tunnel = MOCK_AWG_TUNNELS.find((t) => t.id === id);
+		if (!tunnel) {
+			send(res, 404, { success: false, error: 'tunnel not found', code: 'NOT_FOUND' });
+			return;
+		}
+		if (tunnel.status !== 'running' && tunnel.status !== 'broken') {
+			send(res, 200, {
+				success: true,
+				data: { connected: false, reason: 'tunnel not running' },
+			});
+			return;
+		}
+		if ((tunnel.connectivityCheck?.method ?? 'http') === 'disabled') {
+			send(res, 200, {
+				success: true,
+				data: { connected: true, reason: 'check disabled' },
+			});
+			return;
+		}
+		if (MOCK_AWG_SELF_CHECK_FAIL.has(id)) {
+			send(res, 200, {
+				success: true,
+				data: {
+					connected: false,
+					latency: null,
+					reason: 'HTTP connectivity check failed (mock Fin)',
+				},
+			});
+			return;
+		}
+		const base = AWG_BASE_LATENCY[id];
+		const jitter = Math.floor(Math.random() * 25) - 12;
+		const latency =
+			base !== null ? Math.max(10, Math.min(300, base + jitter)) : 42 + Math.floor(Math.random() * 40);
+		send(res, 200, {
+			success: true,
+			data: { connected: true, latency, httpCode: 204 },
+		});
 		return;
 	}
 

@@ -11,7 +11,9 @@
 		/** AWG connectivity check — used when `label` is omitted. */
 		connectivity?: ConnState;
 		latencyMs?: number | null;
-		recovering?: boolean;
+		/** Fixed AWG label (start / recovery / stop). Disables the button. */
+		statusNote?: string;
+		statusNoteTone?: 'recovering' | 'transitional';
 		checking?: boolean;
 		disabled?: boolean;
 		/** `sm` dense AWG · `mid` subscription members · `md` default cards/list */
@@ -27,7 +29,8 @@
 		state,
 		connectivity,
 		latencyMs = null,
-		recovering = false,
+		statusNote,
+		statusNoteTone = 'transitional',
 		checking = false,
 		disabled = false,
 		size = 'md',
@@ -49,16 +52,19 @@
 		if (labelProp !== undefined) {
 			return checking ? '...' : labelProp;
 		}
+		if (statusNote) return statusNote;
 		if (checking || connectivity === 'checking') return '...';
 		if (connectivity === 'connected' && latencyMs !== null) return `${latencyMs}ms`;
 		if (connectivity === 'connected') return 'OK';
-		if (connectivity === 'disconnected') return '—';
+		if (connectivity === 'disconnected') return 'Нет связи';
 		return '...';
 	});
 
 	let tierClass = $derived.by(() => {
 		if (isSingbox && state) return `tier-${state}`;
-		if (recovering) return '';
+		if (statusNote) {
+			return statusNoteTone === 'recovering' ? 'tier-recovering' : 'tier-transitional';
+		}
 		if (checking || connectivity === 'checking') return '';
 		if (connectivity === 'disconnected') return 'tier-bad';
 		if (connectivity === 'connected' && latencyMs !== null) return `tier-${awgTier(latencyMs)}`;
@@ -75,7 +81,7 @@
 	);
 
 	let isSpinning = $derived(checking || (!isSingbox && connectivity === 'checking'));
-	let isDisabled = $derived(disabled || isSpinning);
+	let isDisabled = $derived(disabled || isSpinning || !!statusNote);
 	/** Icon only for numeric latency or while an explicit recheck is in flight. */
 	let showRefreshIcon = $derived(isSpinning || /^\d+ms$/.test(label));
 </script>
@@ -198,6 +204,14 @@
 	.ping-btn.force-border.tier-fail {
 		border-color: var(--color-error-border);
 	}
+	.ping-btn.tier-recovering {
+		color: var(--color-broken);
+	}
+
+	.ping-btn.tier-transitional {
+		color: var(--color-warning);
+	}
+
 	.ping-btn.tier-unknown,
 	.ping-btn.tier-stopped {
 		color: var(--color-text-muted);

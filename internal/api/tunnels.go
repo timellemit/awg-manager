@@ -463,8 +463,9 @@ type tunnelItem struct {
 	BackendType               string                   `json:"backendType,omitempty"`
 	AWGVersion                string                   `json:"awgVersion"`
 	MTU                       int                      `json:"mtu"`
-	StartedAt                 string                   `json:"startedAt,omitempty"`
-	PingCheck                 pingcheck.TunnelPingInfo `json:"pingCheck"`
+	StartedAt                 string                          `json:"startedAt,omitempty"`
+	PingCheck                 pingcheck.TunnelPingInfo        `json:"pingCheck"`
+	ConnectivityCheck         *storage.ConnectivityCheckConfig `json:"connectivityCheck,omitempty"`
 }
 
 // listItems builds the tunnel list items for API response and SSE snapshots.
@@ -570,7 +571,7 @@ func (h *TunnelsHandler) listItems(ctx context.Context) ([]tunnelItem, error) {
 			pcInfo = pingcheck.TunnelPingInfo{Status: "disabled"}
 		}
 
-		items = append(items, tunnelItem{
+		item := tunnelItem{
 			ID:                        t.ID,
 			Name:                      t.Name,
 			Type:                      "awg",
@@ -595,7 +596,11 @@ func (h *TunnelsHandler) listItems(ctx context.Context) ([]tunnelItem, error) {
 			MTU:                       mtu,
 			StartedAt:                 startedAt,
 			PingCheck:                 pcInfo,
-		})
+		}
+		if stored != nil && stored.ConnectivityCheck != nil {
+			item.ConnectivityCheck = stored.ConnectivityCheck
+		}
+		items = append(items, item)
 	}
 
 	return items, nil
