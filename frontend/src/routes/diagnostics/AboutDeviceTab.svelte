@@ -34,6 +34,7 @@
 		buildRouterClientContext,
 		collectBrowserSnapshot,
 		formatAboutReport,
+		formatLocalTimestampForFilename,
 		routerClientRows,
 		routerStaticRows,
 		type AwgmServicesSnapshot,
@@ -236,19 +237,37 @@
 	const servicesRows = $derived(awgmSnap ? awgmServicesRows(awgmSnap) : []);
 
 	async function copyReport() {
-		const sections = [
-			{ title: 'Роутер', rows: routerRows },
-			{ title: 'Браузер', rows: browserRows },
-			{ title: 'Клиент в сети роутера', rows: clientRows },
-			{ title: 'AWGM', rows: servicesRows },
-		];
-		const text = formatAboutReport(sections);
+		const text = buildAboutReportText();
 		const ok = await copyToClipboard(text);
 		if (ok) {
 			notifications.success('Отчёт скопирован в буфер обмена');
 		} else {
 			notifications.error('Не удалось скопировать');
 		}
+	}
+
+	function buildAboutReportText(): string {
+		const sections = [
+			{ title: 'Роутер', rows: routerRows },
+			{ title: 'Браузер', rows: browserRows },
+			{ title: 'Клиент в сети роутера', rows: clientRows },
+			{ title: 'AWGM', rows: servicesRows },
+		];
+		return formatAboutReport(sections);
+	}
+
+	function downloadReport() {
+		const text = buildAboutReportText();
+		const filename = `awg-about-${formatLocalTimestampForFilename(new Date())}.txt`;
+		const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = filename;
+		document.body.appendChild(a);
+		a.click();
+		a.remove();
+		URL.revokeObjectURL(url);
 	}
 </script>
 
@@ -258,6 +277,9 @@
 	</Button>
 	<Button variant="ghost" size="sm" onclick={copyReport} disabled={refreshing || !sysInfo}>
 		Скопировать данные
+	</Button>
+	<Button variant="ghost" size="sm" onclick={downloadReport} disabled={refreshing || !sysInfo}>
+		Скачать отчёт
 	</Button>
 </div>
 

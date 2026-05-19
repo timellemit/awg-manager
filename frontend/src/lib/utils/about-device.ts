@@ -475,7 +475,7 @@ export function formatAboutSection(title: string, rows: AboutInfoRow[]): string 
 }
 
 export function formatAboutReport(sections: { title: string; rows: AboutInfoRow[] }[]): string {
-	const lines: string[] = ['AWG Manager — окружение', `Сформировано: ${new Date().toISOString()}`, ''];
+	const lines: string[] = ['AWG Manager — окружение', `Дата и время формирования: ${formatLocalTimestampWithOffset(new Date())}`, ''];
 
 	for (const section of sections) {
 		lines.push(`## ${section.title}`);
@@ -486,4 +486,41 @@ export function formatAboutReport(sections: { title: string; rows: AboutInfoRow[
 	}
 
 	return lines.join('\n').trimEnd();
+}
+
+function formatLocalTimestampWithOffset(d: Date): string {
+	const pad2 = (n: number): string => String(n).padStart(2, '0');
+	const pad3 = (n: number): string => String(n).padStart(3, '0');
+
+	const year = d.getFullYear();
+	const month = pad2(d.getMonth() + 1);
+	const day = pad2(d.getDate());
+	const hours = pad2(d.getHours());
+	const minutes = pad2(d.getMinutes());
+	const seconds = pad2(d.getSeconds());
+	const millis = pad3(d.getMilliseconds());
+
+	const totalMinutes = -d.getTimezoneOffset();
+	const sign = totalMinutes >= 0 ? '+' : '-';
+	const absMinutes = Math.abs(totalMinutes);
+	const tzHours = pad2(Math.floor(absMinutes / 60));
+	const tzMinutes = pad2(absMinutes % 60);
+
+	return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}.${millis}${sign}${tzHours}:${tzMinutes}`;
+}
+
+export function formatLocalTimestampForFilename(d: Date): string {
+	const pad2 = (n: number): string => String(n).padStart(2, '0');
+	const year = d.getFullYear();
+	const month = pad2(d.getMonth() + 1);
+	const day = pad2(d.getDate());
+	const hours = pad2(d.getHours());
+	const minutes = pad2(d.getMinutes());
+	const seconds = pad2(d.getSeconds());
+	const totalMinutes = -d.getTimezoneOffset();
+	const sign = totalMinutes >= 0 ? '+' : '-';
+	const absMinutes = Math.abs(totalMinutes);
+	const tzHours = pad2(Math.floor(absMinutes / 60));
+	const tzMinutes = pad2(absMinutes % 60);
+	return `${year}-${month}-${day}_${hours}-${minutes}-${seconds}${sign}${tzHours}-${tzMinutes}`;
 }

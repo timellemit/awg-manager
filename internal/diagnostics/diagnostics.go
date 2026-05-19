@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os/exec"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -576,12 +578,54 @@ func (r *Runner) execute(ctx context.Context) {
 	r.executeStream(ctx)
 }
 
+func routerLocalNow() time.Time {
+	now := time.Now()
+
+	out, err := exec.Command("date", "+%z").Output()
+	if err != nil {
+		return now
+	}
+
+	tz := strings.TrimSpace(string(out))
+	if len(tz) != 5 {
+		return now
+	}
+
+	sign := 1
+	switch tz[0] {
+	case '+':
+		sign = 1
+	case '-':
+		sign = -1
+	default:
+		return now
+	}
+
+	hours, err := strconv.Atoi(tz[1:3])
+	if err != nil {
+		return now
+	}
+	minutes, err := strconv.Atoi(tz[3:5])
+	if err != nil {
+		return now
+	}
+	if hours > 23 || minutes > 59 {
+		return now
+	}
+
+	offset := sign * ((hours * 60 * 60) + (minutes * 60))
+	loc := time.FixedZone(tz, offset)
+
+	return now.In(loc)
+}
+
 func (r *Runner) executeStream(ctx context.Context) {
 	start := time.Now()
+	generatedAt := routerLocalNow()
 	r.appLog.Info("run", "", "Diagnostics started")
 	report := &Report{
 		Version:     "1.0",
-		GeneratedAt: start,
+		GeneratedAt: generatedAt,
 	}
 
 	singleTunnel := r.opts.TunnelID
