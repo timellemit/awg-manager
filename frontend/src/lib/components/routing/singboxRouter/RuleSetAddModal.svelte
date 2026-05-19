@@ -1,9 +1,12 @@
 <script lang="ts">
 	import Modal from '$lib/components/ui/Modal.svelte';
-	import { Dropdown, type DropdownOption } from '$lib/components/ui';
-	import type { SingboxRouterRuleSet } from '$lib/types';
+	import { Button, Dropdown, type DropdownOption } from '$lib/components/ui';
+	import { api } from '$lib/api/client';
+	import type { GeoFileEntry, SingboxRouterRuleSet } from '$lib/types';
 	import type { OutboundGroup } from './outboundOptions';
+	import { HrNeoGeoTagPicker } from '$lib/components/hrneo';
 	import { parseInlineRuleList } from '$lib/utils/singboxInlineRules';
+	import { expandGeoLinesInInput } from '$lib/utils/singboxInlineGeoExpand';
 
 	interface Props {
 		ruleSet?: SingboxRouterRuleSet;
@@ -44,13 +47,76 @@ keyword:youtube`;
 
 	const isEditing = $derived(Boolean(ruleSet));
 
+	let geoFiles = $state<GeoFileEntry[]>([]);
+	let geositePickerOpen = $state(false);
+	let geoipPickerOpen = $state(false);
+	let expandedRulesList = $state('');
+	let geoExpandWarnings = $state<string[]>([]);
+	let geoExpanding = $state(false);
+
+	let geositeFiles = $derived(geoFiles.filter((g) => g.type === 'geosite').map((g) => g.path));
+	let geoipFiles = $derived(geoFiles.filter((g) => g.type === 'geoip').map((g) => g.path));
+
+	$effect(() => {
+		void (async () => {
+			try {
+				geoFiles = (await api.getGeoFiles()) ?? [];
+			} catch {
+				geoFiles = [];
+			}
+		})();
+	});
+
+	$effect(() => {
+		if (type !== 'inline' || inlineMode !== 'list') {
+			expandedRulesList = '';
+			geoExpandWarnings = [];
+			return;
+		}
+		const input = rulesList;
+		const timer = setTimeout(() => {
+			void (async () => {
+				geoExpanding = true;
+				try {
+					const { text, warnings } = await expandGeoLinesInInput(input, async (kind, tag) => {
+						const res = await api.expandGeoTag(kind, tag);
+						return res.lines;
+					});
+					if (input === rulesList) {
+						expandedRulesList = text;
+						geoExpandWarnings = warnings;
+					}
+				} catch {
+					if (input === rulesList) {
+						expandedRulesList = input;
+						geoExpandWarnings = [];
+					}
+				} finally {
+					if (input === rulesList) geoExpanding = false;
+				}
+			})();
+		}, 350);
+		return () => clearTimeout(timer);
+	});
+
 	// ── inline preview derived ──────────────────────────────────
 	const listParsePreview = $derived.by(() => {
 		if (type !== 'inline' || inlineMode !== 'list') {
 			return { rules: [] as Record<string, unknown>[], warnings: [] as string[], errors: [] as string[] };
 		}
-		return parseInlineRuleList(rulesList);
+		const source = expandedRulesList || rulesList;
+		const parsed = parseInlineRuleList(source);
+		if (geoExpandWarnings.length === 0) return parsed;
+		return {
+			...parsed,
+			warnings: [...geoExpandWarnings, ...parsed.warnings],
+		};
 	});
+
+	function appendRulesLine(token: string): void {
+		const trimmed = rulesList.trimEnd();
+		rulesList = trimmed ? `${trimmed}\n${token}` : token;
+	}
 
 	// ── line numbers for rules-list textarea ─────────────────────
 	const rulesListLineNumbers = $derived.by(() => {
@@ -204,7 +270,11 @@ keyword:youtube`;
 						return;
 					}
 				} else {
-					const parsed = parseInlineRuleList(rulesList);
+					const { text: expanded, warnings: geoWarn } = await expandGeoLinesInInput(
+						rulesList,
+						async (kind, tag) => (await api.expandGeoTag(kind, tag)).lines,
+					);
+					const parsed = parseInlineRuleList(expanded);
 					if (parsed.errors.length > 0) {
 						error = parsed.errors.join('\n');
 						busy = false;
@@ -302,7 +372,36 @@ keyword:youtube`;
 
 			{#if inlineMode === 'list'}
 				<div class="field">
-					<div class="lbl">Список правил</div>
+					<div class="list-toolbar">
+						<div class="lbl">Список правил</div>
+						<div class="list-toolbar-actions">
+							<Button variant="ghost" size="sm" onclick={() => (geositePickerOpen = !geositePickerOpen)}>
+								+ geosite:TAG
+							</Button>
+							<Button variant="ghost" size="sm" onclick={() => (geoipPickerOpen = !geoipPickerOpen)}>
+								+ geoip:TAG
+							</Button>
+						</div>
+					</div>
+					{#if geositePickerOpen}
+						<HrNeoGeoTagPicker
+							kind="geosite"
+							files={geositeFiles}
+							onpick={(t) => appendRulesLine(t)}
+							onclose={() => (geositePickerOpen = false)}
+						/>
+					{/if}
+					{#if geoipPickerOpen}
+						<HrNeoGeoTagPicker
+							kind="geoip"
+							files={geoipFiles}
+							onpick={(t) => appendRulesLine(t)}
+							onclose={() => (geoipPickerOpen = false)}
+						/>
+					{/if}
+					{#if geoExpanding}
+						<div class="hint">Разворачиваем geosite:/geoip: теги…</div>
+					{/if}
 					<div class="rules-editor">
 						<pre class="line-numbers" aria-hidden="true" bind:this={rulesListLineNumberGutter}>{rulesListLineNumbers}</pre>
 						<textarea
@@ -322,6 +421,7 @@ keyword:youtube`;
 						<div>
 							<span class="help-label">Поддерживается:</span>
 							домены, URL, wildcard <code>*.example.com</code>, IP/CIDR,
+							<code>geosite:TAG</code>, <code>geoip:TAG</code> (разворачиваются из гео-файлов),
 							<code>keyword:</code>, <code>regex:</code>.
 						</div>
 						<div>
@@ -421,6 +521,18 @@ keyword:youtube`;
 	.lbl {
 		font-size: 0.75rem;
 		color: var(--muted-text);
+	}
+	.list-toolbar {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 0.5rem;
+		flex-wrap: wrap;
+	}
+	.list-toolbar-actions {
+		display: flex;
+		gap: 0.35rem;
+		flex-wrap: wrap;
 	}
 	.hint {
 		font-size: 0.75rem;

@@ -63,6 +63,13 @@ type GeoTagsResponse struct {
 	Data    []GeoTagDTO `json:"data"`
 }
 
+// GeoExpandData is the payload for GET /hydraroute/geo-expand.
+type GeoExpandData struct {
+	Lines []string `json:"lines"`
+	Path  string   `json:"path"`
+	Count int      `json:"count"`
+}
+
 // GeoFileResponse is the envelope for endpoints that return a single
 // geo file entry (POST /hydraroute/geo-files/add).
 type GeoFileResponse struct {
@@ -427,6 +434,48 @@ func (h *HydraRouteHandler) GetGeoTags(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response.Success(w, response.MustNotNil(tags))
+}
+
+// ExpandGeoTag expands a geosite:/geoip: tag into inline rule list lines.
+//
+//	@Summary		HydraRoute geo tag expand
+//	@Tags			hydraroute
+//	@Produce		json
+//	@Security		CookieAuth
+//	@Param			kind	query	string	true	"geosite or geoip"
+//	@Param			tag	query	string	true	"Tag name"
+//	@Success		200	{object}	GeoExpandData
+//	@Router			/hydraroute/geo-expand [get]
+func (h *HydraRouteHandler) ExpandGeoTag(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		response.MethodNotAllowed(w)
+		return
+	}
+
+	kind := r.URL.Query().Get("kind")
+	tag := r.URL.Query().Get("tag")
+	if kind == "" || tag == "" {
+		response.Error(w, "kind and tag query parameters are required", "BAD_REQUEST")
+		return
+	}
+
+	gds := h.svc.GetGeoData()
+	if gds == nil {
+		response.Error(w, "geo data store not initialized", "NOT_INITIALIZED")
+		return
+	}
+
+	lines, path, err := gds.ExpandGeoTag(kind, tag)
+	if err != nil {
+		response.Error(w, err.Error(), "GEO_EXPAND_ERROR")
+		return
+	}
+
+	response.Success(w, GeoExpandData{
+		Lines: lines,
+		Path:  path,
+		Count: len(lines),
+	})
 }
 
 // GetIpsetUsage returns the current ipset usage per kernel interface.

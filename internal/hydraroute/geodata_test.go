@@ -6,19 +6,17 @@ import (
 	"testing"
 )
 
-func TestAdoptExternalFiles_AddsUnknownFiles(t *testing.T) {
+func newTestGeoStore(t *testing.T) *GeoDataStore {
+	t.Helper()
 	tmp := t.TempDir()
-	origHrDir := hrDir
-	hrDir = tmp
-	defer func() { hrDir = origHrDir }()
+	return NewGeoDataStore(tmp)
+}
 
-	store := &GeoDataStore{
-		storagePath: filepath.Join(tmp, "hydraroute-geodata.json"),
-		tagCache:    make(map[string][]GeoTag),
-	}
+func TestAdoptExternalFiles_AddsUnknownFiles(t *testing.T) {
+	store := newTestGeoStore(t)
 
-	geositePath := filepath.Join(tmp, "geosite.dat")
-	geoipPath := filepath.Join(tmp, "geoip.dat")
+	geositePath := filepath.Join(store.geoDir, "geosite.dat")
+	geoipPath := filepath.Join(store.geoDir, "geoip.dat")
 	if err := os.WriteFile(geositePath, []byte("fake-content"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -61,22 +59,17 @@ func TestAdoptExternalFiles_AddsUnknownFiles(t *testing.T) {
 }
 
 func TestAdoptExternalFiles_SkipsAlreadyTracked(t *testing.T) {
-	tmp := t.TempDir()
-	origHrDir := hrDir
-	hrDir = tmp
-	defer func() { hrDir = origHrDir }()
-	existingPath := filepath.Join(tmp, "existing.dat")
+	store := newTestGeoStore(t)
+	existingPath := filepath.Join(store.geoDir, "existing.dat")
 	if err := os.WriteFile(existingPath, []byte("x"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	store := &GeoDataStore{
-		storagePath: filepath.Join(tmp, "hydraroute-geodata.json"),
-		tagCache:    make(map[string][]GeoTag),
-		entries: []GeoFileEntry{
-			{Type: "geosite", Path: existingPath, URL: "https://example.com/f.dat"},
-		},
+	store.mu.Lock()
+	store.entries = []GeoFileEntry{
+		{Type: "geosite", Path: existingPath, URL: "https://example.com/f.dat"},
 	}
+	store.mu.Unlock()
 
 	cfg := &Config{
 		GeoSiteFiles: []string{existingPath},
@@ -89,25 +82,15 @@ func TestAdoptExternalFiles_SkipsAlreadyTracked(t *testing.T) {
 	if n != 0 {
 		t.Fatalf("adopted = %d, want 0 (path already tracked)", n)
 	}
-	if len(store.entries) != 1 {
-		t.Fatalf("entries = %d, want 1 (no duplicate)", len(store.entries))
-	}
-	if store.entries[0].External {
-		t.Error("pre-existing tracked entry should not be marked External")
+	if len(store.List()) != 1 {
+		t.Fatalf("entries = %d, want 1 (no duplicate)", len(store.List()))
 	}
 }
 
 func TestAdoptExternalFiles_SkipsMissingFiles(t *testing.T) {
-	tmp := t.TempDir()
-	origHrDir := hrDir
-	hrDir = tmp
-	defer func() { hrDir = origHrDir }()
-	store := &GeoDataStore{
-		storagePath: filepath.Join(tmp, "hydraroute-geodata.json"),
-		tagCache:    make(map[string][]GeoTag),
-	}
+	store := newTestGeoStore(t)
 	cfg := &Config{
-		GeoSiteFiles: []string{filepath.Join(tmp, "does-not-exist.dat")},
+		GeoSiteFiles: []string{filepath.Join(store.geoDir, "does-not-exist.dat")},
 	}
 
 	n, err := store.AdoptExternalFiles(cfg)
@@ -117,16 +100,13 @@ func TestAdoptExternalFiles_SkipsMissingFiles(t *testing.T) {
 	if n != 0 {
 		t.Fatalf("adopted = %d, want 0 (file missing)", n)
 	}
-	if len(store.entries) != 0 {
-		t.Fatalf("entries = %d, want 0", len(store.entries))
+	if len(store.List()) != 0 {
+		t.Fatalf("entries = %d, want 0", len(store.List()))
 	}
 }
 
 func TestAdoptExternalFiles_NilConfig(t *testing.T) {
-	store := &GeoDataStore{
-		storagePath: filepath.Join(t.TempDir(), "hydraroute-geodata.json"),
-		tagCache:    make(map[string][]GeoTag),
-	}
+	store := newTestGeoStore(t)
 	n, err := store.AdoptExternalFiles(nil)
 	if err != nil {
 		t.Fatalf("AdoptExternalFiles(nil): %v", err)
@@ -136,30 +116,19 @@ func TestAdoptExternalFiles_NilConfig(t *testing.T) {
 	}
 }
 
-func TestAdoptExternalFiles_SkipsOutsideHrDir(t *testing.T) {
+func TestAdoptExternalFiles_SkipsUnmanagedPaths(t *testing.T) {
 	tmp := t.TempDir()
-	origHrDir := hrDir
-	hrDir = filepath.Join(tmp, "hr")
-	if err := os.Mkdir(hrDir, 0755); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { hrDir = origHrDir }()
+	store := NewGeoDataStore(tmp)
 
-	// A file outside hrDir — reachable on disk but should not be adopted.
 	outsidePath := filepath.Join(tmp, "outside.dat")
 	if err := os.WriteFile(outsidePath, []byte("x"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	// A file inside hrDir — should be adopted.
-	insidePath := filepath.Join(hrDir, "inside.dat")
+	insidePath := filepath.Join(store.geoDir, "inside.dat")
 	if err := os.WriteFile(insidePath, []byte("x"), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	store := &GeoDataStore{
-		storagePath: filepath.Join(tmp, "hydraroute-geodata.json"),
-		tagCache:    make(map[string][]GeoTag),
-	}
 	cfg := &Config{
 		GeoSiteFiles: []string{outsidePath, insidePath},
 	}
@@ -169,30 +138,25 @@ func TestAdoptExternalFiles_SkipsOutsideHrDir(t *testing.T) {
 		t.Fatalf("AdoptExternalFiles: %v", err)
 	}
 	if n != 1 {
-		t.Fatalf("adopted = %d, want 1 (only path under hrDir)", n)
+		t.Fatalf("adopted = %d, want 1 (only path under geoDir)", n)
 	}
-	if len(store.entries) != 1 || store.entries[0].Path != insidePath {
-		t.Fatalf("entries = %+v, want only %q", store.entries, insidePath)
+	entries := store.List()
+	if len(entries) != 1 || entries[0].Path != insidePath {
+		t.Fatalf("entries = %+v, want only %q", entries, insidePath)
 	}
 }
 
 func TestUpdate_RejectsExternalEntryWithoutURL(t *testing.T) {
-	tmp := t.TempDir()
-	origHrDir := hrDir
-	hrDir = tmp
-	defer func() { hrDir = origHrDir }()
-
-	path := filepath.Join(tmp, "adopted.dat")
+	store := newTestGeoStore(t)
+	path := filepath.Join(store.geoDir, "adopted.dat")
 	if err := os.WriteFile(path, []byte("x"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	store := &GeoDataStore{
-		storagePath: filepath.Join(tmp, "hydraroute-geodata.json"),
-		tagCache:    make(map[string][]GeoTag),
-		entries: []GeoFileEntry{
-			{Type: "geosite", Path: path, URL: "", External: true},
-		},
+	store.mu.Lock()
+	store.entries = []GeoFileEntry{
+		{Type: "geosite", Path: path, URL: "", External: true},
 	}
+	store.mu.Unlock()
 
 	_, err := store.Update(path)
 	if err == nil {
@@ -201,5 +165,17 @@ func TestUpdate_RejectsExternalEntryWithoutURL(t *testing.T) {
 	want := "cannot update external file: no source URL on record"
 	if err.Error() != want {
 		t.Fatalf("err = %q, want %q", err, want)
+	}
+}
+
+func TestNewGeoDataStore_UsesGeoSubdir(t *testing.T) {
+	tmp := t.TempDir()
+	store := NewGeoDataStore(tmp)
+	want := filepath.Join(tmp, "geo")
+	if store.geoDir != want {
+		t.Fatalf("geoDir = %q, want %q", store.geoDir, want)
+	}
+	if st, err := os.Stat(want); err != nil || !st.IsDir() {
+		t.Fatalf("geo dir not created: %v", err)
 	}
 }

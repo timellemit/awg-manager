@@ -24,6 +24,7 @@
     import ClientRoutesTab from './ClientRoutesTab.svelte';
     import { HrNeoTab } from '$lib/components/hrneo';
     import { SingboxRoutingPage } from '$lib/components/singbox-routing';
+    import GeoDataTab from './GeoDataTab.svelte';
     import { isRoutingSubTabVisible, type RoutingSubTab, type UsageLevel } from '$lib/types/usageLevel';
     import { usageLevel } from '$lib/stores/settings';
 
@@ -50,7 +51,7 @@
         unsubRouting?.();
     });
 
-    let activeTab = $state<'hrneo' | 'dns' | 'ip' | 'policy' | 'clientvpn' | 'singbox'>('dns');
+    let activeTab = $state<'hrneo' | 'geodata' | 'dns' | 'ip' | 'policy' | 'clientvpn' | 'singbox'>('dns');
 
     let isOS5 = $derived($systemInfo.data?.isOS5 ?? false);
     let hydrarouteInstalled = $derived($routing.hydrarouteStatus?.installed ?? false);
@@ -123,6 +124,25 @@
 
     // Derived: tab badges
     let hrRuleCount = $derived(dnsRoutes.filter(r => r.backend === 'hydraroute').length);
+    let geoFileCount = $state(0);
+
+    async function loadGeoFileCount() {
+        if (!hydrarouteInstalled && !singboxInstalled) {
+            geoFileCount = 0;
+            return;
+        }
+        try {
+            const files = await api.getGeoFiles();
+            geoFileCount = files?.length ?? 0;
+        } catch {
+            geoFileCount = 0;
+        }
+    }
+
+    $effect(() => {
+        if (hydrarouteInstalled || singboxInstalled) void loadGeoFileCount();
+        else geoFileCount = 0;
+    });
     let dnsActiveCount = $derived(dnsRoutes.filter(r => r.enabled && r.backend !== 'hydraroute').length);
     let ipActiveCount = $derived(ipRoutes.filter(r => r.enabled).length);
     let policyCount = $derived(accessPolicies.length);
@@ -142,6 +162,7 @@
         dns: 'dnsRoutes',
         ip: 'ipRoutes',
         hrneo: 'hrNeo',
+        geodata: 'geoData',
         singbox: 'singboxRouter',
     };
 
@@ -167,6 +188,9 @@
             // sing-box / hydraroute stack below.
             singboxInstalled ? { id: 'singbox', label: 'Sing-box Router', badge: singboxRuleCount, separatorBefore: true } : null,
             hydrarouteInstalled ? { id: 'hrneo', label: 'HR NEO', badge: hrRuleCount, separatorBefore: !singboxInstalled } : null,
+            (hydrarouteInstalled || singboxInstalled)
+                ? { id: 'geodata', label: 'Гео-данные', badge: geoFileCount, separatorBefore: true }
+                : null,
         ] as (TabItem | null)[])
             .filter((t): t is TabItem => t !== null)
             .filter((t) => tabVisible(t.id))
@@ -202,7 +226,7 @@
         ) {
             return;
         }
-        if (!hrKnown && activeTab === 'hrneo' && !items.some((it) => it.id === 'hrneo')) {
+        if (!hrKnown && (activeTab === 'hrneo' || activeTab === 'geodata') && !items.some((it) => it.id === activeTab)) {
             return;
         }
 
@@ -294,6 +318,8 @@
             {routingTunnels}
             bodyLoading={!$routingClientVpnTabReady}
         />
+    {:else if activeTab === 'geodata'}
+        <GeoDataTab />
     {:else if activeTab === 'singbox'}
         <SingboxRoutingPage />
     {/if}

@@ -17,7 +17,6 @@
 		type SidebarSelection,
 	} from './HrNeoTargetSidebar.svelte';
 	import HrNeoRulesList from './HrNeoRulesList.svelte';
-	import HrNeoGeoDataView from './HrNeoGeoDataView.svelte';
 	import HrNeoSettingsView from './HrNeoSettingsView.svelte';
 	import HrNeoDisabledTagsView from './HrNeoDisabledTagsView.svelte';
 	import HrNeoEditModal from './HrNeoEditModal.svelte';
@@ -190,12 +189,11 @@
 
 	let geositeFiles = $derived(geoFiles.filter((g) => g.type === 'geosite').map((g) => g.path));
 	let geoipFiles = $derived(geoFiles.filter((g) => g.type === 'geoip').map((g) => g.path));
-
-	// Auto-select first target (or geodata) when none is selected
+	// Auto-select first target (or settings) when none is selected
 	$effect(() => {
 		if (!selection) {
 			if (targets.length > 0) selection = { type: 'target', name: targets[0].name };
-			else selection = { type: 'service', item: 'geodata' };
+			else selection = { type: 'service', item: 'settings' };
 		}
 	});
 
@@ -379,8 +377,6 @@
 					oneditrule={openEditRule}
 					ondeleterule={handleDelete}
 				/>
-			{:else if selection?.type === 'service' && selection.item === 'geodata'}
-				<HrNeoGeoDataView files={geoFiles} onrefresh={loadGeoFiles} />
 			{:else if selection?.type === 'service' && selection.item === 'disabled-tags'}
 				<HrNeoDisabledTagsView tags={oversizedTags} {maxelem} />
 			{:else if selection?.type === 'service' && selection.item === 'settings'}
@@ -431,11 +427,6 @@
 					</div>
 				</details>
 			{/each}
-
-			<details>
-				<summary>Гео-данные ({geoFiles.length})</summary>
-				<div class="acc-body"><HrNeoGeoDataView files={geoFiles} onrefresh={loadGeoFiles} /></div>
-			</details>
 
 			<details>
 				<summary>Настройки демона</summary>

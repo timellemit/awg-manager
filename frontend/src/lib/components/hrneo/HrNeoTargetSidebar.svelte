@@ -1,5 +1,5 @@
 <script lang="ts" module>
-	export type ServiceItem = 'geodata' | 'settings' | 'disabled-tags';
+	export type ServiceItem = 'settings' | 'disabled-tags';
 
 	export interface TargetEntry {
 		name: string;
@@ -16,6 +16,10 @@
 </script>
 
 <script lang="ts">
+	import { goto } from '$app/navigation';
+	import { usageLevel } from '$lib/stores/settings';
+	import { isRoutingSubTabVisible } from '$lib/types/usageLevel';
+
 	interface Props {
 		targets: TargetEntry[];
 		selected: SidebarSelection;
@@ -52,6 +56,12 @@
 
 	function isServiceSelected(item: ServiceItem): boolean {
 		return selected?.type === 'service' && selected.item === item;
+	}
+
+	let showGeodataLink = $derived(isRoutingSubTabVisible($usageLevel, 'geoData'));
+
+	function openGeodataTab() {
+		void goto('/routing?tab=geodata');
 	}
 </script>
 
@@ -128,16 +138,16 @@
 	<div class="sidebar-section">
 		<div class="section-label">Служебное</div>
 
+		{#if showGeodataLink}
 		<div
-			role="button"
+			role="link"
 			tabindex="0"
-			class="row svc"
-			class:active={isServiceSelected('geodata')}
-			onclick={() => onselect({ type: 'service', item: 'geodata' })}
+			class="row svc row-link"
+			onclick={openGeodataTab}
 			onkeydown={(e) => {
 				if (e.key === 'Enter' || e.key === ' ') {
 					e.preventDefault();
-					onselect({ type: 'service', item: 'geodata' });
+					openGeodataTab();
 				}
 			}}
 		>
@@ -148,7 +158,9 @@
 					<span class="kind kind-interface">geoip {geoIPCount}</span>
 				</div>
 			</div>
+			<span class="row-link-hint" aria-hidden="true">→</span>
 		</div>
+		{/if}
 
 		<div
 			role="button"
@@ -351,5 +363,15 @@
 	.add-row:hover {
 		border-color: var(--accent);
 		background: var(--bg-tertiary);
+	}
+
+	.row-link {
+		justify-content: space-between;
+	}
+
+	.row-link-hint {
+		color: var(--text-muted);
+		font-size: 0.875rem;
+		flex-shrink: 0;
 	}
 </style>

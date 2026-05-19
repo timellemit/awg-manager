@@ -66,7 +66,7 @@
 
 	{#if files.length === 0}
 		<div class="picker-empty">
-			Нет загруженных файлов <code>{kind}.dat</code>. Добавьте их в разделе «Гео-данные».
+			Нет загруженных файлов <code>{kind}.dat</code>. Добавьте их на вкладке «Маршрутизация → Гео-данные».
 		</div>
 	{:else if loading}
 		<div class="picker-empty">Загрузка тегов…</div>

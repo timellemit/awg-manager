@@ -472,6 +472,14 @@ class ApiClient {
 		return this.request(`/hydraroute/geo-tags?path=${encodeURIComponent(path)}`);
 	}
 
+	async expandGeoTag(
+		kind: 'geosite' | 'geoip',
+		tag: string,
+	): Promise<{ lines: string[]; path: string; count: number }> {
+		const q = new URLSearchParams({ kind, tag });
+		return this.request(`/hydraroute/geo-expand?${q.toString()}`);
+	}
+
 	async getIpsetUsage(): Promise<IpsetUsage> {
 		return this.request('/hydraroute/ipset-usage');
 	}

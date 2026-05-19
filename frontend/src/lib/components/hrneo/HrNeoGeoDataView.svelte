@@ -272,7 +272,7 @@
 		open={true}
 		title="Удалить гео-файл"
 		message={`Удалить «${fileName(pd.path)}»?`}
-		secondary={`Файл удалится с диска и пропадёт из ${pd.type === 'geosite' ? 'GeoSiteFile=' : 'GeoIPFile='} в hrneo.conf. Правила, использующие теги из этого файла, перестанут резолвиться.`}
+		secondary={`Файл удалится из каталога awg-manager/geo. Если установлен HydraRoute — путь также уберётся из ${pd.type === 'geosite' ? 'GeoSiteFile=' : 'GeoIPFile='} в hrneo.conf.`}
 		busy={busy === pd.path}
 		onConfirm={confirmRemove}
 		onClose={() => (pendingDelete = null)}
