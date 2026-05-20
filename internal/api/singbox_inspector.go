@@ -46,7 +46,7 @@ type SingboxRouterInspectResponse struct {
 // Inspect simulates which router rule would match the given domain/IP.
 //
 //	@Summary		Inspect router routing decision
-//	@Description	Simulates which router rule would match the given domain or IP, returning the would-be outbound. Pure simulator — does not invoke sing-box. rule_set matchers are NOT evaluated in this version.
+//	@Description	Simulates which router rule would match the given domain or IP, returning the would-be outbound. Matchers are evaluated in Go; rule_set matchers are additionally checked via sing-box rule-set match when the binary and rule-set files are available. If unavailable, rule_set degrades to no-match with an explanatory note.
 //	@Tags			singbox-router
 //	@Accept			json
 //	@Produce		json

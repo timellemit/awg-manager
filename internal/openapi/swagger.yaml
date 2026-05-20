@@ -872,6 +872,17 @@ definitions:
         example: true
         type: boolean
     type: object
+  api.GeoExpandData:
+    properties:
+      count:
+        type: integer
+      lines:
+        items:
+          type: string
+        type: array
+      path:
+        type: string
+    type: object
   api.GeoFileEntryDTO:
     properties:
       path:
@@ -5389,6 +5400,31 @@ paths:
       summary: Update HydraRoute config
       tags:
       - hydraroute
+  /hydraroute/geo-expand:
+    get:
+      parameters:
+      - description: geosite or geoip
+        in: query
+        name: kind
+        required: true
+        type: string
+      - description: Tag name
+        in: query
+        name: tag
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/api.GeoExpandData'
+      security:
+      - CookieAuth: []
+      summary: HydraRoute geo tag expand
+      tags:
+      - hydraroute
   /hydraroute/geo-files:
     get:
       produces:
@@ -7914,8 +7950,10 @@ paths:
       consumes:
       - application/json
       description: Simulates which router rule would match the given domain or IP,
-        returning the would-be outbound. Pure simulator — does not invoke sing-box.
-        rule_set matchers are NOT evaluated in this version.
+        returning the would-be outbound. Matchers are evaluated in Go; rule_set matchers
+        are additionally checked via sing-box rule-set match when the binary and rule-set
+        files are available. If unavailable, rule_set degrades to no-match with an
+        explanatory note.
       parameters:
       - description: Domain or IP to test, plus optional port/protocol
         in: body
