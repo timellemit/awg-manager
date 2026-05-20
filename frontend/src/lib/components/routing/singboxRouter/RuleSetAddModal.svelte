@@ -1,6 +1,8 @@
 <script lang="ts">
 	import Modal from '$lib/components/ui/Modal.svelte';
-	import { Button, Dropdown, type DropdownOption } from '$lib/components/ui';
+	import { Button, Dropdown, SyntaxHighlightedTextarea, type DropdownOption } from '$lib/components/ui';
+	import { highlightJson } from '$lib/utils/shareEditorHighlight';
+	import { highlightInlineRuleListContent } from '$lib/utils/singboxInlineRulesHighlight';
 	import { api } from '$lib/api/client';
 	import type { GeoFileEntry, SingboxRouterRuleSet } from '$lib/types';
 	import type { OutboundGroup } from './outboundOptions';
@@ -135,18 +137,31 @@ geosite:xai`;
 		geositePickerOpen = false;
 	}
 
-	// ── line numbers for rules-list textarea ─────────────────────
-	const rulesListLineNumbers = $derived.by(() => {
-		const count = Math.max(1, rulesList.split(/\r?\n/).length);
+	// ── line numbers for list / JSON editors ─────────────────────
+	function lineNumbersFor(text: string): string {
+		const count = Math.max(1, text.split(/\r?\n/).length);
 		return Array.from({ length: count }, (_, i) => String(i + 1)).join('\n');
-	});
+	}
 
 	let rulesListTextarea = $state<HTMLTextAreaElement | null>(null);
 	let rulesListLineNumberGutter = $state<HTMLPreElement | null>(null);
+	let rulesJsonTextarea = $state<HTMLTextAreaElement | null>(null);
+	let rulesJsonLineNumberGutter = $state<HTMLPreElement | null>(null);
+
+	function syncLineNumberGutter(
+		ta: HTMLTextAreaElement | null,
+		gutter: HTMLPreElement | null,
+	): void {
+		if (!ta || !gutter) return;
+		gutter.scrollTop = ta.scrollTop;
+	}
 
 	function syncRulesListLineNumbersScroll(): void {
-		if (!rulesListTextarea || !rulesListLineNumberGutter) return;
-		rulesListLineNumberGutter.scrollTop = rulesListTextarea.scrollTop;
+		syncLineNumberGutter(rulesListTextarea, rulesListLineNumberGutter);
+	}
+
+	function syncRulesJsonLineNumbersScroll(): void {
+		syncLineNumberGutter(rulesJsonTextarea, rulesJsonLineNumberGutter);
 	}
 
 	// ── form state ──────────────────────────────────────────────
@@ -165,6 +180,9 @@ geosite:xai`;
 	let downloadDetour = $state('');
 	let path = $state('');
 	let rulesJson = $state('');
+
+	const rulesListLineNumbers = $derived(lineNumbersFor(rulesList));
+	const rulesJsonLineNumbers = $derived(lineNumbersFor(rulesJson));
 
 	let busy = $state(false);
 	let error = $state('');
@@ -541,16 +559,17 @@ geosite:xai`;
 					{/if}
 					<div class="rules-editor">
 						<pre class="line-numbers" aria-hidden="true" bind:this={rulesListLineNumberGutter}>{rulesListLineNumbers}</pre>
-						<textarea
-							class="rules-json rules-list-textarea"
-							bind:this={rulesListTextarea}
-							bind:value={rulesList}
-							placeholder={RULES_LIST_PLACEHOLDER}
-							rows="12"
-							spellcheck="false"
-							wrap="off"
-							onscroll={syncRulesListLineNumbersScroll}
-						></textarea>
+						<div class="rules-editor-input">
+							<SyntaxHighlightedTextarea
+								bind:value={rulesList}
+								bind:textareaRef={rulesListTextarea}
+								highlight={highlightInlineRuleListContent}
+								wrap="pre"
+								class="rules-list-ta"
+								placeholder={RULES_LIST_PLACEHOLDER}
+								onscroll={syncRulesListLineNumbersScroll}
+							/>
+						</div>
 					</div>
 				{#if isEditing && inlineLossyAnalysis.lossy}
 					<div class="parse-messages parse-messages-warning">
@@ -679,7 +698,24 @@ geosite:xai`;
 			{:else}
 				<label class="field">
 					<div class="lbl">Правила (JSON-массив)</div>
-					<textarea class="rules-json" bind:value={rulesJson} rows="10" spellcheck="false"></textarea>
+					<div class="rules-editor rules-json-editor">
+						<pre
+							class="line-numbers"
+							aria-hidden="true"
+							bind:this={rulesJsonLineNumberGutter}
+						>{rulesJsonLineNumbers}</pre>
+						<div class="rules-editor-input">
+							<SyntaxHighlightedTextarea
+								bind:value={rulesJson}
+								bind:textareaRef={rulesJsonTextarea}
+								highlight={highlightJson}
+								indentMode="json"
+								wrap="pre-wrap"
+								class="rules-json-ta"
+								onscroll={syncRulesJsonLineNumbersScroll}
+							/>
+						</div>
+					</div>
 					<div class="hint">
 						Advanced mode: массив объектов с матчерами sing-box.
 					</div>
@@ -814,20 +850,17 @@ geosite:xai`;
 		opacity: 0.7;
 		cursor: not-allowed;
 	}
-	.rules-json {
+	.rules-json-editor {
 		background: var(--bg);
 		border: 1px solid var(--border);
-		padding: 0.5rem 0.6rem;
 		border-radius: 4px;
-		color: var(--text);
-		font-family: ui-monospace, monospace;
-		font-size: 0.8rem;
 		width: 100%;
 		box-sizing: border-box;
-		resize: vertical;
-		min-height: 8rem;
-		max-height: min(70vh, 36rem);
-		line-height: 1.45;
+		height: calc(10 * 1.45em + 1rem);
+	}
+
+	.rules-json-editor:focus-within {
+		border-color: var(--accent, #3b82f6);
 	}
 	.segment {
 		display: inline-flex;
@@ -947,20 +980,24 @@ geosite:xai`;
 		height: 100%;
 		box-sizing: border-box;
 	}
-	.rules-list-textarea {
-		border: 0;
-		border-radius: 0;
-		background: transparent;
+	.rules-editor-input {
 		min-width: 0;
-		width: 100%;
+		min-height: 0;
 		height: 100%;
-		overflow: auto;
-		resize: none;
-		white-space: pre;
+		padding: 0.5rem 0.6rem;
 		box-sizing: border-box;
 	}
-	.rules-list-textarea::placeholder {
-		color: var(--color-text-muted);
+
+	.rules-editor-input :global(.shl-stack) {
+		font-family: ui-monospace, monospace;
+		font-size: 0.8rem;
+		line-height: 1.45;
+	}
+
+	.rules-json-editor :global(.shl-stack) {
+		font-family: ui-monospace, monospace;
+		font-size: 0.8rem;
+		line-height: 1.45;
 	}
 
 </style>
