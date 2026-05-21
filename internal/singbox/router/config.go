@@ -116,6 +116,14 @@ func (c *RouterConfig) DeleteRuleSet(tag string, force bool) error {
 	for _, t := range tags {
 		remove[t] = struct{}{}
 	}
+	if force {
+		for i := range c.Route.Rules {
+			c.Route.Rules[i].RuleSet = removeRuleSetRefs(c.Route.Rules[i].RuleSet, remove)
+		}
+		for i := range c.DNS.Rules {
+			c.DNS.Rules[i].RuleSet = removeRuleSetRefs(c.DNS.Rules[i].RuleSet, remove)
+		}
+	}
 	filtered := make([]RuleSet, 0, len(c.Route.RuleSet))
 	for _, rs := range c.Route.RuleSet {
 		if _, drop := remove[rs.Tag]; drop {
@@ -125,6 +133,23 @@ func (c *RouterConfig) DeleteRuleSet(tag string, force bool) error {
 	}
 	c.Route.RuleSet = filtered
 	return nil
+}
+
+func removeRuleSetRefs(tags []string, remove map[string]struct{}) []string {
+	if len(tags) == 0 {
+		return nil
+	}
+	filtered := tags[:0]
+	for _, tag := range tags {
+		if _, drop := remove[tag]; drop {
+			continue
+		}
+		filtered = append(filtered, tag)
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return filtered
 }
 
 type ruleSetRefIndices struct {

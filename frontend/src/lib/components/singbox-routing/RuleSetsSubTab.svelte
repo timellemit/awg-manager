@@ -19,10 +19,14 @@
 	} from '$lib/components/routing/singboxRouter';
 
 	const ruleSetsStore = singboxRouter.ruleSets;
+	const rulesStore = singboxRouter.rules;
+	const dnsRulesStore = singboxRouter.dnsRules;
 	const optionsStore = singboxRouter.options;
 	const settingsStore = singboxRouter.settings;
 
 	const ruleSets = $derived($ruleSetsStore);
+	const rules = $derived($rulesStore);
+	const dnsRules = $derived($dnsRulesStore);
 	const outboundOptions = $derived($optionsStore);
 	const settings = $derived($settingsStore);
 
@@ -68,6 +72,39 @@
 		deleteTag = tag;
 	}
 
+	function ruleSetTagsWithCompanion(tag: string): Set<string> {
+		const base = tag.endsWith('-srs') ? tag.slice(0, -4) : tag;
+		return new Set([base, `${base}-srs`]);
+	}
+
+	function hasRuleSetReference(ruleSetTags: string[] | undefined, tags: Set<string>): boolean {
+		return (ruleSetTags ?? []).some((tag) => tags.has(tag));
+	}
+
+	function ruleSetDeleteImpact(tag: string): { route: number; dns: number; total: number } {
+		const tags = ruleSetTagsWithCompanion(tag);
+		const route = rules.filter((r) => hasRuleSetReference(r.rule_set, tags)).length;
+		const dns = dnsRules.filter((r) => hasRuleSetReference(r.rule_set, tags)).length;
+		return { route, dns, total: route + dns };
+	}
+
+	function deleteWarningMessage(
+		tag: string,
+		impact: { route: number; dns: number; total: number },
+	): string {
+		if (impact.total === 0) {
+			return `Набор правил «${tag}» используется правилами. При удалении он будет удален из этих правил тоже.`;
+		}
+		const parts: string[] = [];
+		if (impact.route > 0) parts.push(`${impact.route} route-правил(ах)`);
+		if (impact.dns > 0) parts.push(`${impact.dns} DNS-правил(ах)`);
+		return `Набор правил «${tag}» используется в ${parts.join(' и ')}. При удалении он будет удален из этих правил тоже.`;
+	}
+
+	const deleteImpact = $derived(
+		deleteTag === null ? { route: 0, dns: 0, total: 0 } : ruleSetDeleteImpact(deleteTag),
+	);
+
 	function createRuleWithRuleSet(tag: string): void {
 		const sp = new URLSearchParams($page.url.search);
 		sp.set('sub', 'rules');
@@ -79,16 +116,17 @@
 	async function confirmDelete(): Promise<void> {
 		if (deleteTag === null) return;
 		const tag = deleteTag;
+		const impact = ruleSetDeleteImpact(tag);
 		busy = true;
 		try {
-			await api.singboxRouterDeleteRuleSet(tag, false);
+			await api.singboxRouterDeleteRuleSet(tag, impact.total > 0);
 			deleteTag = null;
 			await refresh();
 		} catch (e) {
 			const msg = (e as Error).message;
 			deleteTag = null;
 			if (msg.includes('referenced')) {
-				forceDeleteMessage = msg;
+				forceDeleteMessage = deleteWarningMessage(tag, ruleSetDeleteImpact(tag));
 				forceDeleteTag = tag;
 			} else {
 				notifications.error(msg);
@@ -357,8 +395,10 @@
 
 <ConfirmModal
 	open={deleteTag !== null}
-	title="Удалить rule set"
-	message={deleteTag !== null ? `Удалить rule set «${deleteTag}»?` : ''}
+	title="Удалить набор правил?"
+	message={deleteTag !== null && deleteImpact.total > 0 ? deleteWarningMessage(deleteTag, deleteImpact) : deleteTag !== null ? `Удалить набор правил «${deleteTag}»?` : ''}
+	secondary={deleteImpact.total > 0 ? 'Сами route и DNS правила останутся на месте.' : undefined}
+	confirmLabel={deleteImpact.total > 0 ? 'Удалить с зависимостями' : 'Удалить'}
 	{busy}
 	onConfirm={confirmDelete}
 	onClose={() => {
@@ -368,10 +408,10 @@
 
 <ConfirmModal
 	open={forceDeleteTag !== null}
-	title="Удалить с потерей ссылок?"
+	title="Удалить набор правил с зависимостями?"
 	message={forceDeleteMessage}
-	secondary="Удалить всё равно? Правила, ссылающиеся на этот rule set, станут orphan."
-	confirmLabel="Удалить принудительно"
+	secondary="Сами route и DNS правила останутся на месте."
+	confirmLabel="Удалить с зависимостями"
 	{busy}
 	onConfirm={confirmForceDelete}
 	onClose={() => {

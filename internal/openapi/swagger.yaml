@@ -9038,7 +9038,8 @@ paths:
       consumes:
       - application/json
       description: Removes the ruleset identified by tag. Refuses if any rule references
-        it; pass force=true to ignore references.
+        it; pass force=true to remove this rule_set tag from referencing route and
+        DNS rules.
       parameters:
       - description: Tag + optional force flag
         in: body

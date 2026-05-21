@@ -684,7 +684,7 @@ func (h *SingboxRouterHandler) UpdateRuleSet(w http.ResponseWriter, r *http.Requ
 // DeleteRuleSet removes the ruleset identified by tag.
 //
 //	@Summary		Delete singbox-router ruleset
-//	@Description	Removes the ruleset identified by tag. Refuses if any rule references it; pass force=true to ignore references.
+//	@Description	Removes the ruleset identified by tag. Refuses if any rule references it; pass force=true to remove this rule_set tag from referencing route and DNS rules.
 //	@Tags			singbox-router
 //	@Accept			json
 //	@Produce		json

@@ -134,7 +134,14 @@ func contains(haystack, needle string) bool {
 func TestRuleSetDeleteWithReferences(t *testing.T) {
 	cfg := NewEmptyConfig()
 	cfg.Route.RuleSet = []RuleSet{{Tag: "geosite-youtube"}}
-	cfg.Route.Rules = []Rule{{RuleSet: []string{"geosite-youtube"}, Action: "route", Outbound: "awg10"}}
+	cfg.Route.Rules = []Rule{
+		{RuleSet: []string{"geosite-youtube"}, Action: "route", Outbound: "awg10"},
+		{RuleSet: []string{"geosite-youtube", "geosite-openai"}, Action: "route", Outbound: "awg11"},
+	}
+	cfg.DNS.Rules = []DNSRule{
+		{RuleSet: []string{"geosite-youtube"}, Server: "remote"},
+		{RuleSet: []string{"geosite-youtube", "geosite-openai"}, Server: "local"},
+	}
 
 	err := cfg.DeleteRuleSet("geosite-youtube", false)
 	if !errors.Is(err, ErrRuleSetReferenced) {
@@ -146,6 +153,58 @@ func TestRuleSetDeleteWithReferences(t *testing.T) {
 	}
 	if len(cfg.Route.RuleSet) != 0 {
 		t.Error("rule_set should be empty after force delete")
+	}
+	if len(cfg.Route.Rules) != 2 {
+		t.Fatalf("route rules should remain after force delete, got %+v", cfg.Route.Rules)
+	}
+	if len(cfg.Route.Rules[0].RuleSet) != 0 {
+		t.Fatalf("deleted tag should be removed from route rule, got %+v", cfg.Route.Rules[0].RuleSet)
+	}
+	if len(cfg.Route.Rules[1].RuleSet) != 1 || cfg.Route.Rules[1].RuleSet[0] != "geosite-openai" {
+		t.Fatalf("unrelated route rule_set refs should remain, got %+v", cfg.Route.Rules[1].RuleSet)
+	}
+	if len(cfg.DNS.Rules) != 2 {
+		t.Fatalf("dns rules should remain after force delete, got %+v", cfg.DNS.Rules)
+	}
+	if len(cfg.DNS.Rules[0].RuleSet) != 0 {
+		t.Fatalf("deleted tag should be removed from dns rule, got %+v", cfg.DNS.Rules[0].RuleSet)
+	}
+	if len(cfg.DNS.Rules[1].RuleSet) != 1 || cfg.DNS.Rules[1].RuleSet[0] != "geosite-openai" {
+		t.Fatalf("unrelated dns rule_set refs should remain, got %+v", cfg.DNS.Rules[1].RuleSet)
+	}
+}
+
+func TestRuleSetDeleteWithDNSReferenceRefusesWithoutForce(t *testing.T) {
+	cfg := NewEmptyConfig()
+	cfg.Route.RuleSet = []RuleSet{{Tag: "geosite-youtube"}}
+	cfg.DNS.Rules = []DNSRule{{RuleSet: []string{"geosite-youtube"}, Server: "remote"}}
+
+	err := cfg.DeleteRuleSet("geosite-youtube", false)
+	if !errors.Is(err, ErrRuleSetReferenced) {
+		t.Errorf("expected ErrRuleSetReferenced, got %v", err)
+	}
+	if len(cfg.Route.RuleSet) != 1 || len(cfg.DNS.Rules) != 1 || len(cfg.DNS.Rules[0].RuleSet) != 1 {
+		t.Fatalf("non-force delete must not mutate config, got rule_sets=%+v dns=%+v", cfg.Route.RuleSet, cfg.DNS.Rules)
+	}
+}
+
+func TestRuleSetDeleteRemovesCompanionReferences(t *testing.T) {
+	cfg := NewEmptyConfig()
+	cfg.Route.RuleSet = []RuleSet{{Tag: "inline"}, {Tag: "inline-srs"}}
+	cfg.Route.Rules = []Rule{{RuleSet: []string{"inline-srs", "keep"}, Action: "route", Outbound: "proxy"}}
+	cfg.DNS.Rules = []DNSRule{{RuleSet: []string{"inline-srs", "keep"}, Server: "remote"}}
+
+	if err := cfg.DeleteRuleSet("inline", true); err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Route.RuleSet) != 0 {
+		t.Fatalf("base and companion rule_set should be removed, got %+v", cfg.Route.RuleSet)
+	}
+	if len(cfg.Route.Rules) != 1 || len(cfg.Route.Rules[0].RuleSet) != 1 || cfg.Route.Rules[0].RuleSet[0] != "keep" {
+		t.Fatalf("companion route references should be removed only from rule_set list, got %+v", cfg.Route.Rules)
+	}
+	if len(cfg.DNS.Rules) != 1 || len(cfg.DNS.Rules[0].RuleSet) != 1 || cfg.DNS.Rules[0].RuleSet[0] != "keep" {
+		t.Fatalf("companion dns references should be removed only from rule_set list, got %+v", cfg.DNS.Rules)
 	}
 }
 
