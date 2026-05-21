@@ -54,6 +54,7 @@ import (
 	"github.com/hoaxisr/awg-manager/internal/singbox/subscription"
 	"github.com/hoaxisr/awg-manager/internal/staticroute"
 	"github.com/hoaxisr/awg-manager/internal/storage"
+	"github.com/hoaxisr/awg-manager/internal/sys/env"
 	"github.com/hoaxisr/awg-manager/internal/sys/kmod"
 	"github.com/hoaxisr/awg-manager/internal/sys/ndmsinfo"
 	"github.com/hoaxisr/awg-manager/internal/sys/osdetect"
@@ -250,7 +251,7 @@ func main() {
 	// (state.Manager, routing.Catalog, etc.) can depend on them. Commands
 	// + SaveCoordinator are constructed later (they depend on eventBus +
 	// orchestrator).
-	ndmsSem := ndmstransport.NewSemaphore(4)
+	ndmsSem := ndmstransport.NewSemaphore(env.IntDefault("AWG_NDMS_CAP", 30))
 	ndmsTransportClient := ndmstransport.New(ndmsSem)
 	ndmsTransportClient.SetAppLogger(loggingService)
 
@@ -320,6 +321,8 @@ func main() {
 		eventBus,
 		3*time.Second,
 		10*time.Second,
+		env.DurationDefault("AWG_NDMS_SAVE_SETTLE_DELAY", 2*time.Second),
+		ndmsQueries.RunningConfig,
 	)
 	ndmsCommands := ndmscommand.NewCommands(ndmscommand.Deps{
 		Poster:       ndmsTransportClient,
@@ -894,6 +897,7 @@ func main() {
 			StaticRouteService:  staticRouteService,
 			SystemTunnelService: systemTunnelSvc,
 			ManagedService:      managedService,
+			ManagedServiceImpl:  managedService,
 			NwgOp:               nwgOp,
 			TerminalManager:     terminalManager,
 			AccessPolicySvc:     accessPolicySvc,
@@ -1019,6 +1023,7 @@ func main() {
 
 	routerSvc := router.NewService(router.Deps{
 		Log:                    log,
+		AppLog:                 loggingService,
 		Settings:               settingsStore,
 		Singbox:                singboxOp,
 		Policies:               &routerAccessPolicyAdapter{svc: accessPolicySvc, wan: wanModel},
@@ -1194,6 +1199,12 @@ func main() {
 			// Seed WAN model with current interface state from NDMS.
 			// Must happen before tunnel start so ISP resolution works.
 			populateWANModel(shutdownCtx, ndmsQueries, wanModel, log)
+
+			// Back-fill ManagedServer.PrivateKey for entries created before
+			// the field existed in storage. Best-effort, idempotent — already
+			// populated entries are skipped. Must run AFTER the NDMS interface
+			// cache is ready so kernel-name resolution works.
+			managedService.MigratePrivateKeys(shutdownCtx)
 
 			// Migrate legacy NDMS ID values to kernel names (one-time after model is populated).
 			tunnelService.MigrateISPInterfaceToKernel()
@@ -1691,7 +1702,14 @@ func runCleanup(dataDir string) {
 
 	// Build NDMS Commands early so the Operator can consume them. HookNotifier
 	// is wired below once the orchestrator exists (see SetHookNotifier call).
-	cleanupNDMSSave := ndmscommand.NewSaveCoordinator(cleanupNDMSTransport, cleanupEventBus, 3*time.Second, 10*time.Second)
+	cleanupNDMSSave := ndmscommand.NewSaveCoordinator(
+		cleanupNDMSTransport,
+		cleanupEventBus,
+		3*time.Second,
+		10*time.Second,
+		env.DurationDefault("AWG_NDMS_SAVE_SETTLE_DELAY", 2*time.Second),
+		cleanupNDMSQueries.RunningConfig,
+	)
 	cleanupNDMSCommands := ndmscommand.NewCommands(ndmscommand.Deps{
 		Poster:  cleanupNDMSTransport,
 		Save:    cleanupNDMSSave,

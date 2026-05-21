@@ -11,7 +11,7 @@ import (
 func newTestProxyCommands(_ *testing.T) (*ProxyCommands, *fakePoster, *SaveCoordinator) {
 	poster := &fakePoster{}
 	pub := &fakePublisher{}
-	sc := NewSaveCoordinator(poster, pub, 500*time.Millisecond, 5*time.Second)
+	sc := NewSaveCoordinator(poster, pub, 500*time.Millisecond, 5*time.Second, 0, nil)
 	q := query.NewQueries(query.Deps{Getter: query.NewFakeGetter(), Logger: query.NopLogger(), IsOS5: func() bool { return true }})
 	return NewProxyCommands(poster, sc, q), poster, sc
 }

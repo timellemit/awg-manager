@@ -12,7 +12,7 @@ import (
 func TestWireguardCommands_SetASCParams(t *testing.T) {
 	poster := &fakePoster{}
 	pub := &fakePublisher{}
-	sc := NewSaveCoordinator(poster, pub, 500*time.Millisecond, 5*time.Second)
+	sc := NewSaveCoordinator(poster, pub, 500*time.Millisecond, 5*time.Second, 0, nil)
 	q := query.NewQueries(query.Deps{Getter: query.NewFakeGetter(), Logger: query.NopLogger()})
 	cmds := NewWireguardCommands(poster, sc, q)
 
@@ -31,7 +31,7 @@ func TestWireguardCommands_SetASCParams(t *testing.T) {
 func TestWireguardCommands_SetASCParams_InvalidJSON(t *testing.T) {
 	poster := &fakePoster{}
 	pub := &fakePublisher{}
-	sc := NewSaveCoordinator(poster, pub, 500*time.Millisecond, 5*time.Second)
+	sc := NewSaveCoordinator(poster, pub, 500*time.Millisecond, 5*time.Second, 0, nil)
 	q := query.NewQueries(query.Deps{Getter: query.NewFakeGetter(), Logger: query.NopLogger()})
 	cmds := NewWireguardCommands(poster, sc, q)
 

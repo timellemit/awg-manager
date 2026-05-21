@@ -1347,6 +1347,8 @@ export interface SingboxRouterRuleSet {
 	download_detour?: string;
 	path?: string;
 	rules?: Record<string, unknown>[];
+	/** True when a compiled .srs sibling exists (inline only). */
+	materialized_srs?: boolean;
 }
 
 export interface SingboxRouterOutbound {
@@ -1622,6 +1624,69 @@ export interface UpdateSubscriptionInput {
 	mode?: SubscriptionMode;
 	urlTest?: SubscriptionURLTest;
 }
+
+// ─────────────────────────────────────────────
+// #region Managed Server Backup / Restore
+// ─────────────────────────────────────────────
+
+/**
+ * Single managed server entry as exported to a backup file.
+ * Shape mirrors storage.ManagedServer JSON; policy is optional
+ * because newly-created servers may not have one assigned yet.
+ */
+export interface ManagedServerExport {
+	interfaceName: string;
+	description?: string;
+	address: string;
+	mask: string;
+	listenPort: number;
+	endpoint?: string;
+	dns?: string;
+	mtu?: number;
+	natEnabled?: boolean;
+	policy?: string;
+	privateKey?: string;
+	i1?: string;
+	i2?: string;
+	i3?: string;
+	i4?: string;
+	i5?: string;
+	peers: ManagedPeer[];
+}
+
+export interface ManagedServerBackupFile {
+	version: number;
+	type: string;
+	exportedAt: string;
+	managedServers: ManagedServerExport[];
+	warnings?: Array<{
+		interfaceName?: string;
+		message: string;
+	}>;
+}
+
+export interface RestoreOptions {
+	allowRenumber: boolean;
+}
+
+export interface RestoreOutcome {
+	name: string;
+	newName?: string;
+	action: 'created' | 'merged' | 'renamed' | 'conflict' | 'failed';
+	addedPeers?: number;
+	conflicts?: string[];
+	error?: string;
+}
+
+export interface ManagedServerRestoreResponse {
+	outcomes: RestoreOutcome[];
+}
+
+export interface ManagedServerDriftResponse {
+	drift: ManagedServerExport[];
+}
+
+// #endregion
 
 // === Singbox Router Staging ===
 
