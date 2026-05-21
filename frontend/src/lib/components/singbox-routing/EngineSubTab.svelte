@@ -96,7 +96,7 @@
 	function validateExtraPorts(value: string): boolean {
 		if (!value.trim()) return true;
 		const entries = value.split(',').map((e) => e.trim()).filter(Boolean);
-		return entries.every((e) => /^\d+\s+(UDP|TCP)$/i.test(e));
+		return entries.every((e) => /^([1-9]\d{0,4})\s+(UDP|TCP)$/i.test(e));
 	}
 
 	async function saveAdvanced(): Promise<void> {

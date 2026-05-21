@@ -270,6 +270,12 @@ func buildRestoreInput(spec RestoreInputSpec) string {
 	b.WriteString("*mangle\n")
 	fmt.Fprintf(&b, ":%s - [0:0]\n", ChainName)
 
+	// Bypass ports: RETURN first — before DNS intercept and catch-all so that
+	// any explicitly excluded port skips sing-box entirely (including port 53).
+	for _, port := range spec.BypassUDPPorts {
+		fmt.Fprintf(&b, "-A %s -p udp --dport %d -j RETURN\n", ChainName, port)
+	}
+
 	// set_chain_rules: DNS first (when INTERCEPT_DNS_ENABLE=1)
 	fmt.Fprintf(&b, "-A %s -p udp --dport 53 -j TPROXY --on-port %d --on-ip 127.0.0.1 --tproxy-mark 0x%x\n",
 		ChainName, TPROXYPort, Fwmark)
@@ -281,11 +287,6 @@ func buildRestoreInput(spec RestoreInputSpec) string {
 	}
 	for _, ip := range spec.WANIPs {
 		fmt.Fprintf(&b, "-A %s -d %s -j RETURN\n", ChainName, ip)
-	}
-
-	// Bypass ports: RETURN before catch-all so these ports skip sing-box entirely.
-	for _, port := range spec.BypassUDPPorts {
-		fmt.Fprintf(&b, "-A %s -p udp --dport %d -j RETURN\n", ChainName, port)
 	}
 
 	// add_tproxy_rules: catch-all TPROXY for UDP.
