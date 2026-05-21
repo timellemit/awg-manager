@@ -31,7 +31,7 @@ func testQueries() *query.Queries {
 func newTestInterfaceCommands(_ *testing.T) (*InterfaceCommands, *fakePoster, *SaveCoordinator, *query.Queries, *spyHookNotifier) {
 	poster := &fakePoster{}
 	pub := &fakePublisher{}
-	sc := NewSaveCoordinator(poster, pub, 500*time.Millisecond, 5*time.Second)
+	sc := NewSaveCoordinator(poster, pub, 500*time.Millisecond, 5*time.Second, 0, nil)
 	q := testQueries()
 	hn := &spyHookNotifier{}
 	return NewInterfaceCommands(poster, sc, q, hn), poster, sc, q, hn
@@ -125,7 +125,7 @@ func TestInterfaceCommands_InterfaceDown_WithHookNotifier(t *testing.T) {
 func TestInterfaceCommands_InterfaceUp_NilHookNotifier(t *testing.T) {
 	poster := &fakePoster{}
 	pub := &fakePublisher{}
-	sc := NewSaveCoordinator(poster, pub, 500*time.Millisecond, 5*time.Second)
+	sc := NewSaveCoordinator(poster, pub, 500*time.Millisecond, 5*time.Second, 0, nil)
 	q := testQueries()
 	cmds := NewInterfaceCommands(poster, sc, q, nil)
 	if err := cmds.InterfaceUp(context.Background(), "OpkgTun0"); err != nil {

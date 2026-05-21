@@ -153,7 +153,7 @@ func (nopPublisher) Publish(string, any) {}
 // fakePoster so tests can observe outgoing payloads.
 func newTestRouteCommands() (*command.RouteCommands, *fakePoster) {
 	poster := &fakePoster{}
-	sc := command.NewSaveCoordinator(poster, nopPublisher{}, 500*time.Millisecond, 5*time.Second)
+	sc := command.NewSaveCoordinator(poster, nopPublisher{}, 500*time.Millisecond, 5*time.Second, 0, nil)
 	q := query.NewQueries(query.Deps{
 		Getter: query.NewFakeGetter(),
 		Logger: query.NopLogger(),

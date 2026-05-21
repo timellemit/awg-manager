@@ -54,6 +54,7 @@ import (
 	"github.com/hoaxisr/awg-manager/internal/singbox/subscription"
 	"github.com/hoaxisr/awg-manager/internal/staticroute"
 	"github.com/hoaxisr/awg-manager/internal/storage"
+	"github.com/hoaxisr/awg-manager/internal/sys/env"
 	"github.com/hoaxisr/awg-manager/internal/sys/kmod"
 	"github.com/hoaxisr/awg-manager/internal/sys/ndmsinfo"
 	"github.com/hoaxisr/awg-manager/internal/sys/osdetect"
@@ -250,7 +251,7 @@ func main() {
 	// (state.Manager, routing.Catalog, etc.) can depend on them. Commands
 	// + SaveCoordinator are constructed later (they depend on eventBus +
 	// orchestrator).
-	ndmsSem := ndmstransport.NewSemaphore(4)
+	ndmsSem := ndmstransport.NewSemaphore(env.IntDefault("AWG_NDMS_CAP", 30))
 	ndmsTransportClient := ndmstransport.New(ndmsSem)
 	ndmsTransportClient.SetAppLogger(loggingService)
 
@@ -320,6 +321,8 @@ func main() {
 		eventBus,
 		3*time.Second,
 		10*time.Second,
+		env.DurationDefault("AWG_NDMS_SAVE_SETTLE_DELAY", 2*time.Second),
+		ndmsQueries.RunningConfig,
 	)
 	ndmsCommands := ndmscommand.NewCommands(ndmscommand.Deps{
 		Poster:       ndmsTransportClient,
@@ -1699,7 +1702,14 @@ func runCleanup(dataDir string) {
 
 	// Build NDMS Commands early so the Operator can consume them. HookNotifier
 	// is wired below once the orchestrator exists (see SetHookNotifier call).
-	cleanupNDMSSave := ndmscommand.NewSaveCoordinator(cleanupNDMSTransport, cleanupEventBus, 3*time.Second, 10*time.Second)
+	cleanupNDMSSave := ndmscommand.NewSaveCoordinator(
+		cleanupNDMSTransport,
+		cleanupEventBus,
+		3*time.Second,
+		10*time.Second,
+		env.DurationDefault("AWG_NDMS_SAVE_SETTLE_DELAY", 2*time.Second),
+		cleanupNDMSQueries.RunningConfig,
+	)
 	cleanupNDMSCommands := ndmscommand.NewCommands(ndmscommand.Deps{
 		Poster:  cleanupNDMSTransport,
 		Save:    cleanupNDMSSave,
