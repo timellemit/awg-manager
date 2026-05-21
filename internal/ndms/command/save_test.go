@@ -517,3 +517,57 @@ func TestSaveCoordinator_fire_Retry_InvalidatesOnceAfterFinalSuccess(t *testing.
 		t.Errorf("invalidator should be called once after final success, got %d", got)
 	}
 }
+
+// --- Post-save settle tests (Flush path) ---
+
+func TestSaveCoordinator_Flush_OnSuccess_InvalidatesImmediately(t *testing.T) {
+	poster := &fakePoster{}
+	pub := &fakePublisher{}
+	inv := &mockInvalidator{}
+	// settleDelay 1s, but Flush should invalidate WITHOUT sleep.
+	sc := NewSaveCoordinator(poster, pub, 5*time.Millisecond, 100*time.Millisecond,
+		1*time.Second, inv)
+
+	t0 := time.Now()
+	if err := sc.Flush(context.Background()); err != nil {
+		t.Fatalf("Flush returned error: %v", err)
+	}
+	elapsed := time.Since(t0)
+
+	if got := inv.Calls(); got != 1 {
+		t.Errorf("invalidator calls: want 1, got %d", got)
+	}
+	if elapsed >= 500*time.Millisecond {
+		t.Errorf("Flush should not sleep — elapsed %s, want < 500ms", elapsed)
+	}
+}
+
+func TestSaveCoordinator_Flush_OnFailure_DoesNotInvalidate(t *testing.T) {
+	poster := &fakePoster{}
+	poster.SetError(errors.New("boom"))
+	pub := &fakePublisher{}
+	inv := &mockInvalidator{}
+	sc := NewSaveCoordinator(poster, pub, 5*time.Millisecond, 100*time.Millisecond,
+		10*time.Millisecond, inv)
+
+	if err := sc.Flush(context.Background()); err == nil {
+		t.Fatalf("Flush should have returned error")
+	}
+
+	if got := inv.Calls(); got != 0 {
+		t.Errorf("invalidator should not be called on Flush failure, got %d", got)
+	}
+}
+
+func TestSaveCoordinator_Flush_NilInvalidator_DoesNotPanic(t *testing.T) {
+	poster := &fakePoster{}
+	pub := &fakePublisher{}
+	// invalidator = nil
+	sc := NewSaveCoordinator(poster, pub, 5*time.Millisecond, 100*time.Millisecond,
+		10*time.Millisecond, nil)
+
+	if err := sc.Flush(context.Background()); err != nil {
+		t.Fatalf("Flush returned error: %v", err)
+	}
+	// Success — no panic.
+}

@@ -246,18 +246,27 @@ func (s *SaveCoordinator) Flush(ctx context.Context) error {
 
 	s.mu.Lock()
 	s.flushInProgress = false
-	if err == nil {
+	successful := err == nil
+	if successful {
 		s.pendingCount = 0
 		s.retryCount = 0
 		s.lastSaveAt = time.Now()
 		s.setStateLocked(SaveStateIdle, "")
 	} else {
-		// Flush IS the explicit retry — failure is terminal, go
-		// straight to Failed. Mark retry budget exhausted.
+		// Flush IS the explicit retry — failure is terminal, go straight
+		// to Failed. Mark retry budget exhausted.
 		s.retryCount = s.maxRetries + 1
 		s.setStateLocked(SaveStateFailed, err.Error())
 	}
+	invalidator := s.invalidator
 	s.mu.Unlock()
+
+	// On Flush — invalidate WITHOUT sleep. Flush is a terminal operation
+	// (shutdown or explicit UI retry); callers either don't read after
+	// (shutdown) or are already waiting on a UI spinner (retry button).
+	if successful && invalidator != nil {
+		invalidator.InvalidateAll()
+	}
 	return err
 }
 
