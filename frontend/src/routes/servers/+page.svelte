@@ -5,6 +5,7 @@
 	import { servers } from '$lib/stores/servers';
 	import { systemInfo } from '$lib/stores/system';
 	import { goto } from '$app/navigation';
+	import { browser } from '$app/environment';
 	import { PageContainer, PageHeader } from '$lib/components/layout';
 	import { LoadingSpinner, EmptyState } from '$lib/components/layout';
 	import { StoreStatusBadge, Button } from '$lib/components/ui';
@@ -37,6 +38,33 @@
 	// Format: '__managed__:Wireguard5'. Prefix lets us distinguish managed
 	// rail items from system server ids without an extra `kind` lookup.
 	const MANAGED_PREFIX = '__managed__:';
+
+	const ACTIVE_SERVER_STORAGE_KEY = 'awgm:servers:activeId';
+
+	function readStoredActiveId(): string {
+		if (!browser) return '';
+
+		try {
+			return localStorage.getItem(ACTIVE_SERVER_STORAGE_KEY) ?? '';
+		} catch {
+			return '';
+		}
+	}
+
+	function persistActiveId(id: string) {
+		if (!browser) return;
+
+		try {
+			if (id) {
+				localStorage.setItem(ACTIVE_SERVER_STORAGE_KEY, id);
+			} else {
+				localStorage.removeItem(ACTIVE_SERVER_STORAGE_KEY);
+			}
+		} catch {
+			// localStorage can be unavailable; ignore and keep in-memory selection.
+		}
+	}
+
 	function managedRailId(iface: string): string {
 		return MANAGED_PREFIX + iface;
 	}
@@ -80,14 +108,25 @@
 
 	// Default to empty; the effect below snaps to the first item once the rail loads
 	// and re-snaps if the current activeId disappears (e.g. after a delete).
-	let activeId = $state<string>('');
+	let activeId = $state<string>(readStoredActiveId());
+
+	function setActiveId(id: string) {
+		activeId = id;
+		persistActiveId(id);
+	}
+
 	$effect(() => {
+		// Пока серверы ещё не загрузились, не трогаем сохранённый activeId.
+		// Иначе при F5 можно преждевременно стереть сохранённый выбор.
+		if (!snap.data) return;
+
 		if (railItems.length === 0) {
-			activeId = '';
+			setActiveId('');
 			return;
 		}
+
 		if (!railItems.some((i) => i.id === activeId)) {
-			activeId = railItems[0].id;
+			setActiveId(railItems[0].id);
 		}
 	});
 
@@ -122,7 +161,7 @@
 		notifications.success('Сервер создан');
 		servers.invalidate();
 		if (newId) {
-			activeId = managedRailId(newId);
+			setActiveId(managedRailId(newId));
 		}
 	}
 
@@ -172,7 +211,7 @@
 			<ServerRail
 				items={railItems}
 				activeId={activeId}
-				onSelect={(id) => (activeId = id)}
+				onSelect={setActiveId}
 				onCreate={openCreate}
 			/>
 			<main class="detail">

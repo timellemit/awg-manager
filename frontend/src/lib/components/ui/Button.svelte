@@ -18,6 +18,7 @@
     iconBefore?: Snippet;
     iconAfter?: Snippet;
     onclick?: (e: MouseEvent) => void;
+    title?: string;
     children: Snippet;
   }
 
@@ -34,6 +35,7 @@
     iconBefore,
     iconAfter,
     onclick,
+    title,
     children,
   }: Props = $props();
 
@@ -57,6 +59,7 @@
     {href}
     {target}
     {rel}
+    {title}
     aria-disabled={isDisabled}
     aria-busy={loading}
     role="button"
@@ -83,6 +86,7 @@
     disabled={isDisabled}
     aria-busy={loading}
     {onclick}
+    {title}
   >
     {#if loading}<span class="spinner" aria-hidden="true"></span>{:else if iconBefore}{@render iconBefore()}{/if}
     <span class="label">{@render children()}</span>
