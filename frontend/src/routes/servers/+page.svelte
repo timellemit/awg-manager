@@ -106,6 +106,8 @@
 		return dedupBy(items, (i) => i.id, { warnTag: 'server rail' });
 	});
 
+	let hasServers = $derived(railItems.length > 0);
+
 	// Default to empty; the effect below snaps to the first item once the rail loads
 	// and re-snaps if the current activeId disappears (e.g. after a delete).
 	let activeId = $state<string>(readStoredActiveId());
@@ -181,7 +183,7 @@
 <PageContainer width="full">
 	<PageHeader title="Серверы">
 		{#snippet actions()}
-			<ManagedServerBackupToolbar />
+			<ManagedServerBackupToolbar showExport={hasServers} />
 			<StoreStatusBadge store={servers} />
 		{/snippet}
 	</PageHeader>
