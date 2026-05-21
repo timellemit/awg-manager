@@ -82,6 +82,30 @@ func (p *fakePublisher) Hints() []events.ResourceInvalidatedEvent {
 	return out
 }
 
+// mockInvalidator counts InvalidateAll calls. Used in post-save settle
+// tests. CalledAt records when invalidate fired so timing assertions
+// can pin "sleep happened before invalidate".
+type mockInvalidator struct {
+	mu       sync.Mutex
+	calls    int32
+	calledAt time.Time
+}
+
+func (m *mockInvalidator) InvalidateAll() {
+	atomic.AddInt32(&m.calls, 1)
+	m.mu.Lock()
+	m.calledAt = time.Now()
+	m.mu.Unlock()
+}
+
+func (m *mockInvalidator) Calls() int32 { return atomic.LoadInt32(&m.calls) }
+
+func (m *mockInvalidator) CalledAt() time.Time {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.calledAt
+}
+
 // --- Tests ---
 
 func TestSaveCoordinator_SingleRequestTriggersSave(t *testing.T) {
@@ -351,5 +375,145 @@ func TestSaveCoordinator_StatusSnapshot(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	if st := sc.Status(); st.State != SaveStateIdle {
 		t.Errorf("after fire: want Idle, got %v", st.State)
+	}
+}
+
+// --- Post-save settle tests (fire path) ---
+
+func TestSaveCoordinator_fire_OnSuccess_InvalidatesRunningConfig(t *testing.T) {
+	poster := &fakePoster{}
+	pub := &fakePublisher{}
+	inv := &mockInvalidator{}
+	sc := NewSaveCoordinator(poster, pub, 10*time.Millisecond, 100*time.Millisecond,
+		20*time.Millisecond, inv)
+
+	sc.Request()
+	// debounce 10ms + post 0ms + settle 20ms = ~30ms. Wait 100ms for safety.
+	time.Sleep(100 * time.Millisecond)
+
+	if got := inv.Calls(); got != 1 {
+		t.Errorf("invalidator calls: want 1, got %d", got)
+	}
+}
+
+func TestSaveCoordinator_fire_OnSuccess_SettlesBeforeInvalidate(t *testing.T) {
+	poster := &fakePoster{}
+	pub := &fakePublisher{}
+	inv := &mockInvalidator{}
+	settle := 50 * time.Millisecond
+	sc := NewSaveCoordinator(poster, pub, 5*time.Millisecond, 100*time.Millisecond,
+		settle, inv)
+
+	t0 := time.Now()
+	sc.Request()
+	time.Sleep(150 * time.Millisecond)
+
+	if inv.Calls() != 1 {
+		t.Fatalf("invalidator should be called once, got %d", inv.Calls())
+	}
+	elapsed := inv.CalledAt().Sub(t0)
+	// debounce 5ms + (instant POST) + settle 50ms = >= 55ms.
+	// Allow lower bound a few ms below to absorb scheduler jitter on slow CI.
+	if elapsed < settle {
+		t.Errorf("invalidate fired too early: elapsed %s, want >= %s", elapsed, settle)
+	}
+}
+
+func TestSaveCoordinator_fire_OnSuccess_PublishesSettledHint(t *testing.T) {
+	poster := &fakePoster{}
+	pub := &fakePublisher{}
+	inv := &mockInvalidator{}
+	sc := NewSaveCoordinator(poster, pub, 5*time.Millisecond, 100*time.Millisecond,
+		10*time.Millisecond, inv)
+
+	sc.Request()
+	time.Sleep(80 * time.Millisecond)
+
+	// Filter for save-settled hint specifically — fire() also publishes
+	// state-change hints via setStateLocked.
+	var settled int
+	for _, h := range pub.Hints() {
+		if h.Resource == "saveStatus" && h.Reason == "save-settled" {
+			settled++
+		}
+	}
+	if settled != 1 {
+		t.Errorf("save-settled hints: want 1, got %d (all hints: %+v)",
+			settled, pub.Hints())
+	}
+}
+
+func TestSaveCoordinator_fire_OnFailure_DoesNotInvalidate(t *testing.T) {
+	poster := &fakePoster{}
+	poster.SetError(errors.New("boom"))
+	pub := &fakePublisher{}
+	inv := &mockInvalidator{}
+	sc := NewSaveCoordinator(poster, pub, 5*time.Millisecond, 100*time.Millisecond,
+		10*time.Millisecond, inv)
+	sc.SetRetryPolicy(50*time.Millisecond, 0) // disable retry — single attempt then fail
+
+	sc.Request()
+	time.Sleep(100 * time.Millisecond)
+
+	if got := inv.Calls(); got != 0 {
+		t.Errorf("invalidator should not be called on failure, got %d calls", got)
+	}
+}
+
+func TestSaveCoordinator_fire_ZeroSettleDelay_SkipsSettle(t *testing.T) {
+	poster := &fakePoster{}
+	pub := &fakePublisher{}
+	inv := &mockInvalidator{}
+	sc := NewSaveCoordinator(poster, pub, 5*time.Millisecond, 100*time.Millisecond,
+		0, inv) // settleDelay = 0
+
+	sc.Request()
+	time.Sleep(80 * time.Millisecond)
+
+	if got := inv.Calls(); got != 0 {
+		t.Errorf("settleDelay=0 should skip invalidate, got %d calls", got)
+	}
+	for _, h := range pub.Hints() {
+		if h.Reason == "save-settled" {
+			t.Errorf("settleDelay=0 should not publish save-settled hint, got %+v", h)
+		}
+	}
+}
+
+func TestSaveCoordinator_fire_NilInvalidator_SkipsSettle(t *testing.T) {
+	poster := &fakePoster{}
+	pub := &fakePublisher{}
+	sc := NewSaveCoordinator(poster, pub, 5*time.Millisecond, 100*time.Millisecond,
+		20*time.Millisecond, nil) // invalidator = nil
+
+	sc.Request()
+	time.Sleep(80 * time.Millisecond)
+
+	// No invalidator, but also no panic — and no save-settled hint either.
+	for _, h := range pub.Hints() {
+		if h.Reason == "save-settled" {
+			t.Errorf("nil invalidator should not publish save-settled hint, got %+v", h)
+		}
+	}
+}
+
+func TestSaveCoordinator_fire_Retry_InvalidatesOnceAfterFinalSuccess(t *testing.T) {
+	poster := &fakePoster{}
+	pub := &fakePublisher{}
+	inv := &mockInvalidator{}
+	sc := NewSaveCoordinator(poster, pub, 5*time.Millisecond, 100*time.Millisecond,
+		10*time.Millisecond, inv)
+	sc.SetRetryPolicy(20*time.Millisecond, 3)
+
+	// First attempt fails, second attempt succeeds.
+	poster.SetError(errors.New("transient"))
+	sc.Request()
+	time.Sleep(30 * time.Millisecond) // first fire fails, retry scheduled
+
+	poster.SetError(nil) // unblock retry
+	time.Sleep(80 * time.Millisecond)
+
+	if got := inv.Calls(); got != 1 {
+		t.Errorf("invalidator should be called once after final success, got %d", got)
 	}
 }

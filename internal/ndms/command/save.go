@@ -186,7 +186,26 @@ func (s *SaveCoordinator) fire() {
 		s.retryCount = 0
 		s.lastSaveAt = time.Now()
 		s.setStateLocked(SaveStateIdle, "")
+		// Snapshot settle deps under the lock so SetSettleDelay races
+		// can't tear our view of (delay, invalidator).
+		settleDelay := s.settleDelay
+		invalidator := s.invalidator
 		s.mu.Unlock()
+
+		// Post-save settle (outside all mutexes — semaphore slot already
+		// released by postJSON's defer above): wait for NDMS to publish
+		// the updated running-config view, then invalidate the cache so
+		// the next reader gets fresh data.
+		if settleDelay > 0 && invalidator != nil {
+			time.Sleep(settleDelay)
+			invalidator.InvalidateAll()
+			if s.publisher != nil {
+				s.publisher.Publish("resource:invalidated", events.ResourceInvalidatedEvent{
+					Resource: "saveStatus",
+					Reason:   "save-settled",
+				})
+			}
+		}
 		return
 	}
 
