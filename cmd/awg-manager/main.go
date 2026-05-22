@@ -245,6 +245,10 @@ func main() {
 	loggingService := logging.NewService(settingsStore)
 	defer loggingService.Stop()
 
+	// bootLog: UI-visible scoped logger for all bootstrap diagnostics. Replaces
+	// the legacy no-op *logger.Logger that used to silently drop everything.
+	bootLog := logging.NewScopedLogger(loggingService, logging.GroupSystem, logging.SubBoot)
+
 	// === NEW NDMS LAYER (CQRS: query.Queries + command.Commands) ===
 	// Transport + Queries are constructed early so downstream consumers
 	// (state.Manager, routing.Catalog, etc.) can depend on them. Commands
@@ -270,7 +274,7 @@ func main() {
 	// MUST run before kmod.New(): the kmod loader reads model/SoC from
 	// ndmsinfo.Get() at construction time.
 	if err := ndmsinfo.Init(context.Background(), ndmsQueries.SystemInfo, ndmsTimeout); err != nil {
-		log.Warn("NDMS version info not available", map[string]interface{}{"error": err.Error()})
+		bootLog.Warn("ndms-version", "", err.Error())
 	}
 
 	// Load kernel module if available (before backend detection).
@@ -281,7 +285,7 @@ func main() {
 	kmodLoader.CleanupLegacyModules()
 	// EnsureModule: select bundled .ko if available → insmod
 	if err := kmodLoader.EnsureModule(context.Background()); err != nil {
-		log.Warn("Kernel module not available", map[string]interface{}{"error": err.Error()})
+		bootLog.Warn("kmod", "", "kernel module not available: "+err.Error())
 	}
 
 	// Warm NDMS list caches before accepting clients so the first SSE snapshot
@@ -291,16 +295,16 @@ func main() {
 	{
 		warmCtx, warmCancel := context.WithTimeout(context.Background(), 15*time.Second)
 		if _, err := ndmsQueries.Policies.List(warmCtx); err != nil {
-			log.Warnf("ndms prewarm policies: %v", err)
+			bootLog.Warn("ndms-prewarm", "policies", err.Error())
 		}
 		if _, err := ndmsQueries.Hotspot.List(warmCtx); err != nil {
-			log.Warnf("ndms prewarm hotspot: %v", err)
+			bootLog.Warn("ndms-prewarm", "hotspot", err.Error())
 		}
 		if _, err := ndmsQueries.Interfaces.List(warmCtx); err != nil {
-			log.Warnf("ndms prewarm interfaces: %v", err)
+			bootLog.Warn("ndms-prewarm", "interfaces", err.Error())
 		}
 		if _, err := ndmsQueries.RunningConfig.Lines(warmCtx); err != nil {
-			log.Warnf("ndms prewarm running-config: %v", err)
+			bootLog.Warn("ndms-prewarm", "running-config", err.Error())
 		}
 		warmCancel()
 	}
@@ -339,7 +343,7 @@ func main() {
 	// Load awg_proxy.ko if firmware < 5.1 Alpha 4
 	if !ndmsinfo.SupportsWireguardASC() {
 		if err := nwgOp.EnsureKmodLoaded(); err != nil {
-			log.Warn("awg_proxy.ko not available", map[string]interface{}{"error": err.Error()})
+			bootLog.Warn("kmod", "awg_proxy.ko", "not available: "+err.Error())
 		}
 	}
 
@@ -348,7 +352,7 @@ func main() {
 	// (USB hotplug, new PPPoE configured after boot, etc.).
 	wanModel := wan.NewModel()
 	wanModel.SetRepopulateFn(func() {
-		populateWANModel(context.Background(), ndmsQueries, wanModel, log)
+		populateWANModel(context.Background(), ndmsQueries, wanModel, bootLog)
 	})
 
 	// Create the main tunnel service
@@ -376,12 +380,12 @@ func main() {
 	// is stat-only — TagCount is populated lazily in the background.
 	if cfg, err := hydraroute.ReadConfig(); err == nil {
 		if n, err := geoDataStore.AdoptExternalFiles(cfg); err != nil {
-			log.Warn("Failed to adopt external geo files", map[string]interface{}{"error": err.Error()})
+			bootLog.Warn("hrneo-adopt-geo", "", err.Error())
 		} else if n > 0 {
-			log.Info("Adopted external geo files from hrneo.conf", map[string]interface{}{"count": n})
+			bootLog.Info("hrneo-adopt-geo", "", fmt.Sprintf("adopted %d files from hrneo.conf", n))
 		}
 		if err := hydraService.SyncGeoFilesToConfig(); err != nil {
-			log.Warn("Failed to sync geo paths to hrneo.conf after adopt", map[string]interface{}{"error": err.Error()})
+			bootLog.Warn("hrneo-sync-geo", "", "failed after adopt: "+err.Error())
 		}
 	}
 	// Warm up tag cache for entries with TagCount=0 in a background goroutine.
@@ -393,10 +397,7 @@ func main() {
 				continue
 			}
 			if _, err := geoDataStore.GetTags(e.Path); err != nil {
-				log.Warn("Background tag parse failed", map[string]interface{}{
-					"path":  e.Path,
-					"error": err.Error(),
-				})
+				bootLog.Warn("subscription-tag-parse", e.Path, err.Error())
 			}
 		}
 	}()
@@ -407,7 +408,7 @@ func main() {
 	// (constructed later, after ndmsCommands is available.)
 	dnsRouteStore := dnsroute.NewStore(*dataDir)
 	if _, err := dnsRouteStore.Load(); err != nil {
-		log.Warn("Failed to load dns-routes", map[string]interface{}{"error": err.Error()})
+		bootLog.Warn("dns-routes-load", "", err.Error())
 	}
 
 	hydraService.SetDnsListProvider(func() []hydraroute.DnsListInfo {
@@ -473,7 +474,7 @@ func main() {
 	defer trafficHistory.Stop()
 
 	// Updater service
-	updaterService := updater.New(version, settingsStore, log, loggingService)
+	updaterService := updater.New(version, settingsStore, loggingService)
 	updaterService.Start()
 	defer updaterService.Stop()
 
@@ -486,9 +487,9 @@ func main() {
 	// Autostart ttyd if already installed — silent, non-blocking.
 	if terminalManager.IsInstalled(context.Background()) {
 		if port, err := terminalManager.Start(context.Background()); err != nil {
-			log.Warn("ttyd autostart failed", map[string]interface{}{"error": err.Error()})
+			bootLog.Warn("ttyd-autostart", "", err.Error())
 		} else {
-			log.Info("ttyd autostarted", map[string]interface{}{"port": port})
+			bootLog.Info("ttyd-autostart", "", fmt.Sprintf("started on port %d", port))
 		}
 	}
 
@@ -558,7 +559,7 @@ func main() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := dnsRouteService.Reconcile(ctx); err != nil {
-			log.Warnf("dns failover reconcile: %v", err)
+			bootLog.Warn("dns-failover-reconcile", "", err.Error())
 			return err
 		}
 		return nil
@@ -609,7 +610,7 @@ func main() {
 
 	ndmsInstaller := ndmsevents.NewInstaller(eventsLogger(loggingService))
 	if err := ndmsInstaller.Install(); err != nil {
-		log.Warnf("ndms hook installer: %v", err)
+		bootLog.Warn("ndms-hook-installer", "", err.Error())
 	}
 
 	ndmsRunningProvider := newRunningInterfacesAdapter(systemTunnelSvc, awgStore, settingsStore)
@@ -695,7 +696,7 @@ func main() {
 	// instead of leaving stale content behind.
 	singboxConfigDir := singboxOp.ConfigDir()
 	if err := singbox.MigrateDeviceProxyOutOfTunnels(singboxConfigDir); err != nil {
-		log.Warnf("singbox: deviceproxy migration: %v", err)
+		bootLog.Warn("deviceproxy-migration", "", err.Error())
 	}
 	sbOrch := singboxorch.New(singboxConfigDir, singboxOp.Process())
 	sbOrch.SetLogger(func(level, msg string) {
@@ -723,11 +724,11 @@ func main() {
 			}
 		}
 		if err := sbOrch.Register(meta); err != nil {
-			log.Errorf("singbox orchestrator register %s: %v", meta.Slot, err)
+			bootLog.Error("singbox-orchestrator", string(meta.Slot), "register failed: "+err.Error())
 		}
 	}
 	if err := sbOrch.Bootstrap(); err != nil {
-		log.Errorf("singbox orchestrator bootstrap: %v", err)
+		bootLog.Error("singbox-orchestrator", "bootstrap", err.Error())
 	}
 	// Reflect Settings into orchestrator slot enabled-state. router /
 	// deviceproxy / subscriptions are content-driven; tunnels / awg
@@ -745,12 +746,12 @@ func main() {
 	subStorePath := filepath.Join(*dataDir, "subscriptions.json")
 	subStore, err := subscription.NewStore(subStorePath)
 	if err != nil {
-		log.Errorf("subscription store: %v", err)
+		bootLog.Error("subscription-store", "", err.Error())
 	}
 	subProxyMgr := singbox.NewProxyManager(ndmsQueries, ndmsCommands)
 	subAdapter := subscription.NewOperatorAdapter(sbOrch, subProxyMgr, singboxOp.Clash())
 	if err := subAdapter.LoadFromDisk(singboxConfigDir); err != nil {
-		log.Warnf("subscription adapter: load from disk: %v", err)
+		bootLog.Warn("subscription-adapter", "load-from-disk", err.Error())
 	}
 	subSvc := subscription.NewService(subStore, subAdapter)
 	subSvc.SetAppLogger(loggingService)
@@ -765,11 +766,11 @@ func main() {
 	// the correct download URL and SHA256 from EmbeddedBinaries.
 	arch := detectArch()
 	if arch == "" {
-		log.Warnf("could not derive arch (runtime.GOARCH=%s) — managed sing-box install/update disabled", runtime.GOARCH)
+		bootLog.Warn("managed-singbox", runtime.GOARCH, "could not derive arch — install/update disabled")
 	} else {
 		spec, ok := installer.EmbeddedBinaries[arch]
 		if !ok {
-			log.Warnf("no embedded sing-box BinarySpec for arch %q — managed sing-box install/update disabled", arch)
+			bootLog.Warn("managed-singbox", arch, "no embedded BinarySpec — install/update disabled")
 		} else {
 			singboxInstaller := installer.New(installer.DefaultBinaryPath, arch, spec, loggingService)
 			singboxOp.SetInstaller(singboxInstaller)
@@ -800,7 +801,7 @@ func main() {
 				}
 				lc := &operatorLifecycle{op: singboxOp}
 				if err := singboxInstaller.Migrate(ctx, lc); err != nil {
-					log.Warnf("singbox auto-migration deferred: %v", err)
+					bootLog.Warn("singbox-auto-migration", "", "deferred: "+err.Error())
 				}
 			}()
 		}
@@ -877,7 +878,6 @@ func main() {
 			SlowRequestThreshold: slowHTTPThreshold,
 		},
 		server.Deps{
-			Log:                 log,
 			TunnelService:       tunnelService,
 			ExternalService:     externalService,
 			TestingService:      testService,
@@ -959,7 +959,7 @@ func main() {
 	// Boot reconcile — populates 15-awg.json before sing-box starts so
 	// the merged config.d is consistent on first read. Reload-free.
 	if err := awgoutboundsSvc.Reconcile(context.Background()); err != nil {
-		log.Warn("awgoutbounds: initial reconcile failed", map[string]interface{}{"err": err})
+		bootLog.Warn("awgoutbounds-reconcile", "", err.Error())
 	}
 
 	// Device-proxy service — LAN-facing SOCKS/HTTP proxy managed through
@@ -1002,7 +1002,7 @@ func main() {
 	// Initial reconcile on boot — idempotent, brings config.json in sync
 	// with storage + current tunnel set.
 	if err := deviceProxySvc.Reconcile(context.Background()); err != nil {
-		log.Warn("deviceproxy: initial reconcile failed", map[string]interface{}{"err": err})
+		bootLog.Warn("deviceproxy-reconcile", "", err.Error())
 	}
 
 	srv.SetDeviceProxyService(deviceProxySvc)
@@ -1021,7 +1021,6 @@ func main() {
 	srv.SetMetricsPoller(ndmsMetricsPoller)
 
 	routerSvc := router.NewService(router.Deps{
-		Log:                    log,
 		AppLog:                 loggingService,
 		Settings:               settingsStore,
 		Singbox:                singboxOp,
@@ -1043,7 +1042,7 @@ func main() {
 			routerStartupLog.Error("reconcile", "startup", err.Error())
 		}
 	}()
-	routerScheduler := router.NewScheduler(routerSvc, settingsStore, log)
+	routerScheduler := router.NewScheduler(routerSvc, settingsStore)
 	routerScheduler.Start()
 
 	// Late-bind sing-box / router / Clash deps into the monitoring scheduler.
@@ -1127,13 +1126,10 @@ func main() {
 		ndmsTransportClient,
 		&dnsRouteCountAdapter{store: dnsRouteStore},
 		&runningTunnelAdapter{svc: tunnelService},
-		log,
 		loggingService,
 	)
 	dnsCheckService.EnsureIPHost(context.Background())
 	srv.SetDnsCheckService(dnsCheckService)
-
-	bootLog := logging.NewScopedLogger(loggingService, logging.GroupSystem, logging.SubBoot)
 
 	logStartup(bootLog, version, string(osdetect.Get()), listenAddr, settings)
 
@@ -1160,7 +1156,7 @@ func main() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if err := ndmsSaveCoord.Flush(ctx); err != nil {
-			log.Warnf("ndms saveCoord flush on shutdown: %v", err)
+			bootLog.Warn("ndms-savecoord-flush", "shutdown", err.Error())
 		}
 	})
 	srv.AddShutdownHook(ndmsDispatcher.Stop)
@@ -1197,7 +1193,7 @@ func main() {
 
 			// Seed WAN model with current interface state from NDMS.
 			// Must happen before tunnel start so ISP resolution works.
-			populateWANModel(shutdownCtx, ndmsQueries, wanModel, log)
+			populateWANModel(shutdownCtx, ndmsQueries, wanModel, bootLog)
 
 			// Back-fill ManagedServer.PrivateKey for entries created before
 			// the field existed in storage. Best-effort, idempotent — already
@@ -1229,7 +1225,7 @@ func main() {
 		// syscall.Exec preserves child processes — amneziawg-go, TUN devices,
 		// iptables rules, routes, NDMS config all survive. Only in-memory
 		// operator maps (endpointRoutes, resolvedISP) need restoration.
-		populateWANModel(context.Background(), ndmsQueries, wanModel, log)
+		populateWANModel(context.Background(), ndmsQueries, wanModel, bootLog)
 
 		// Migrate legacy NDMS ID values to kernel names (one-time after model is populated).
 		tunnelService.MigrateISPInterfaceToKernel()
@@ -1383,14 +1379,14 @@ func logStartup(appLog *logging.ScopedLogger, version, osVersion, listenAddr str
 
 // populateWANModel queries NDMS for current WAN interfaces and fills the
 // unified WAN model so that AnyUp() works before any WAN hooks fire.
-func populateWANModel(ctx context.Context, queries *ndmsquery.Queries, model *wan.Model, log *logger.Logger) {
+func populateWANModel(ctx context.Context, queries *ndmsquery.Queries, model *wan.Model, appLog *logging.ScopedLogger) {
 	interfaces, err := queries.Interfaces.ListWAN(ctx)
 	if err != nil {
-		log.Warn("populateWANModel: failed to get WAN interfaces", map[string]interface{}{"error": err.Error()})
+		appLog.Warn("populate-wan", "", "failed to get WAN interfaces: "+err.Error())
 		return
 	}
 	model.Populate(interfaces)
-	log.Info("Boot: WAN model populated", map[string]interface{}{"count": len(interfaces)})
+	appLog.Info("populate-wan", "", fmt.Sprintf("WAN model populated, count=%d", len(interfaces)))
 }
 
 // getInterfaceIP returns the first IPv4 address of the given interface.
@@ -1668,11 +1664,18 @@ func ensureServiceEnv() {
 func runCleanup(dataDir string) {
 	fmt.Println("awg-manager cleanup: removing all managed resources...")
 
-	log := logger.New()
-	defer log.Close()
-
 	settingsStore := storage.NewSettingsStore(dataDir)
 	settingsStore.Load()
+
+	loggingService := logging.NewService(settingsStore)
+	defer loggingService.Stop()
+	bootLog := logging.NewScopedLogger(loggingService, logging.GroupSystem, logging.SubCleanup)
+
+	// Legacy *logger.Logger kept for cleanup-time downstream constructors
+	// (backend.New, ndmsquery.NewPolicyMarkStore) that still take it. They
+	// are no-ops; the real cleanup logs come through bootLog above.
+	log := logger.New()
+	_ = log
 
 	awgStore := storage.NewAWGTunnelStore(filepath.Join(dataDir, "tunnels"))
 
@@ -1690,7 +1693,7 @@ func runCleanup(dataDir string) {
 	// Init NDMS info (needed for OS detection). Wire ndmsinfo to the
 	// SystemInfoStore, then initialize with retry.
 	if err := ndmsinfo.Init(context.Background(), cleanupNDMSQueries.SystemInfo, 10*time.Second); err != nil {
-		log.Warnf("cleanup: NDMS version info not available: %v", err)
+		bootLog.Warn("ndms-version", "", err.Error())
 	}
 
 	// Create service components
@@ -1771,16 +1774,16 @@ func runCleanup(dataDir string) {
 	// available.
 	cleanupSingboxConfigDir := singboxOp.ConfigDir()
 	if err := singbox.MigrateDeviceProxyOutOfTunnels(cleanupSingboxConfigDir); err != nil {
-		log.Warnf("singbox: deviceproxy migration: %v", err)
+		bootLog.Warn("deviceproxy-migration", "", err.Error())
 	}
 	cleanupSbOrch := singboxorch.New(cleanupSingboxConfigDir, singboxOp.Process())
 	for _, meta := range singboxorch.KnownSlots() {
 		if err := cleanupSbOrch.Register(meta); err != nil {
-			log.Errorf("singbox orchestrator register %s: %v", meta.Slot, err)
+			bootLog.Error("singbox-orchestrator", string(meta.Slot), "register failed: "+err.Error())
 		}
 	}
 	if err := cleanupSbOrch.Bootstrap(); err != nil {
-		log.Errorf("singbox orchestrator bootstrap: %v", err)
+		bootLog.Error("singbox-orchestrator", "bootstrap", err.Error())
 	}
 	singboxOp.SetOrch(cleanupSbOrch)
 
