@@ -1396,6 +1396,8 @@ func (o *Operator) AddTunnels(ctx context.Context, linksText string) ([]TunnelIn
 
 // RemoveTunnel removes outbound+inbound+route+Proxy for a tag.
 func (o *Operator) RemoveTunnel(ctx context.Context, tag string) error {
+	o.migrationMu.Lock()
+	defer o.migrationMu.Unlock()
 	if o.runtimeLogger != nil {
 		o.runtimeLogger.Info("single-remove", tag, "start")
 	}

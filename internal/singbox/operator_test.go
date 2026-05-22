@@ -1093,6 +1093,23 @@ func TestParseProxyIdx_Malformed(t *testing.T) {
 	}
 }
 
+// TestRemoveTunnel_EmptyProxyInterface_ParseSentinelSkipsNDMS verifies the
+// branch where a tunnel has empty ProxyInterface (NDMS Proxy toggle was off
+// when added): the sentinel from parseProxyIdx flows into the
+// `if proxyIdx >= 0` guard in RemoveTunnel (~operator.go:1446), skipping
+// RemoveProxy without error. End-to-end RemoveTunnel needs a live sing-box
+// binary (applyConfig forks it) — covered by manual scenarios in T23 (S4).
+// This unit test pins the sentinel contract.
+func TestRemoveTunnel_EmptyProxyInterface_ParseSentinelSkipsNDMS(t *testing.T) {
+	idx, err := parseProxyIdx("")
+	if err != nil {
+		t.Fatalf("sentinel broken: parseProxyIdx(\"\") err = %v", err)
+	}
+	if idx >= 0 {
+		t.Errorf("sentinel must be < 0 (so guard skips RemoveProxy), got %d", idx)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Helpers for constructing a minimal Operator in tests.
 // ---------------------------------------------------------------------------
