@@ -1251,9 +1251,39 @@ func outboundJSONWithTag(raw json.RawMessage, tag string) (json.RawMessage, erro
 	return json.RawMessage(out), nil
 }
 
+// nextFreeListenPortSlot picks the lowest unused listen-port slot
+// (relative to firstPort) among existing tunnels and reserved
+// (slots handed out earlier in the same batch). NDMS-free counterpart
+// to proxyMgr.NextFreeIndex used when the NDMS Proxy toggle is off.
+func nextFreeListenPortSlot(cfg *Config, reserved map[int]bool) int {
+	used := make(map[int]bool, len(reserved))
+	for k := range reserved {
+		used[k] = true
+	}
+	for _, t := range cfg.Tunnels() {
+		slot := t.ListenPort - firstPort
+		if slot >= 0 {
+			used[slot] = true
+		}
+	}
+	for i := 0; i < maxProxySlots; i++ {
+		if !used[i] {
+			return i
+		}
+	}
+	return 0
+}
+
 // AddTunnels parses one or more links and atomically adds them.
 // Returns successfully-added tunnels and parse errors.
 func (o *Operator) AddTunnels(ctx context.Context, linksText string) ([]TunnelInfo, []BatchError, error) {
+	o.migrationMu.Lock()
+	defer o.migrationMu.Unlock()
+
+	// Snapshot the flag once for the whole operation — a flip mid-AddTunnels
+	// would split the tunnel's NDMS state from its config.json.
+	ndmsProxyEnabled := o.isNDMSProxyEnabled()
+
 	if o.runtimeLogger != nil {
 		o.runtimeLogger.Info("single-add", "", "start add tunnels batch")
 	}
@@ -1274,16 +1304,22 @@ func (o *Operator) AddTunnels(ctx context.Context, linksText string) ([]TunnelIn
 		return nil, parseErrs, err
 	}
 	tagOccupied := tunnelTagsInUse(cfg)
-	// reserved tracks ProxyN indices we've handed out in this batch so
-	// NextFreeIndex doesn't reuse the same slot twice before the batch
-	// is committed to NDMS.
+	// reserved tracks indices we've handed out in this batch so the slot
+	// allocator doesn't reuse the same slot twice before the batch is
+	// committed (NDMS path) or written to config (port-only path).
 	reserved := make(map[int]bool)
 	var addedTags []string
 	for _, p := range batchResult.Outbounds {
-		freeIdx, idxErr := o.proxyMgr.NextFreeIndex(ctx, reserved)
-		if idxErr != nil {
-			parseErrs = append(parseErrs, BatchError{Input: p.Tag, Err: fmt.Errorf("allocate proxy slot: %w", idxErr)})
-			continue
+		var freeIdx int
+		if ndmsProxyEnabled {
+			var idxErr error
+			freeIdx, idxErr = o.proxyMgr.NextFreeIndex(ctx, reserved)
+			if idxErr != nil {
+				parseErrs = append(parseErrs, BatchError{Input: p.Tag, Err: fmt.Errorf("allocate proxy slot: %w", idxErr)})
+				continue
+			}
+		} else {
+			freeIdx = nextFreeListenPortSlot(cfg, reserved)
 		}
 		listenPort := firstPort + freeIdx
 		tag := allocUniqueTunnelTag(tagOccupied, p.Tag)
@@ -1311,11 +1347,15 @@ func (o *Operator) AddTunnels(ctx context.Context, linksText string) ([]TunnelIn
 		return nil, parseErrs, fmt.Errorf("apply: %w", err)
 	}
 
-	// Create NDMS Proxy interfaces for new tunnels
 	all := cfg.Tunnels()
-	for _, t := range all {
-		for _, newTag := range addedTags {
-			if t.Tag == newTag {
+
+	// Create NDMS Proxy interfaces for new tunnels (skipped when toggle is off).
+	if ndmsProxyEnabled {
+		for _, t := range all {
+			for _, newTag := range addedTags {
+				if t.Tag != newTag {
+					continue
+				}
 				idx, err := parseProxyIdx(t.ProxyInterface)
 				if err != nil {
 					o.log.Error("malformed proxy interface post-add", "tag", t.Tag, "iface", t.ProxyInterface, "err", err)
@@ -1334,6 +1374,13 @@ func (o *Operator) AddTunnels(ctx context.Context, linksText string) ([]TunnelIn
 	for _, t := range all {
 		for _, newTag := range addedTags {
 			if t.Tag == newTag {
+				// When NDMS Proxy is disabled the ProxyInterface/KernelInterface
+				// fields are meaningless — clear them so callers don't act on
+				// stale interface names.
+				if !ndmsProxyEnabled {
+					t.ProxyInterface = ""
+					t.KernelInterface = ""
+				}
 				added = append(added, t)
 			}
 		}

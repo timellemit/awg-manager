@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -1112,6 +1113,50 @@ func newOperatorForTest(t *testing.T, opts ...operatorOpt) *Operator {
 		o(&d)
 	}
 	return NewOperator(d)
+}
+
+// TestNextFreeListenPortSlot covers the NDMS-free slot allocator used by
+// AddTunnels when the NDMS Proxy toggle is off. Full AddTunnels integration
+// requires a live sing-box binary (preflight + startAndWait fork/exec) — out
+// of scope for a unit test; manual scenarios (Task 23, S2) cover that path.
+func TestNextFreeListenPortSlot(t *testing.T) {
+	tests := []struct {
+		name     string
+		existing []int // existing listen ports
+		reserved map[int]bool
+		want     int
+	}{
+		{"empty config, no reserved", nil, nil, 0},
+		{"one tunnel at slot 0", []int{firstPort}, nil, 1},
+		{"gap reuse: slot 1 free", []int{firstPort, firstPort + 2}, nil, 1},
+		{"reserved within batch", nil, map[int]bool{0: true, 1: true}, 2},
+		{"existing + reserved", []int{firstPort}, map[int]bool{1: true}, 2},
+		{"sub-firstPort port ignored", []int{1000, firstPort}, nil, 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := newTestConfigWithListenPorts(t, tc.existing)
+			got := nextFreeListenPortSlot(cfg, tc.reserved)
+			if got != tc.want {
+				t.Errorf("nextFreeListenPortSlot = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// newTestConfigWithListenPorts builds a minimal *Config whose Tunnels()
+// reports tunnels with the given listenPorts. Used by TestNextFreeListenPortSlot.
+func newTestConfigWithListenPorts(t *testing.T, ports []int) *Config {
+	t.Helper()
+	cfg := NewConfig()
+	for i, p := range ports {
+		tag := fmt.Sprintf("test-%d", i)
+		ob := json.RawMessage(fmt.Sprintf(`{"type":"vless","server":"x","server_port":443,"tag":%q}`, tag))
+		if err := cfg.AddTunnelWithListenPort(tag, "vless", "x", 443, p, ob); err != nil {
+			t.Fatalf("seed tunnel listenPort=%d: %v", p, err)
+		}
+	}
+	return cfg
 }
 
 func TestGetStatus_NDMSProxyEnabled_Mirrors(t *testing.T) {
