@@ -723,6 +723,12 @@ func main() {
 	if err := sbOrch.Bootstrap(); err != nil {
 		bootLog.Error("singbox-orchestrator", "bootstrap", err.Error())
 	}
+	// Download proxy is an ephemeral per-operation slot. If a previous awgm
+	// process crashed during geo download, Bootstrap may discover an active
+	// 35-download-proxy.json. Always disable it on boot.
+	if err := sbOrch.SetEnabledSilent(singboxorch.SlotDownloadProxy, false); err != nil {
+		bootLog.Warn("singbox-orchestrator", "downloadproxy-disable", err.Error())
+	}
 	// Reflect Settings into orchestrator slot enabled-state. router /
 	// deviceproxy / subscriptions are content-driven; tunnels / awg
 	// are AlwaysOn (registered as such above) and cannot be toggled
@@ -904,6 +910,7 @@ func main() {
 			Bus:                 eventBus,
 			HydraService:        hydraService,
 			SingboxHandler:      singboxHandler,
+			SingboxOrch:         sbOrch,
 			ClashProxy:          clashProxy,
 			SingboxConnsHandler: singboxConnsHandler,
 			MonitoringService:   monitoringService,

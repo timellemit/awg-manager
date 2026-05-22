@@ -31,6 +31,7 @@ import (
 	"github.com/hoaxisr/awg-manager/internal/orchestrator"
 	"github.com/hoaxisr/awg-manager/internal/routing"
 	"github.com/hoaxisr/awg-manager/internal/singbox"
+	singboxorch "github.com/hoaxisr/awg-manager/internal/singbox/orchestrator"
 
 	"github.com/hoaxisr/awg-manager/internal/logging"
 	"github.com/hoaxisr/awg-manager/internal/managed"
@@ -115,6 +116,7 @@ type Server struct {
 	subscriptionHandler    *api.SubscriptionHandler
 	clashProxy             *api.ClashProxy
 	singboxOp              *singbox.Operator
+	singboxOrch            *singboxorch.Orchestrator
 	deviceProxySvc         *deviceproxy.Service
 	monitoringService      *monitoring.Service
 	singboxSubMembersFn    func() []diagnostics.SingboxSubMember
@@ -176,6 +178,7 @@ type Deps struct {
 	Bus                  *events.Bus
 	HydraService         *hydraroute.Service
 	SingboxHandler       *api.SingboxHandler
+	SingboxOrch          *singboxorch.Orchestrator
 	ClashProxy           *api.ClashProxy
 	SingboxConnsHandler  *api.SingboxConnectionsHandler
 	MonitoringService    *monitoring.Service
@@ -233,6 +236,7 @@ func New(cfg Config, deps Deps) *Server {
 		orch:                   deps.Orch,
 		bus:                    deps.Bus,
 		singboxHandler:         deps.SingboxHandler,
+		singboxOrch:            deps.SingboxOrch,
 		singboxConnsHandler:    deps.SingboxConnsHandler,
 		clashProxy:             deps.ClashProxy,
 		monitoringService:      deps.MonitoringService,
@@ -674,8 +678,12 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	if s.hydraService != nil {
 		hrHandler := api.NewHydraRouteHandler(s.hydraService)
 		hrHandler.SetEventBus(s.bus)
+		hrHandler.SetDeviceProxyService(s.deviceProxySvc)
+		hrHandler.SetSingboxOperator(s.singboxOp)
+		hrHandler.SetSingboxOrchestrator(s.singboxOrch)
 		mux.HandleFunc("/api/hydraroute/config", guarded(hrHandler.GetConfig))
 		mux.HandleFunc("/api/hydraroute/config/update", guarded(hrHandler.UpdateConfig))
+		mux.HandleFunc("/api/download/outbounds", guarded(hrHandler.ListDownloadOutbounds))
 		mux.HandleFunc("/api/hydraroute/geo-files", guarded(hrHandler.ListGeoFiles))
 		mux.HandleFunc("/api/hydraroute/geo-files/add", guarded(hrHandler.AddGeoFile))
 		mux.HandleFunc("/api/hydraroute/geo-files/delete", guarded(hrHandler.DeleteGeoFile))
