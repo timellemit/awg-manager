@@ -223,6 +223,30 @@ func TestEnable_AllDevicesMode_DoesNotRequirePolicyMark(t *testing.T) {
 	}
 }
 
+func TestSetRouteFinal_AllowsSubscriptionCompositeTag(t *testing.T) {
+	singbox := newTestSingbox(t)
+	svc := &ServiceImpl{
+		deps: Deps{
+			Singbox: singbox,
+			SubscriptionComposites: NewSubscriptionCompositesAdapter(
+				&fakeSubscriptionSource{tags: []string{"sub-test"}},
+			),
+		},
+	}
+
+	if err := svc.SetRouteFinal(context.Background(), "sub-test"); err != nil {
+		t.Fatalf("SetRouteFinal(sub-test): %v", err)
+	}
+
+	cfg, err := LoadConfig(filepath.Join(singbox.dir, "20-router.json"))
+	if err != nil {
+		t.Fatalf("LoadConfig(20-router.json): %v", err)
+	}
+	if cfg.Route.Final != "sub-test" {
+		t.Fatalf("route.final: want sub-test, got %q", cfg.Route.Final)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Reconcile tests
 // ---------------------------------------------------------------------------

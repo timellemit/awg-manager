@@ -180,6 +180,9 @@ definitions:
         items:
           $ref: '#/definitions/api.AccessPolicyInterfaceDTO'
         type: array
+      isStandard:
+        example: true
+        type: boolean
       name:
         example: default
         type: string

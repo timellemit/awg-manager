@@ -1096,7 +1096,8 @@ func (s *ServiceImpl) SetRouteFinal(ctx context.Context, tag string) error {
 }
 
 // isKnownOutboundTag returns true if tag is a sing-box built-in or matches
-// an outbound from any known catalog (router composites, AWG, sing-box tunnels).
+// an outbound from any known catalog (router composites, subscription
+// composites, AWG, sing-box tunnels).
 func (s *ServiceImpl) isKnownOutboundTag(ctx context.Context, tag string, cfg *RouterConfig) bool {
 	if tag == "direct" || tag == "block" || tag == "dns" {
 		return true
@@ -1105,6 +1106,14 @@ func (s *ServiceImpl) isKnownOutboundTag(ctx context.Context, tag string, cfg *R
 	for _, o := range cfg.Outbounds {
 		if o.Tag == tag {
 			return true
+		}
+	}
+	// Subscription composites (40-subscriptions.json)
+	if s.deps.SubscriptionComposites != nil {
+		for _, o := range s.deps.SubscriptionComposites.ListSubscriptionComposites() {
+			if o.Tag == tag {
+				return true
+			}
 		}
 	}
 	// AWG-direct outbounds (managed + system)
