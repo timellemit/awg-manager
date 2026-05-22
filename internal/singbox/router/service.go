@@ -1180,7 +1180,9 @@ func (s *ServiceImpl) DeleteRuleSet(ctx context.Context, tag string, force bool)
 		if err := c.DeleteRuleSet(inlineTag, force); err != nil {
 			return err
 		}
-		s.ruleSetMaterializer().removeInlineArtifacts(inlineTag)
+		if s.deps.Orch == nil {
+			s.ruleSetMaterializer().removeInlineArtifacts(inlineTag)
+		}
 		return nil
 	})
 }
@@ -1481,7 +1483,20 @@ func (s *ServiceImpl) DiscardStaging(ctx context.Context) error {
 	if err := s.deps.Orch.DiscardDraft(orchestrator.SlotRouter); err != nil {
 		return err
 	}
+	if err := s.restoreEffectiveRuleSetArtifacts(); err != nil {
+		return err
+	}
 	s.emitStagingEvent("discarded")
 	s.emitRulesEvent()
 	return nil
+}
+
+func (s *ServiceImpl) restoreEffectiveRuleSetArtifacts() error {
+	cfg, err := s.loadRouterConfig()
+	if err != nil {
+		return err
+	}
+	m := s.ruleSetMaterializer()
+	_, err = m.materializeConfig(m.restoreConfig(cfg))
+	return err
 }
