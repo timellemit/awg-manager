@@ -820,6 +820,8 @@ func main() {
 		eventBus,
 	)
 	singboxHandler := api.NewSingboxHandler(singboxOp, eventBus, delayChecker, testService, loggingService)
+	singboxMigrator := singbox.NewMigrator(singboxOp, settingsStore)
+	singboxHandler.SetNDMSProxyMigrator(singboxMigrator, settingsStore)
 	clashProxy := api.NewClashProxy(singboxOp)
 	singboxConnsHandler := api.NewSingboxConnectionsHandler(ndmsQueries.Hotspot)
 
