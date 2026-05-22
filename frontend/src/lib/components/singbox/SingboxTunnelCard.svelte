@@ -193,7 +193,7 @@
 		<div class="list-cell list-cell-name" data-label="Туннель">
 			<button type="button" class="name-btn" onclick={edit}>{tunnel.tag}</button>
 			<div class="list-sub mono">
-				{tunnel.proxyInterface}
+				{tunnel.proxyInterface || 'via sing-box'}
 				{#if tunnel.kernelInterface}<span> · {tunnel.kernelInterface}</span>{/if}
 			</div>
 		</div>
@@ -338,7 +338,7 @@
 
 	<h3 class="title">{tunnel.tag}</h3>
 	<div class="iface">
-		{tunnel.proxyInterface}
+		{tunnel.proxyInterface || 'via sing-box'}
 		{#if tunnel.kernelInterface}
 			<span class="kernel">· {tunnel.kernelInterface}</span>
 		{/if}
