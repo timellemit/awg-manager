@@ -194,7 +194,7 @@
 		<div class="list-cell list-cell-name" data-label="Туннель">
 			<button type="button" class="name-btn" onclick={edit}>{tunnel.tag}</button>
 			<div class="list-sub mono">
-				{tunnel.proxyInterface}
+				{tunnel.proxyInterface || 'via sing-box'}
 				{#if tunnel.kernelInterface}<span> · {tunnel.kernelInterface}</span>{/if}
 			</div>
 		</div>
@@ -342,8 +342,8 @@
 				<button type="button" class="title title-dense" onclick={edit}>{tunnel.tag}</button>
 			</div>
 			<div class="meta-tags-dense">
-				<span class="iface-dense" title="{tunnel.proxyInterface}{tunnel.kernelInterface ? ` · ${tunnel.kernelInterface}` : ''}">
-					<span>{tunnel.proxyInterface}</span>
+				<span class="iface-dense" title="{tunnel.proxyInterface || 'via sing-box'}{tunnel.kernelInterface ? ` · ${tunnel.kernelInterface}` : ''}">
+					<span>{tunnel.proxyInterface || 'via sing-box'}</span>
 					{#if tunnel.kernelInterface}<span class="meta-dot" aria-hidden="true">·</span><span>{tunnel.kernelInterface}</span>{/if}
 				</span>
 				<span class="badge b-{tunnel.protocol}">{protocolLabel}</span>
@@ -519,7 +519,7 @@
 
 	<h3 class="title">{tunnel.tag}</h3>
 	<div class="iface">
-		<span>{tunnel.proxyInterface}</span>
+		<span>{tunnel.proxyInterface || 'via sing-box'}</span>
 		{#if tunnel.kernelInterface}
 			<span class="meta-dot" aria-hidden="true">·</span><span>{tunnel.kernelInterface}</span>
 		{/if}

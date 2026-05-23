@@ -140,6 +140,24 @@ type Operator struct {
 	// settings. Called BEFORE proc transitions so a persistence error
 	// short-circuits the action instead of leaving an unpersisted intent.
 	persistManualStop func(bool) error
+
+	// ndmsProxyEnabledFn is the late-bound closure from OperatorDeps.IsNDMSProxyEnabled.
+	// nil means "treat as enabled" for back-compat (pre-dates this field).
+	ndmsProxyEnabledFn func() bool
+
+	// needsOrphanCleanup сигналит Reconcile запустить one-shot sweep
+	// орфанных ProxyN. CAS-флаг — после consume сбрасывается, следующие
+	// тики не делают повторных NDMS-вызовов. Поднимается из MigrateOff
+	// (best-effort fallback) и из main.go при старте, если settings уже
+	// в disabled-режиме (предыдущая сессия не успела дочистить).
+	needsOrphanCleanup atomic.Bool
+
+	// migrationMu serialises all lifecycle ops that touch ProxyManager:
+	// AddTunnels, RemoveTunnel, MigrateOff/On, Reconcile orphan cleanup.
+	// Required because toggle and tunnel lifecycle race — a flag flip
+	// during AddTunnels could leave a tunnel with NDMS state inconsistent
+	// with the new mode.
+	migrationMu sync.Mutex
 }
 
 // OperatorDeps are external dependencies for DI.
@@ -163,6 +181,12 @@ type OperatorDeps struct {
 	// to persist the new intent to settings.json. Optional — when nil,
 	// the in-memory flag still works but does not survive an awgm restart.
 	SetManuallyStopped func(bool) error
+	// IsNDMSProxyEnabled returns the current value of the global toggle
+	// (Settings.CreateNDMSProxyForSingbox). Late-binding closure avoids
+	// circular construction between SettingsStore and Operator. When nil,
+	// the operator behaves as if always enabled (back-compat for tests
+	// that pre-date this field).
+	IsNDMSProxyEnabled func() bool
 }
 
 func NewOperator(d OperatorDeps) *Operator {
@@ -207,11 +231,16 @@ func NewOperator(d OperatorDeps) *Operator {
 		persistManualStop: d.SetManuallyStopped,
 	}
 	op.manuallyStopped.Store(d.InitialManuallyStopped)
+	op.ndmsProxyEnabledFn = d.IsNDMSProxyEnabled
 	op.proc.OnStderrLine = op.handleStderrLine
 	op.proc.OnStdoutLine = op.handleStdoutLine
 	op.proc.OnExit = op.handleExit
 	return op
 }
+
+// migrationLock is for cross-file ops in this package (e.g.
+// MigrateOff/On) that must run under the same mutex as AddTunnels.
+func (o *Operator) migrationLock() *sync.Mutex { return &o.migrationMu }
 
 // singBoxStderrTextHead matches the wall-clock prefix sing-box's text logger
 // emits on stderr (e.g. "+0000 2026-05-14 21:45:56 …"). Used so JSON or
@@ -1112,6 +1141,16 @@ func (o *Operator) RequiredVersion() string {
 	return o.inst.RequiredVersion()
 }
 
+// isNDMSProxyEnabled returns the current NDMS proxy toggle value.
+// Returns true when no closure is wired (back-compat: callers that
+// constructed an Operator before this field existed behave as enabled).
+func (o *Operator) isNDMSProxyEnabled() bool {
+	if o.ndmsProxyEnabledFn == nil {
+		return true
+	}
+	return o.ndmsProxyEnabledFn()
+}
+
 // GetStatus returns install + run status.
 func (o *Operator) GetStatus(ctx context.Context) Status {
 	s := Status{}
@@ -1141,6 +1180,7 @@ func (o *Operator) GetStatus(ctx context.Context) Status {
 		s.TunnelCount = len(cfg.Tunnels())
 	}
 	s.ProxyComponent = ndmsinfo.HasProxyComponent()
+	s.NDMSProxyEnabled = o.isNDMSProxyEnabled()
 	if !s.Running {
 		s.LastError = o.LastError()
 	}
@@ -1254,8 +1294,19 @@ func (o *Operator) ListTunnels(ctx context.Context) ([]TunnelInfo, error) {
 	}
 	tunnels := cfg.Tunnels()
 	procAlive, _ := o.proc.IsRunning()
+	ndmsEnabled := o.isNDMSProxyEnabled()
 	for i := range tunnels {
-		tunnels[i].Running = procAlive && kernelInterfaceExists(tunnels[i].KernelInterface)
+		t := &tunnels[i]
+		if ndmsEnabled && t.KernelInterface != "" {
+			t.Running = procAlive && kernelInterfaceExists(t.KernelInterface)
+			continue
+		}
+		// NDMS Proxy off → нет t2sN в ядре, проверяем outbound через Clash.
+		// Полей ProxyInterface/KernelInterface не должно быть видно наверх:
+		// Tunnels() парсер derives их из listenPort всегда, здесь чистим.
+		t.Running = procAlive && o.clash.HasOutbound(t.Tag)
+		t.ProxyInterface = ""
+		t.KernelInterface = ""
 	}
 	return tunnels, nil
 }
@@ -1312,6 +1363,54 @@ func allocUniqueTunnelTag(used map[string]bool, base string) string {
 	}
 }
 
+// outboundFingerprint извлекает identity-поля outbound для проверки дублей
+// при импорте: совпавший fingerprint = тот же VPN-аккаунт. Возвращает ""
+// для нераспознанных типов — такие пропускаются (не считаем дублём).
+//
+// Используется только для prevention двойного добавления через AddTunnels:
+// двойной POST от nginx-proxy retry, открытие приложения в двух вкладках,
+// и т.п.
+func outboundFingerprint(ob map[string]any) string {
+	typ, _ := ob["type"].(string)
+	server, _ := ob["server"].(string)
+	port, _ := toInt(ob["server_port"])
+	if server == "" || port == 0 {
+		return ""
+	}
+	var secret string
+	switch typ {
+	case "vless", "vmess":
+		secret, _ = ob["uuid"].(string)
+	case "trojan", "hysteria2", "shadowsocks":
+		secret, _ = ob["password"].(string)
+	case "naive":
+		u, _ := ob["username"].(string)
+		p, _ := ob["password"].(string)
+		secret = u + ":" + p
+	default:
+		return ""
+	}
+	if secret == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s|%s|%d|%s", typ, server, port, secret)
+}
+
+// existingOutboundFingerprints собирает fingerprints из текущей config.json.
+// Используется AddTunnels для prevention дублей.
+func existingOutboundFingerprints(cfg *Config) map[string]string {
+	out := make(map[string]string)
+	for _, ob := range cfg.userOutbounds() {
+		fp := outboundFingerprint(ob)
+		if fp == "" {
+			continue
+		}
+		tag, _ := ob["tag"].(string)
+		out[fp] = tag
+	}
+	return out
+}
+
 func outboundJSONWithTag(raw json.RawMessage, tag string) (json.RawMessage, error) {
 	var m map[string]any
 	if err := json.Unmarshal(raw, &m); err != nil {
@@ -1325,9 +1424,39 @@ func outboundJSONWithTag(raw json.RawMessage, tag string) (json.RawMessage, erro
 	return json.RawMessage(out), nil
 }
 
+// nextFreeListenPortSlot picks the lowest unused listen-port slot
+// (relative to firstPort) among existing tunnels and reserved
+// (slots handed out earlier in the same batch). NDMS-free counterpart
+// to proxyMgr.NextFreeIndex used when the NDMS Proxy toggle is off.
+func nextFreeListenPortSlot(cfg *Config, reserved map[int]bool) int {
+	used := make(map[int]bool, len(reserved))
+	for k := range reserved {
+		used[k] = true
+	}
+	for _, t := range cfg.Tunnels() {
+		slot := t.ListenPort - firstPort
+		if slot >= 0 {
+			used[slot] = true
+		}
+	}
+	for i := 0; i < maxProxySlots; i++ {
+		if !used[i] {
+			return i
+		}
+	}
+	return 0
+}
+
 // AddTunnels parses one or more links and atomically adds them.
 // Returns successfully-added tunnels and parse errors.
 func (o *Operator) AddTunnels(ctx context.Context, linksText string) ([]TunnelInfo, []BatchError, error) {
+	o.migrationMu.Lock()
+	defer o.migrationMu.Unlock()
+
+	// Snapshot the flag once for the whole operation — a flip mid-AddTunnels
+	// would split the tunnel's NDMS state from its config.json.
+	ndmsProxyEnabled := o.isNDMSProxyEnabled()
+
 	if o.runtimeLogger != nil {
 		o.runtimeLogger.Info("single-add", "", "start add tunnels batch")
 	}
@@ -1348,16 +1477,40 @@ func (o *Operator) AddTunnels(ctx context.Context, linksText string) ([]TunnelIn
 		return nil, parseErrs, err
 	}
 	tagOccupied := tunnelTagsInUse(cfg)
-	// reserved tracks ProxyN indices we've handed out in this batch so
-	// NextFreeIndex doesn't reuse the same slot twice before the batch
-	// is committed to NDMS.
+	// fingerprints существующих туннелей — для отбраковки дублей при двойном
+	// POST (nginx proxy_next_upstream, две вкладки UI, и т.п.). См.
+	// outboundFingerprint выше — сравнение по (protocol, server, port, secret).
+	existingFps := existingOutboundFingerprints(cfg)
+	// reserved tracks indices we've handed out in this batch so the slot
+	// allocator doesn't reuse the same slot twice before the batch is
+	// committed (NDMS path) or written to config (port-only path).
 	reserved := make(map[int]bool)
 	var addedTags []string
 	for _, p := range batchResult.Outbounds {
-		freeIdx, idxErr := o.proxyMgr.NextFreeIndex(ctx, reserved)
-		if idxErr != nil {
-			parseErrs = append(parseErrs, BatchError{Input: p.Tag, Err: fmt.Errorf("allocate proxy slot: %w", idxErr)})
-			continue
+		// Idempotency: пропускаем если такой же outbound уже есть в config.
+		var obParsed map[string]any
+		if err := json.Unmarshal(p.Outbound, &obParsed); err == nil {
+			if fp := outboundFingerprint(obParsed); fp != "" {
+				if existingTag, dup := existingFps[fp]; dup {
+					parseErrs = append(parseErrs, BatchError{
+						Input: p.Tag,
+						Err:   fmt.Errorf("duplicate of existing tunnel %q", existingTag),
+					})
+					continue
+				}
+				existingFps[fp] = p.Tag // защита от повтора внутри одного batch
+			}
+		}
+		var freeIdx int
+		if ndmsProxyEnabled {
+			var idxErr error
+			freeIdx, idxErr = o.proxyMgr.NextFreeIndex(ctx, reserved)
+			if idxErr != nil {
+				parseErrs = append(parseErrs, BatchError{Input: p.Tag, Err: fmt.Errorf("allocate proxy slot: %w", idxErr)})
+				continue
+			}
+		} else {
+			freeIdx = nextFreeListenPortSlot(cfg, reserved)
 		}
 		listenPort := firstPort + freeIdx
 		tag := allocUniqueTunnelTag(tagOccupied, p.Tag)
@@ -1385,11 +1538,15 @@ func (o *Operator) AddTunnels(ctx context.Context, linksText string) ([]TunnelIn
 		return nil, parseErrs, fmt.Errorf("apply: %w", err)
 	}
 
-	// Create NDMS Proxy interfaces for new tunnels
 	all := cfg.Tunnels()
-	for _, t := range all {
-		for _, newTag := range addedTags {
-			if t.Tag == newTag {
+
+	// Create NDMS Proxy interfaces for new tunnels (skipped when toggle is off).
+	if ndmsProxyEnabled {
+		for _, t := range all {
+			for _, newTag := range addedTags {
+				if t.Tag != newTag {
+					continue
+				}
 				idx, err := parseProxyIdx(t.ProxyInterface)
 				if err != nil {
 					o.log.Error("malformed proxy interface post-add", "tag", t.Tag, "iface", t.ProxyInterface, "err", err)
@@ -1408,6 +1565,13 @@ func (o *Operator) AddTunnels(ctx context.Context, linksText string) ([]TunnelIn
 	for _, t := range all {
 		for _, newTag := range addedTags {
 			if t.Tag == newTag {
+				// When NDMS Proxy is disabled the ProxyInterface/KernelInterface
+				// fields are meaningless — clear them so callers don't act on
+				// stale interface names.
+				if !ndmsProxyEnabled {
+					t.ProxyInterface = ""
+					t.KernelInterface = ""
+				}
 				added = append(added, t)
 			}
 		}
@@ -1423,6 +1587,8 @@ func (o *Operator) AddTunnels(ctx context.Context, linksText string) ([]TunnelIn
 
 // RemoveTunnel removes outbound+inbound+route+Proxy for a tag.
 func (o *Operator) RemoveTunnel(ctx context.Context, tag string) error {
+	o.migrationMu.Lock()
+	defer o.migrationMu.Unlock()
 	if o.runtimeLogger != nil {
 		o.runtimeLogger.Info("single-remove", tag, "start")
 	}
@@ -1514,9 +1680,40 @@ func (o *Operator) UpdateTunnel(ctx context.Context, tag string, outbound json.R
 	return nil
 }
 
+// MarkNeedsOrphanCleanup поднимает one-shot флаг для Reconcile —
+// при следующем тике он почистит зомби-ProxyN, оставшиеся в NDMS
+// после перехода в disabled-режим. CAS гарантирует ровно один sweep
+// на сигнал. Вызывается из MigrateOff и из main.go на старте, если
+// settings уже в disabled.
+func (o *Operator) MarkNeedsOrphanCleanup() { o.needsOrphanCleanup.Store(true) }
+
+// removeOrphanSingboxProxies собирает known tunnel tags и port-slots
+// из текущего config.json и делегирует в ProxyManager. Best-effort.
+func (o *Operator) removeOrphanSingboxProxies(ctx context.Context) error {
+	cfg, err := o.loadConfig()
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	tunnelTags := map[string]bool{}
+	portSlots := map[int]bool{}
+	if cfg != nil {
+		for _, t := range cfg.Tunnels() {
+			tunnelTags[t.Tag] = true
+			slot := t.ListenPort - firstPort
+			if slot >= 0 {
+				portSlots[slot] = true
+			}
+		}
+	}
+	return o.proxyMgr.RemoveOrphanSingboxProxies(ctx, tunnelTags, portSlots)
+}
+
 // Reconcile: ensure process is running if config has tunnels; ensure Proxies are up.
 // Honours the sticky-stop intent — when the user pressed Stop, watchdog/Reconcile
 // must not bring sing-box back up. Cleared only by Control("start"/"restart").
+//
+// В режиме NDMS Proxy disabled пропускает SyncProxies и, при наличии
+// сигнала, делает one-shot orphan cleanup.
 func (o *Operator) Reconcile(ctx context.Context) error {
 	if o.manuallyStopped.Load() {
 		if o.runtimeLogger != nil {
@@ -1524,6 +1721,9 @@ func (o *Operator) Reconcile(ctx context.Context) error {
 		}
 		return nil
 	}
+	// Mutex не берём: Reconcile — watchdog hot path (тикает каждые 30s).
+	// Если Migrate*/On сейчас активны — Reconcile может race'ить с ними
+	// безопасно: SyncProxies идемпотент, orphan cleanup CAS-флаг тоже.
 	cfg, err := o.loadConfig()
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -1540,7 +1740,7 @@ func (o *Operator) Reconcile(ctx context.Context) error {
 	}
 	if running, _ := o.proc.IsRunning(); !running {
 		if o.runtimeLogger != nil {
-			o.runtimeLogger.Warn("reconcile", "", fmt.Sprintf("process down, starting before proxy sync (tunnels=%d)", len(tunnels)))
+			o.runtimeLogger.Warn("reconcile", "", fmt.Sprintf("process down, starting (tunnels=%d)", len(tunnels)))
 		}
 		if err := o.startAndWait(ctx); err != nil {
 			if o.runtimeLogger != nil {
@@ -1548,6 +1748,19 @@ func (o *Operator) Reconcile(ctx context.Context) error {
 			}
 			return fmt.Errorf("start: %w", err)
 		}
+	}
+	if !o.isNDMSProxyEnabled() {
+		if o.needsOrphanCleanup.CompareAndSwap(true, false) {
+			if err := o.removeOrphanSingboxProxies(ctx); err != nil {
+				if o.runtimeLogger != nil {
+					o.runtimeLogger.Warn("reconcile", "", "orphan cleanup: "+err.Error())
+				}
+			}
+		}
+		if o.runtimeLogger != nil {
+			o.runtimeLogger.Info("reconcile", "", fmt.Sprintf("done (ndms-proxy disabled) tunnels=%d", len(tunnels)))
+		}
+		return nil
 	}
 	if err := o.proxyMgr.SyncProxies(ctx, tunnels); err != nil {
 		if o.runtimeLogger != nil {
@@ -2073,13 +2286,18 @@ func (o *Operator) loadOrInitConfig() (*Config, error) {
 }
 
 func parseProxyIdx(name string) (int, error) {
+	if name == "" {
+		// Sentinel: tunnel has no NDMS Proxy (NDMS-proxy disabled mode).
+		// Callers MUST check idx >= 0 before invoking ProxyManager.
+		return -1, nil
+	}
 	var idx int
 	n, err := fmt.Sscanf(name, proxyIfacePrefix+"%d", &idx)
 	if err != nil {
-		return 0, fmt.Errorf("parse %q: %w", name, err)
+		return 0, fmt.Errorf("parse proxy idx %q: %w", name, err)
 	}
 	if n != 1 {
-		return 0, fmt.Errorf("parse %q: expected %s<N>", name, proxyIfacePrefix)
+		return 0, fmt.Errorf("parse proxy idx %q: expected %s<N>", name, proxyIfacePrefix)
 	}
 	return idx, nil
 }

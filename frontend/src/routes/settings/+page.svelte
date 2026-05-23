@@ -6,7 +6,7 @@
 	import { notifications } from "$lib/stores/notifications";
 	import { singboxStatus } from "$lib/stores/singbox";
 	import { PageContainer, PageHeader, LoadingSpinner } from "$lib/components/layout";
-	import { Toggle, Modal, Button } from "$lib/components/ui";
+	import { Toggle, Modal, Button, ConfirmModal, FormToggle } from "$lib/components/ui";
 	import {
 		SystemInfoGrid,
 		LoggingSettings,
@@ -55,6 +55,9 @@
 	let singboxUpdating = $state(false);
 	let singboxUpdateError = $state<string | null>(null);
 	let singboxBusy = $state(false);
+	let ndmsProxyBusy = $state(false);
+	let ndmsProxyConfirmOpen = $state(false);
+	let ndmsProxyConfirmEnable = $state(false); // true = подтверждение включения; false = выключения
 	let hydraProbeNoteTimer: ReturnType<typeof setTimeout> | null = null;
 	let systemInfoRefreshing = $state(false);
 	let systemInfoUpdatedAt = $state<string | null>(null);
@@ -67,6 +70,7 @@
 	);
 	const singboxInstalled = $derived(singboxStatusValue?.installed ?? false);
 	const singboxRunning = $derived(singboxStatusValue?.running ?? false);
+	const ndmsProxyEnabled = $derived(singboxStatusValue?.ndmsProxyEnabled ?? true);
 	const hydraInstalled = $derived(hydraStatus?.installed ?? false);
 	const hydraRunning = $derived(hydraStatus?.running ?? false);
 
@@ -87,6 +91,40 @@
 			hydraProbeNoteTimer = null;
 		}
 	});
+
+	function handleNDMSProxyToggleClick(next: boolean) {
+		// next — желаемое состояние после клика. Открываем confirm-modal
+		// с предупреждением (warning-only — мы не сканим NDMS-policies).
+		ndmsProxyConfirmEnable = next;
+		ndmsProxyConfirmOpen = true;
+	}
+
+	async function applyNDMSProxyToggle() {
+		const enabled = ndmsProxyConfirmEnable;
+		ndmsProxyBusy = true;
+		try {
+			const res = await api.singboxToggleNDMSProxy(enabled);
+			ndmsProxyConfirmOpen = false;
+			// Обновим стор статуса оптимистично — SSE invalidate тоже придёт.
+			if (singboxStatusValue) {
+				singboxStatus.applyMutationResponse({ ...singboxStatusValue, ndmsProxyEnabled: res.enabled });
+			}
+			notifications.success(
+				res.migrated
+					? (enabled ? 'NDMS Proxy включены' : 'NDMS Proxy выключены')
+					: 'Состояние не изменилось',
+			);
+		} catch (e) {
+			const msg = e instanceof Error ? e.message : 'Не удалось переключить NDMS Proxy';
+			if (msg.includes('PROXY_COMPONENT_MISSING') || msg.includes("'proxy'")) {
+				notifications.error('NDMS-компонент "proxy" не установлен. Установите его в System → Components.');
+			} else {
+				notifications.error(msg);
+			}
+		} finally {
+			ndmsProxyBusy = false;
+		}
+	}
 
 	async function controlSingbox(action: 'start' | 'stop' | 'restart') {
 		singboxBusy = true;
@@ -614,6 +652,27 @@ onMount(() => {
 						{/if}
 					</div>
 				</div>
+
+				<div class="setting-row">
+					<div class="flex flex-col gap-1">
+						<span class="font-medium">NDMS Proxy для туннелей sing-box</span>
+						<span class="setting-description">
+							{#if ndmsProxyEnabled}
+								Включено — для каждого туннеля sing-box создаётся интерфейс ProxyX в роутере.
+								Нужно если вы используете NDMS-маршрутизацию (Access Policy, политики роутера) для sing-box.
+							{:else}
+								Выключено — sing-box работает только через свою маршрутизацию. ProxyX-интерфейсы не создаются (решает проблему зависания роутера при потере WAN).
+							{/if}
+						</span>
+					</div>
+					<div class="action-buttons">
+						<FormToggle
+							checked={ndmsProxyEnabled}
+							disabled={ndmsProxyBusy}
+							onchange={handleNDMSProxyToggleClick}
+						/>
+					</div>
+				</div>
 			{/if}
 
 			{#if hydraInstalled && showHydraIntegration}
@@ -641,6 +700,22 @@ onMount(() => {
 		</div>
 		</div>
 	{/if}
+
+	<ConfirmModal
+		open={ndmsProxyConfirmOpen}
+		title={ndmsProxyConfirmEnable ? 'Включить NDMS Proxy?' : 'Выключить NDMS Proxy?'}
+		message={ndmsProxyConfirmEnable
+			? 'Будут созданы интерфейсы ProxyX в NDMS для текущих туннелей sing-box.'
+			: 'Интерфейсы ProxyX будут удалены из NDMS. Sing-box продолжит работать через свою маршрутизацию.'}
+		secondary={ndmsProxyConfirmEnable
+			? 'Требуется NDMS-компонент "proxy".'
+			: 'Проверьте, что никакие правила маршрутизации NDMS (Access Policy, политики роутера) не ссылаются на эти ProxyX — иначе они перестанут работать.'}
+		confirmLabel={ndmsProxyConfirmEnable ? 'Включить' : 'Выключить'}
+		variant={ndmsProxyConfirmEnable ? 'primary' : 'danger'}
+		busy={ndmsProxyBusy}
+		onConfirm={applyNDMSProxyToggle}
+		onClose={() => (ndmsProxyConfirmOpen = false)}
+	/>
 
 	<Modal
 		open={restartConfirmOpen}

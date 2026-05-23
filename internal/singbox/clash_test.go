@@ -2,6 +2,7 @@ package singbox
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -48,5 +49,38 @@ func TestClashClient_DelayTest(t *testing.T) {
 	}
 	if delay != 87 {
 		t.Errorf("delay: %d", delay)
+	}
+}
+
+func TestClashClient_HasOutbound(t *testing.T) {
+	body := `{"proxies":{"direct":{"name":"direct","type":"direct"},"us-vless":{"name":"us-vless","type":"vless"}}}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/proxies" {
+			_, _ = io.WriteString(w, body)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+
+	addr := strings.TrimPrefix(srv.URL, "http://")
+	c := NewClashClient(addr)
+
+	if !c.HasOutbound("us-vless") {
+		t.Errorf("HasOutbound(us-vless) = false, want true")
+	}
+	if !c.HasOutbound("direct") {
+		t.Errorf("HasOutbound(direct) = false, want true")
+	}
+	if c.HasOutbound("nonexistent") {
+		t.Errorf("HasOutbound(nonexistent) = true, want false")
+	}
+}
+
+func TestClashClient_HasOutbound_ClashDown(t *testing.T) {
+	// Point to unused port so HTTP GET fails fast.
+	c := NewClashClient("127.0.0.1:1")
+	if c.HasOutbound("any-tag") {
+		t.Errorf("expected false when Clash is unreachable")
 	}
 }

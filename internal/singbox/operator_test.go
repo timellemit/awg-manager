@@ -6,6 +6,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -1119,6 +1124,279 @@ func TestPreflightConfigDir_FallsThroughToValidator(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "synthetic schema failure") {
 		t.Errorf("validator error must propagate verbatim, got: %s", err)
+	}
+}
+
+func TestParseProxyIdx_EmptyReturnsSentinel(t *testing.T) {
+	idx, err := parseProxyIdx("")
+	if err != nil {
+		t.Errorf("parseProxyIdx(\"\") err = %v, want nil", err)
+	}
+	if idx != -1 {
+		t.Errorf("parseProxyIdx(\"\") idx = %d, want -1 (sentinel)", idx)
+	}
+}
+
+func TestParseProxyIdx_ValidProxy(t *testing.T) {
+	idx, err := parseProxyIdx("Proxy3")
+	if err != nil || idx != 3 {
+		t.Errorf("parseProxyIdx(Proxy3) = (%d, %v), want (3, nil)", idx, err)
+	}
+}
+
+func TestParseProxyIdx_Malformed(t *testing.T) {
+	if _, err := parseProxyIdx("garbage"); err == nil {
+		t.Error("parseProxyIdx(garbage) should error")
+	}
+}
+
+// TestRemoveTunnel_EmptyProxyInterface_ParseSentinelSkipsNDMS verifies the
+// branch where a tunnel has empty ProxyInterface (NDMS Proxy toggle was off
+// when added): the sentinel from parseProxyIdx flows into the
+// `if proxyIdx >= 0` guard in RemoveTunnel (~operator.go:1446), skipping
+// RemoveProxy without error. End-to-end RemoveTunnel needs a live sing-box
+// binary (applyConfig forks it) — covered by manual scenarios in T23 (S4).
+// This unit test pins the sentinel contract.
+func TestRemoveTunnel_EmptyProxyInterface_ParseSentinelSkipsNDMS(t *testing.T) {
+	idx, err := parseProxyIdx("")
+	if err != nil {
+		t.Fatalf("sentinel broken: parseProxyIdx(\"\") err = %v", err)
+	}
+	if idx >= 0 {
+		t.Errorf("sentinel must be < 0 (so guard skips RemoveProxy), got %d", idx)
+	}
+}
+
+// TestListTunnels_Running_NDMSDisabled_UsesClash verifies that when the
+// NDMS Proxy toggle is off, ListTunnels falls back from the kernel-iface
+// probe (which would always return false — no t2sN exists) to the Clash
+// /proxies endpoint. It also pins the post-condition that derived
+// ProxyInterface/KernelInterface (which Tunnels() computes from
+// listenPort regardless of mode) are cleared in the returned slice so
+// the API/UI consistently reflect the NDMS-free state.
+func TestListTunnels_Running_NDMSDisabled_UsesClash(t *testing.T) {
+	// Test config has listen_port = firstPort (= 1080), so Tunnels()
+	// parser DOES derive ProxyInterface=Proxy0 / KernelInterface=t2s0
+	// from listenPort — we then assert the disabled path clears them.
+	tunnelsJSON := `{
+		"inbounds":[{"type":"mixed","tag":"us-vless-in","listen":"127.0.0.1","listen_port":1080}],
+		"outbounds":[{"type":"vless","tag":"us-vless","server":"x","server_port":443}],
+		"route":{"rules":[{"inbound":"us-vless-in","outbound":"us-vless"}]}
+	}`
+
+	cases := []struct {
+		name          string
+		clashHandler  func(http.ResponseWriter, *http.Request)
+		clashAddr     string // overrides if non-empty
+		wantRunning   bool
+	}{
+		{
+			name: "clash reports outbound present → Running true",
+			clashHandler: func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/proxies" {
+					_, _ = io.WriteString(w, `{"proxies":{"us-vless":{"name":"us-vless","type":"vless"}}}`)
+					return
+				}
+				http.NotFound(w, r)
+			},
+			wantRunning: true,
+		},
+		{
+			name:        "clash unreachable → Running false",
+			clashAddr:   "127.0.0.1:1", // unused port
+			wantRunning: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			configDir := filepath.Join(dir, "config.d")
+			if err := os.MkdirAll(configDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(configDir, "10-tunnels.json"), []byte(tunnelsJSON), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			pidPath := filepath.Join(dir, "sing-box.pid")
+			if err := os.WriteFile(pidPath, []byte(fmt.Sprintf("%d\n", os.Getpid())), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			op := newOperatorForTest(t, withNDMSProxyEnabled(func() bool { return false }))
+			op.dir = dir
+			op.configPath = configDir
+			op.pidPath = pidPath
+			op.proc = NewProcess(op.binary, configDir, pidPath)
+
+			var srvAddr string
+			if tc.clashHandler != nil {
+				srv := httptest.NewServer(http.HandlerFunc(tc.clashHandler))
+				defer srv.Close()
+				srvAddr = strings.TrimPrefix(srv.URL, "http://")
+			} else {
+				srvAddr = tc.clashAddr
+			}
+			op.clash = NewClashClient(srvAddr)
+
+			tuns, err := op.ListTunnels(context.Background())
+			if err != nil {
+				t.Fatalf("ListTunnels: %v", err)
+			}
+			if len(tuns) != 1 {
+				t.Fatalf("tunnels = %d, want 1", len(tuns))
+			}
+			if tuns[0].Running != tc.wantRunning {
+				t.Errorf("Running = %v, want %v", tuns[0].Running, tc.wantRunning)
+			}
+			if tuns[0].ProxyInterface != "" {
+				t.Errorf("ProxyInterface = %q, want empty in disabled mode", tuns[0].ProxyInterface)
+			}
+			if tuns[0].KernelInterface != "" {
+				t.Errorf("KernelInterface = %q, want empty in disabled mode", tuns[0].KernelInterface)
+			}
+		})
+	}
+}
+
+func TestOutboundFingerprint(t *testing.T) {
+	tests := []struct {
+		name string
+		ob   map[string]any
+		want string
+	}{
+		{
+			"vless full",
+			map[string]any{"type": "vless", "server": "ex.com", "server_port": 443, "uuid": "uuid-1"},
+			"vless|ex.com|443|uuid-1",
+		},
+		{
+			"trojan password",
+			map[string]any{"type": "trojan", "server": "ex.com", "server_port": 443, "password": "secret"},
+			"trojan|ex.com|443|secret",
+		},
+		{
+			"hysteria2 password",
+			map[string]any{"type": "hysteria2", "server": "ex.com", "server_port": 8443, "password": "p"},
+			"hysteria2|ex.com|8443|p",
+		},
+		{
+			"naive concat",
+			map[string]any{"type": "naive", "server": "ex.com", "server_port": 443, "username": "u", "password": "p"},
+			"naive|ex.com|443|u:p",
+		},
+		{
+			"unknown type → empty",
+			map[string]any{"type": "wireguard", "server": "ex.com", "server_port": 443},
+			"",
+		},
+		{
+			"missing server → empty",
+			map[string]any{"type": "vless", "server_port": 443, "uuid": "x"},
+			"",
+		},
+		{
+			"missing port → empty",
+			map[string]any{"type": "vless", "server": "ex.com", "uuid": "x"},
+			"",
+		},
+		{
+			"missing uuid → empty (для vless)",
+			map[string]any{"type": "vless", "server": "ex.com", "server_port": 443},
+			"",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := outboundFingerprint(tc.ob); got != tc.want {
+				t.Errorf("outboundFingerprint = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Helpers for constructing a minimal Operator in tests.
+// ---------------------------------------------------------------------------
+
+type operatorOpt func(*OperatorDeps)
+
+func withNDMSProxyEnabled(fn func() bool) operatorOpt {
+	return func(d *OperatorDeps) { d.IsNDMSProxyEnabled = fn }
+}
+
+func newOperatorForTest(t *testing.T, opts ...operatorOpt) *Operator {
+	t.Helper()
+	d := OperatorDeps{
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Dir: t.TempDir(),
+	}
+	for _, o := range opts {
+		o(&d)
+	}
+	return NewOperator(d)
+}
+
+// TestNextFreeListenPortSlot covers the NDMS-free slot allocator used by
+// AddTunnels when the NDMS Proxy toggle is off. Full AddTunnels integration
+// requires a live sing-box binary (preflight + startAndWait fork/exec) — out
+// of scope for a unit test; manual scenarios (Task 23, S2) cover that path.
+func TestNextFreeListenPortSlot(t *testing.T) {
+	tests := []struct {
+		name     string
+		existing []int // existing listen ports
+		reserved map[int]bool
+		want     int
+	}{
+		{"empty config, no reserved", nil, nil, 0},
+		{"one tunnel at slot 0", []int{firstPort}, nil, 1},
+		{"gap reuse: slot 1 free", []int{firstPort, firstPort + 2}, nil, 1},
+		{"reserved within batch", nil, map[int]bool{0: true, 1: true}, 2},
+		{"existing + reserved", []int{firstPort}, map[int]bool{1: true}, 2},
+		{"sub-firstPort port ignored", []int{1000, firstPort}, nil, 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := newTestConfigWithListenPorts(t, tc.existing)
+			got := nextFreeListenPortSlot(cfg, tc.reserved)
+			if got != tc.want {
+				t.Errorf("nextFreeListenPortSlot = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// newTestConfigWithListenPorts builds a minimal *Config whose Tunnels()
+// reports tunnels with the given listenPorts. Used by TestNextFreeListenPortSlot.
+func newTestConfigWithListenPorts(t *testing.T, ports []int) *Config {
+	t.Helper()
+	cfg := NewConfig()
+	for i, p := range ports {
+		tag := fmt.Sprintf("test-%d", i)
+		ob := json.RawMessage(fmt.Sprintf(`{"type":"vless","server":"x","server_port":443,"tag":%q}`, tag))
+		if err := cfg.AddTunnelWithListenPort(tag, "vless", "x", 443, p, ob); err != nil {
+			t.Fatalf("seed tunnel listenPort=%d: %v", p, err)
+		}
+	}
+	return cfg
+}
+
+func TestGetStatus_NDMSProxyEnabled_Mirrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		enabled bool
+	}{
+		{"enabled true", true},
+		{"enabled false", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			op := newOperatorForTest(t, withNDMSProxyEnabled(func() bool { return tc.enabled }))
+			got := op.GetStatus(context.Background())
+			if got.NDMSProxyEnabled != tc.enabled {
+				t.Errorf("NDMSProxyEnabled = %v, want %v", got.NDMSProxyEnabled, tc.enabled)
+			}
+		})
 	}
 }
 

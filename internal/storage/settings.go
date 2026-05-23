@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	CurrentSchemaVersion = 19
+	CurrentSchemaVersion = 20
 	DefaultPort          = 2222
 	DefaultInterface     = "br0"
 )
@@ -117,6 +117,9 @@ func (s *SettingsStore) Load() (*Settings, error) {
 		if settings.SchemaVersion < 19 {
 			s.migrateToV19(&settings)
 		}
+		if settings.SchemaVersion < 20 {
+			s.migrateToV20(&settings)
+		}
 	}
 
 	// Self-heal duplicated managed servers — see dedupManagedServers comment.
@@ -172,6 +175,7 @@ func (s *SettingsStore) defaultSettings() *Settings {
 			RefreshInterval: 24,
 			WANAutoDetect:   true, // sing-box auto_detect_interface by default
 		},
+		CreateNDMSProxyForSingbox: true,
 	}
 }
 
@@ -345,6 +349,15 @@ func (s *SettingsStore) migrateToV19(settings *Settings) {
 	settings.SchemaVersion = 19
 }
 
+// migrateToV20 introduces CreateNDMSProxyForSingbox toggle. Existing
+// installs already rely on ProxyN/t2sN being created — set true to
+// preserve behaviour. Fresh installs ship v20 with default true via
+// defaultSettings.
+func (s *SettingsStore) migrateToV20(settings *Settings) {
+	settings.CreateNDMSProxyForSingbox = true
+	settings.SchemaVersion = 20
+}
+
 // dedupManagedServers returns servers with duplicate InterfaceName entries
 // removed (first occurrence wins). Second return value is how many entries
 // were dropped. Pure: caller decides whether to persist.
@@ -504,6 +517,32 @@ func (s *SettingsStore) SetSingboxManuallyStopped(v bool) error {
 	}
 	s.settings.SingboxManuallyStopped = v
 	return s.saveUnlocked(s.settings)
+}
+
+// SetSingboxCreateNDMSProxy atomically updates the toggle under the
+// store lock. Mirrors SetSingboxManuallyStopped — required because
+// the API handler is the single writer (CLAUDE.md single-writer
+// storage pattern), and concurrent writers on other Settings fields
+// must not silently overwrite this change.
+func (s *SettingsStore) SetSingboxCreateNDMSProxy(v bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.settings == nil {
+		return fmt.Errorf("settings not loaded")
+	}
+	s.settings.CreateNDMSProxyForSingbox = v
+	return s.saveUnlocked(s.settings)
+}
+
+// IsSingboxNDMSProxyEnabled returns the current toggle value, or true
+// on read error (back-compat default — never fail-closed for this
+// flag; we'd rather create a Proxy than silently break NDMS routing).
+func (s *SettingsStore) IsSingboxNDMSProxyEnabled() bool {
+	settings, err := s.Get()
+	if err != nil {
+		return true
+	}
+	return settings.CreateNDMSProxyForSingbox
 }
 
 // MarkServerInterface adds an interface ID to the server interfaces list.

@@ -625,6 +625,16 @@
 				</svg>
 				iperf3 не найден. Доступно только на NDMS 5.x.
 			</p>
+		{:else if kind === 'singbox' && !iface}
+			<p class="test-desc unavailable">
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+					<circle cx="12" cy="12" r="10"/>
+					<line x1="12" y1="8" x2="12" y2="12"/>
+					<circle cx="12" cy="16" r="0.8" fill="currentColor" stroke="none"/>
+				</svg>
+				Тест iperf для sing-box туннеля требует включённого NDMS Proxy
+				(нужен kernel-интерфейс t2sX для bind).
+			</p>
 		{:else}
 			<p class="test-desc">Измерить скорость через {subjectLabel} с помощью iperf3.</p>
 

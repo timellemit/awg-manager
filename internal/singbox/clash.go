@@ -57,6 +57,27 @@ func (c *ClashClient) GetProxies() (map[string]ClashProxy, error) {
 	return wrap.Proxies, nil
 }
 
+// HasOutbound reports whether an outbound with the given tag is
+// currently present in the running sing-box (queried via Clash
+// /proxies). Used by the operator to decide tunnel.Running in
+// NDMS-proxy-disabled mode, where the kernel-iface probe is not
+// applicable.
+//
+// Returns false on any transport error or non-2xx — semantically
+// equivalent to "not operational right now", which matches the UI's
+// expectation when Clash is down or sing-box is restarting.
+func (c *ClashClient) HasOutbound(tag string) bool {
+	if tag == "" {
+		return false
+	}
+	proxies, err := c.GetProxies()
+	if err != nil {
+		return false
+	}
+	_, ok := proxies[tag]
+	return ok
+}
+
 // TestDelay triggers a latency test for a proxy via Clash API.
 func (c *ClashClient) TestDelay(name, testURL string, timeout time.Duration) (int, error) {
 	q := url.Values{}

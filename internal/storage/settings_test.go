@@ -392,6 +392,38 @@ func TestLoadUpgradeFromV15SetsAdvanced(t *testing.T) {
 	}
 }
 
+func TestSettings_CreateNDMSProxyForSingbox_DefaultTrue(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := NewSettingsStore(tmpDir)
+	s, err := store.Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if !s.CreateNDMSProxyForSingbox {
+		t.Errorf("CreateNDMSProxyForSingbox default = %v, want true (back-compat)", s.CreateNDMSProxyForSingbox)
+	}
+}
+
+func TestSettings_MigrateV19toV20_SetsTrueOnExistingInstall(t *testing.T) {
+	tmpDir := t.TempDir()
+	// Write a v19 settings file without the new field.
+	legacy := `{"schemaVersion":19,"authEnabled":false,"usageLevel":"basic"}`
+	if err := os.WriteFile(filepath.Join(tmpDir, "settings.json"), []byte(legacy), 0o600); err != nil {
+		t.Fatalf("write legacy: %v", err)
+	}
+	store := NewSettingsStore(tmpDir)
+	s, err := store.Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if s.SchemaVersion != 20 {
+		t.Errorf("schema = %d, want 20", s.SchemaVersion)
+	}
+	if !s.CreateNDMSProxyForSingbox {
+		t.Errorf("migration should set CreateNDMSProxyForSingbox=true for existing installs (back-compat)")
+	}
+}
+
 func TestNormalizeUsageLevel(t *testing.T) {
 	tests := []struct {
 		in   string
@@ -409,5 +441,32 @@ func TestNormalizeUsageLevel(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("NormalizeUsageLevel(%q) = %q, want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+func TestSettingsStore_SetSingboxCreateNDMSProxy_PersistsAtomic(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := NewSettingsStore(tmpDir)
+	if _, err := store.Load(); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if err := store.SetSingboxCreateNDMSProxy(false); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	// Re-open from disk to confirm persistence.
+	fresh := NewSettingsStore(tmpDir)
+	s, err := fresh.Load()
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if s.CreateNDMSProxyForSingbox {
+		t.Errorf("persisted = %v, want false", s.CreateNDMSProxyForSingbox)
+	}
+	// Toggle back.
+	if err := fresh.SetSingboxCreateNDMSProxy(true); err != nil {
+		t.Fatalf("set back: %v", err)
+	}
+	if !fresh.IsSingboxNDMSProxyEnabled() {
+		t.Errorf("getter sees = false after set true")
 	}
 }

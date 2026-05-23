@@ -680,7 +680,14 @@ func main() {
 		// service toggling SingboxRouter) cannot silently overwrite it.
 		InitialManuallyStopped: settings.SingboxManuallyStopped,
 		SetManuallyStopped:     settingsStore.SetSingboxManuallyStopped,
+		IsNDMSProxyEnabled:     settingsStore.IsSingboxNDMSProxyEnabled,
 	})
+	// Если на старте флаг disabled — orphan-cleanup (после возможного
+	// обрыва прошлой MigrateOff в любой момент). Reconcile подберёт
+	// сигнал на первом тике watchdog'а.
+	if !settingsStore.IsSingboxNDMSProxyEnabled() {
+		singboxOp.MarkNeedsOrphanCleanup()
+	}
 
 	// config.d orchestrator — the single writer of slot files (00-base /
 	// 10-tunnels / 15-awg / 20-router / 30-deviceproxy). Producers route
@@ -812,6 +819,8 @@ func main() {
 		eventBus,
 	)
 	singboxHandler := api.NewSingboxHandler(singboxOp, eventBus, delayChecker, testService, loggingService)
+	singboxMigrator := singbox.NewMigrator(singboxOp, settingsStore)
+	singboxHandler.SetNDMSProxyMigrator(singboxMigrator, settingsStore)
 	clashProxy := api.NewClashProxy(singboxOp)
 	singboxConnsHandler := api.NewSingboxConnectionsHandler(ndmsQueries.Hotspot)
 
@@ -1760,9 +1769,10 @@ func runCleanup(dataDir string) {
 	dnsSvc := dnsroute.NewService(dnsStore, cleanupNDMSQueries, cleanupNDMSCommands, nil, nil)
 
 	singboxOp := singbox.NewOperator(singbox.OperatorDeps{
-		Log:      slog.Default().With("component", "singbox"),
-		Queries:  cleanupNDMSQueries,
-		Commands: cleanupNDMSCommands,
+		Log:                slog.Default().With("component", "singbox"),
+		Queries:            cleanupNDMSQueries,
+		Commands:           cleanupNDMSCommands,
+		IsNDMSProxyEnabled: settingsStore.IsSingboxNDMSProxyEnabled,
 	})
 
 	// Cleanup mode: bootstrap the orchestrator so any subsequent

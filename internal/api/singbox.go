@@ -79,6 +79,15 @@ type SingboxHandler struct {
 	delayChecker *singbox.DelayChecker
 	testingSvc   *testing.Service
 	log          *logging.ScopedLogger
+	migrator     *singbox.Migrator
+	settings     ndmsProxyToggler
+}
+
+// ndmsProxyToggler — узкий интерфейс для чтения текущего значения
+// toggle. SingboxHandler полагается на него для idempotency-check
+// (если значение не меняется — 200 OK без миграции).
+type ndmsProxyToggler interface {
+	IsSingboxNDMSProxyEnabled() bool
 }
 
 var errTunnelNoInterface = errors.New("tunnel has no kernel interface")
@@ -96,6 +105,82 @@ func NewSingboxHandler(op *singbox.Operator, bus *events.Bus, dc *singbox.DelayC
 		testingSvc:   ts,
 		log:          logging.NewScopedLogger(lg, logging.GroupSingbox, logging.SubSBRuntime),
 	}
+}
+
+// SetNDMSProxyMigrator подключает мигратор и getter настроек после
+// конструкции (избегаем circular construction между SettingsStore и
+// SingboxHandler). Без них endpoint ToggleNDMSProxy возвращает 500.
+func (h *SingboxHandler) SetNDMSProxyMigrator(m *singbox.Migrator, settings ndmsProxyToggler) {
+	h.migrator = m
+	h.settings = settings
+}
+
+// ToggleNDMSProxyRequest is the body for POST /singbox/ndms-proxy.
+type ToggleNDMSProxyRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+// ToggleNDMSProxy handles POST /api/singbox/ndms-proxy.
+// Переключает создание NDMS Proxy интерфейсов для sing-box туннелей.
+// Idempotent: повторный вызов с тем же значением — 200 OK без миграции.
+// 412 при enabled=true если NDMS-компонент 'proxy' не установлен.
+//
+//	@Summary		Toggle NDMS Proxy creation for sing-box tunnels
+//	@Tags			singbox
+//	@Accept			json
+//	@Produce		json
+//	@Security		CookieAuth
+//	@Param			body	body		ToggleNDMSProxyRequest	true	"Toggle value"
+//	@Success		200		{object}	APIEnvelope
+//	@Failure		400		{object}	APIErrorEnvelope
+//	@Failure		412		{object}	APIErrorEnvelope
+//	@Failure		500		{object}	APIErrorEnvelope
+//	@Router			/singbox/ndms-proxy [post]
+func (h *SingboxHandler) ToggleNDMSProxy(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		response.MethodNotAllowed(w)
+		return
+	}
+	if h.migrator == nil || h.settings == nil {
+		response.InternalError(w, "ndms-proxy toggle not wired")
+		return
+	}
+	var req ToggleNDMSProxyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		response.Error(w, "invalid request", "INVALID_REQUEST")
+		return
+	}
+
+	current := h.settings.IsSingboxNDMSProxyEnabled()
+	if current == req.Enabled {
+		// Идемпотент: значение уже такое — никакой миграции, никакой
+		// проверки компонента. Защищает от ложных 412 при ретраях.
+		response.Success(w, map[string]any{"enabled": req.Enabled, "migrated": false})
+		return
+	}
+
+	ctx := r.Context()
+	if req.Enabled {
+		if err := h.migrator.MigrateOn(ctx); err != nil {
+			if errors.Is(err, singbox.ErrProxyComponentMissing) {
+				response.ErrorWithStatus(w, http.StatusPreconditionFailed,
+					"NDMS-компонент 'proxy' не установлен. Установите его через System → Components.",
+					"PROXY_COMPONENT_MISSING")
+				return
+			}
+			response.InternalError(w, err.Error())
+			return
+		}
+	} else {
+		if err := h.migrator.MigrateOff(ctx); err != nil {
+			response.InternalError(w, err.Error())
+			return
+		}
+	}
+
+	publishInvalidated(h.bus, ResourceSingboxStatus, "ndms-proxy-toggled")
+	publishInvalidated(h.bus, ResourceSingboxTunnels, "ndms-proxy-toggled")
+	response.Success(w, map[string]any{"enabled": req.Enabled, "migrated": true})
 }
 
 // DelayCheck handles POST /api/singbox/tunnels/delay-check?tag=X.
