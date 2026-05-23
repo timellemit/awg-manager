@@ -3,10 +3,14 @@ package transport
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -49,6 +53,144 @@ func echoBatchHandler(t *testing.T) http.HandlerFunc {
 		out, _ := json.Marshal(responses)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write(out)
+	}
+}
+
+func TestBatcher_MultipleSubmits_OneBatch(t *testing.T) {
+	var batchCount atomic.Uint32
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		batchCount.Add(1)
+		body, _ := io.ReadAll(r.Body)
+		var batch []json.RawMessage
+		_ = json.Unmarshal(body, &batch)
+		responses := make([]json.RawMessage, len(batch))
+		for i := range batch {
+			responses[i] = json.RawMessage(`{"ok":true,"i":` + strconv.Itoa(i) + `}`)
+		}
+		out, _ := json.Marshal(responses)
+		_, _ = w.Write(out)
+	}
+	b, cleanup := newTestBatcher(t, handler, 30*time.Millisecond)
+	defer cleanup()
+
+	ctx := context.Background()
+	results := make(chan error, 5)
+	for _, p := range []string{
+		"/show/interface/",
+		"/show/sc/dns-proxy/route",
+		"/show/rc/object-group/fqdn",
+		"/show/running-config",
+		"/show/interface/Wireguard0",
+	} {
+		go func(path string) {
+			_, err := b.Submit(ctx, path)
+			results <- err
+		}(p)
+	}
+	for i := 0; i < 5; i++ {
+		if err := <-results; err != nil {
+			t.Errorf("submit %d err: %v", i, err)
+		}
+	}
+	if got := batchCount.Load(); got != 1 {
+		t.Errorf("HTTP POST count = %d, want 1 (all in one batch)", got)
+	}
+}
+
+func TestBatcher_CoalescesIdenticalPaths(t *testing.T) {
+	var batchSizes []int
+	var mu sync.Mutex
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var batch []json.RawMessage
+		_ = json.Unmarshal(body, &batch)
+		mu.Lock()
+		batchSizes = append(batchSizes, len(batch))
+		mu.Unlock()
+		responses := make([]json.RawMessage, len(batch))
+		for i := range batch {
+			responses[i] = json.RawMessage(`{"data":"x"}`)
+		}
+		out, _ := json.Marshal(responses)
+		_, _ = w.Write(out)
+	}
+	b, cleanup := newTestBatcher(t, handler, 30*time.Millisecond)
+	defer cleanup()
+
+	ctx := context.Background()
+	results := make(chan []byte, 5)
+	for i := 0; i < 5; i++ {
+		go func() {
+			body, _ := b.Submit(ctx, "/show/interface/")
+			results <- body
+		}()
+	}
+	bodies := make([][]byte, 0, 5)
+	for i := 0; i < 5; i++ {
+		bodies = append(bodies, <-results)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(batchSizes) != 1 {
+		t.Errorf("HTTP POST count = %d, want 1", len(batchSizes))
+	}
+	if batchSizes[0] != 1 {
+		t.Errorf("batch size = %d, want 1 (coalesced)", batchSizes[0])
+	}
+	// All 5 callers should get the same body.
+	for i, b := range bodies {
+		if string(b) != string(bodies[0]) {
+			t.Errorf("body[%d] != body[0]: %q vs %q", i, b, bodies[0])
+		}
+	}
+}
+
+func TestBatcher_MaxBatchTriggersImmediateFlush(t *testing.T) {
+	var batchSizes []int
+	var mu sync.Mutex
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var batch []json.RawMessage
+		_ = json.Unmarshal(body, &batch)
+		mu.Lock()
+		batchSizes = append(batchSizes, len(batch))
+		mu.Unlock()
+		responses := make([]json.RawMessage, len(batch))
+		for i := range batch {
+			responses[i] = json.RawMessage(`{}`)
+		}
+		out, _ := json.Marshal(responses)
+		_, _ = w.Write(out)
+	}
+	// Long window — only maxBatch should trigger flush.
+	srv := httptest.NewServer(http.HandlerFunc(handler))
+	defer srv.Close()
+	cli := NewWithURL(srv.URL, NewSemaphore(30))
+	b := newBatcher(cli, 5*time.Second, 4, 256) // maxBatch=4
+	b.Start()
+	defer b.Close()
+
+	ctx := context.Background()
+	start := time.Now()
+	results := make(chan error, 4)
+	for i := 0; i < 4; i++ {
+		go func(i int) {
+			_, err := b.Submit(ctx, fmt.Sprintf("/show/path-%d/", i))
+			results <- err
+		}(i)
+	}
+	for i := 0; i < 4; i++ {
+		<-results
+	}
+	elapsed := time.Since(start)
+	if elapsed > time.Second {
+		t.Errorf("flush took %v — should be immediate via maxBatch trigger", elapsed)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(batchSizes) != 1 || batchSizes[0] != 4 {
+		t.Errorf("batches = %v, want [4]", batchSizes)
 	}
 }
 
