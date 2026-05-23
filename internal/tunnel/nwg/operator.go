@@ -598,7 +598,6 @@ func (o *OperatorNativeWG) GetPingCheckStatus(ctx context.Context, stored *stora
 			status.Port = stored.PingCheck.Port
 		}
 	}
-	o.appLog.Info("show-pingcheck", profile, fmt.Sprintf("exists=%v host=%s status=%s", status.Exists, status.Host, status.Status))
 	return status, nil
 }
 
