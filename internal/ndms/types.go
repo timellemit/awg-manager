@@ -42,7 +42,7 @@ type ProxyInfo struct {
 }
 
 // Peer is one peer entry under an NDMS wireguard interface —
-// populated from /show/interface/{name}/wireguard/peer.
+// populated from the .wireguard.peer field of /show/interface/{name}.
 type Peer struct {
 	PublicKey              string    `json:"publicKey"`
 	Description            string    `json:"description,omitempty"`

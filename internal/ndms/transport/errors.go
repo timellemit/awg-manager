@@ -26,8 +26,8 @@ var (
 
 // HTTPError is returned by Client.Get / GetRaw / Post when NDMS replies
 // with a non-2xx status. Typed so callers can match on Status — e.g.
-// a 404 on /show/interface/<name>/wireguard/peer means "no peers",
-// not a real error.
+// PeerStore treats a 404 on /show/interface/<name> as "interface gone,
+// no peers" rather than a real error.
 type HTTPError struct {
 	Method string
 	Path   string

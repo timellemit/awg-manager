@@ -19,7 +19,6 @@ import (
 //	"/show/interface/"                            → cmd {"show":{"interface":{}}}, unwrap ["show","interface"]
 //	"/show/interface/Wireguard0"                  → cmd {"show":{"interface":{"name":"Wireguard0"}}}, unwrap ["show","interface"]
 //	"/show/interface/system-name?name=Wireguard0" → cmd {"show":{"interface":{"system-name":{"name":"Wireguard0"}}}}, unwrap ["show","interface","system-name"]
-//	"/show/interface/Wireguard0/wireguard/peer"   → cmd {"show":{"interface":{"name":"Wireguard0","wireguard":{"peer":{}}}}}, unwrap ["show","interface","wireguard","peer"]
 //	"/show/sc/dns-proxy/route"                    → cmd {"show":{"sc":{"dns-proxy":{"route":{}}}}}, unwrap ["show","sc","dns-proxy","route"]
 //	"/show/running-config"                        → cmd {"show":{"running-config":{}}}, unwrap ["show","running-config"]
 //
@@ -62,52 +61,6 @@ func pathToCommand(path string) (any, []string, error) {
 			}
 			leafParams[kv[:eq]] = kv[eq+1:]
 		}
-	}
-
-	// "/show/.../interface/<name>/<tail...>" — the segment right after a
-	// literal "interface" segment is the interface NAME ({name:...} param),
-	// not a command key, and any tail (e.g. wireguard/peer, wireguard/asc)
-	// nests under the interface node alongside name. Without this, <name> is
-	// emitted as a literal command key; NDMS then returns an empty/object
-	// envelope instead of the array a direct GET gives — the batched
-	// peer/asc fetch then fails to decode (json: object into []peerWire).
-	// Engaged only when a tail follows the name, so the no-tail forms
-	// (/show/interface/<name>, /show/interface/) and the terminal
-	// /show/interface/system-name?name=... lookup fall through below.
-	ifIdx := -1
-	for i, s := range segments {
-		if s == "interface" {
-			ifIdx = i
-			break
-		}
-	}
-	if ifIdx >= 0 && len(segments) >= ifIdx+3 {
-		name := segments[ifIdx+1]
-		tail := segments[ifIdx+2:] // ≥1 segment; tail[len-1] is the leaf
-		prefix := segments[:ifIdx] // e.g. ["show"] or ["show","rc"]
-
-		var leafVal any = map[string]any{}
-		if leafParams != nil {
-			leafVal = leafParams
-		}
-		sub := leafVal
-		for i := len(tail) - 1; i >= 1; i-- {
-			sub = map[string]any{tail[i]: sub}
-		}
-		ifaceNode := map[string]any{"name": name, tail[0]: sub}
-
-		var cur any = map[string]any{"interface": ifaceNode}
-		for i := len(prefix) - 1; i >= 0; i-- {
-			cur = map[string]any{prefix[i]: cur}
-		}
-
-		// unwrap walks the command path WITHOUT the name value — NDMS wraps
-		// the response item by command keys only, never by the name.
-		unwrapKeys := make([]string, 0, len(prefix)+1+len(tail))
-		unwrapKeys = append(unwrapKeys, prefix...)
-		unwrapKeys = append(unwrapKeys, "interface")
-		unwrapKeys = append(unwrapKeys, tail...)
-		return cur, unwrapKeys, nil
 	}
 
 	var leafKey string

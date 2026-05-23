@@ -34,25 +34,6 @@ func TestPathToCommand(t *testing.T) {
 			[]string{"show", "interface", "system-name"},
 			false,
 		},
-		// Regression: батчер кодировал /show/interface/<name>/wireguard/peer
-		// как {show:{interface:{<name>:{wireguard:{peer:{}}}}}} — имя уходило
-		// литеральным ключом, NDMS возвращал object вместо массива, и
-		// PeerStore падал на decode (object into []peerWire) каждые ~5с. Имя
-		// должно быть {name:...} параметром узла interface, хвост — рядом.
-		{
-			"nested interface peer — name is a param, tail nests alongside",
-			"/show/interface/Wireguard0/wireguard/peer",
-			map[string]any{"show": map[string]any{"interface": map[string]any{"name": "Wireguard0", "wireguard": map[string]any{"peer": map[string]any{}}}}},
-			[]string{"show", "interface", "wireguard", "peer"},
-			false,
-		},
-		{
-			"nested rc interface asc — interface not at index 1",
-			"/show/rc/interface/Wireguard0/wireguard/asc",
-			map[string]any{"show": map[string]any{"rc": map[string]any{"interface": map[string]any{"name": "Wireguard0", "wireguard": map[string]any{"asc": map[string]any{}}}}}},
-			[]string{"show", "rc", "interface", "wireguard", "asc"},
-			false,
-		},
 		{
 			"deep nested",
 			"/show/sc/dns-proxy/route",
