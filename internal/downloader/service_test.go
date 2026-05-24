@@ -4,6 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -37,8 +42,9 @@ func (f *fakeRouteProvider) GetDownloadRoute(context.Context) (*Route, error) {
 type fakeSingbox struct {
 	running bool
 
-	selectorCalls []string
-	selectorErrs  []error
+	selectorCalls          []string
+	selectorErrs           []error
+	selectorCtxHasDeadline []bool
 
 	activeNow  string
 	activeErrs []error
@@ -51,7 +57,9 @@ func (f *fakeSingbox) IsRunning() (bool, int) {
 	return false, 0
 }
 
-func (f *fakeSingbox) SetSelectorDefault(_ context.Context, selectorTag, memberTag string) error {
+func (f *fakeSingbox) SetSelectorDefault(ctx context.Context, selectorTag, memberTag string) error {
+	_, hasDeadline := ctx.Deadline()
+	f.selectorCtxHasDeadline = append(f.selectorCtxHasDeadline, hasDeadline)
 	f.selectorCalls = append(f.selectorCalls, selectorTag+"="+memberTag)
 	f.activeNow = memberTag
 	if len(f.selectorErrs) == 0 {
@@ -289,6 +297,9 @@ func TestResolveClient_HappyPath(t *testing.T) {
 	if len(sb.selectorCalls) < 2 || sb.selectorCalls[len(sb.selectorCalls)-1] != "awgm-download-selector=direct" {
 		t.Fatalf("expected selector restore to direct, got %v", sb.selectorCalls)
 	}
+	if len(sb.selectorCtxHasDeadline) == 0 || !sb.selectorCtxHasDeadline[len(sb.selectorCtxHasDeadline)-1] {
+		t.Fatalf("expected cleanup selector restore to use bounded context, deadlines=%v", sb.selectorCtxHasDeadline)
+	}
 	if len(slot.enableCalls) < 2 || slot.enableCalls[len(slot.enableCalls)-1] != false {
 		t.Fatalf("expected disable call on cleanup, got %v", slot.enableCalls)
 	}
@@ -300,6 +311,7 @@ func TestResolveClient_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second resolve should not deadlock: %v", err)
 	}
+	assertRoutedTransportProxy(t, lease2.Client)
 	lease2.Close()
 }
 
@@ -532,5 +544,141 @@ func assertSlotJSON(t *testing.T, raw string) {
 	}
 	if rule["inbound"] != "awgm-download-in" || rule["outbound"] != "awgm-download-selector" {
 		t.Fatalf("unexpected route rule: %+v", rule)
+	}
+}
+
+func assertRoutedTransportProxy(t *testing.T, client *http.Client) {
+	t.Helper()
+	if client == nil {
+		t.Fatal("client is nil")
+	}
+	tr, ok := client.Transport.(*http.Transport)
+	if !ok || tr == nil {
+		t.Fatalf("expected *http.Transport, got %T", client.Transport)
+	}
+	reqURL, err := url.Parse("https://example.org/file.dat")
+	if err != nil {
+		t.Fatalf("parse request url: %v", err)
+	}
+	proxyURL, err := tr.Proxy(&http.Request{URL: reqURL})
+	if err != nil {
+		t.Fatalf("proxy func returned error: %v", err)
+	}
+	if proxyURL == nil {
+		t.Fatal("expected non-nil proxy URL for routed transport")
+	}
+	if proxyURL.Host != "127.0.0.1:11998" {
+		t.Fatalf("proxy host = %q, want 127.0.0.1:11998", proxyURL.Host)
+	}
+}
+
+func TestReadAll_Direct(t *testing.T) {
+	svc := NewService(Deps{})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("ok-body"))
+	}))
+	defer ts.Close()
+
+	body, meta, err := svc.ReadAll(context.Background(), Request{
+		Purpose:      "test-readall",
+		URL:          ts.URL,
+		MaxBodyBytes: 64,
+		RouteOverride: &Route{
+			Tag: "direct",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if string(body) != "ok-body" {
+		t.Fatalf("body = %q, want ok-body", string(body))
+	}
+	if meta.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", meta.StatusCode)
+	}
+	if meta.Route.Tag != "direct" {
+		t.Fatalf("route tag = %q, want direct", meta.Route.Tag)
+	}
+}
+
+func TestReadAll_ExceedsLimit(t *testing.T) {
+	svc := NewService(Deps{})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("1234567890"))
+	}))
+	defer ts.Close()
+
+	_, _, err := svc.ReadAll(context.Background(), Request{
+		Purpose:      "test-readall-limit",
+		URL:          ts.URL,
+		MaxBodyBytes: 4,
+	})
+	if err == nil || !strings.Contains(err.Error(), "exceeds limit") {
+		t.Fatalf("expected exceeds limit error, got %v", err)
+	}
+}
+
+func TestDownloadFile_Atomic(t *testing.T) {
+	svc := NewService(Deps{})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("file-content"))
+	}))
+	defer ts.Close()
+
+	tmp := t.TempDir()
+	dest := filepath.Join(tmp, "pkg.ipk")
+	res, err := svc.DownloadFile(context.Background(), FileRequest{
+		Request: Request{
+			Purpose: "test-download",
+			URL:     ts.URL,
+		},
+		DestPath:     dest,
+		MaxFileBytes: 128,
+		Atomic:       true,
+	})
+	if err != nil {
+		t.Fatalf("DownloadFile: %v", err)
+	}
+	if res.Path != dest {
+		t.Fatalf("result path = %q, want %q", res.Path, dest)
+	}
+	data, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("read dest: %v", err)
+	}
+	if string(data) != "file-content" {
+		t.Fatalf("dest body = %q, want file-content", string(data))
+	}
+}
+
+func TestDownloadFile_OverLimitCleansTemp(t *testing.T) {
+	svc := NewService(Deps{})
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("1234567890"))
+	}))
+	defer ts.Close()
+
+	tmp := t.TempDir()
+	dest := filepath.Join(tmp, "pkg.ipk")
+	tmpPath := filepath.Join(tmp, "pkg.tmp")
+	_, err := svc.DownloadFile(context.Background(), FileRequest{
+		Request: Request{
+			Purpose: "test-overlimit",
+			URL:     ts.URL,
+		},
+		DestPath:     dest,
+		TempPath:     tmpPath,
+		MaxFileBytes: 4,
+		Atomic:       true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "exceeds limit") {
+		t.Fatalf("expected over-limit error, got %v", err)
+	}
+	if _, statErr := os.Stat(tmpPath); !os.IsNotExist(statErr) {
+		t.Fatalf("temp file should be removed, stat err=%v", statErr)
+	}
+	if _, statErr := os.Stat(dest); !os.IsNotExist(statErr) {
+		t.Fatalf("dest file should not exist, stat err=%v", statErr)
 	}
 }

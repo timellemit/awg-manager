@@ -245,6 +245,18 @@
 		}
 	}
 
+	function currentDownloadRouteLabel(): string {
+		const tag = settings?.download?.routeTag?.trim() || 'direct';
+		const match = downloadOutbounds.find((ob) => ob.tag === tag);
+		if (match) {
+			return `${match.label}${match.detail ? ` - ${match.detail}` : ''}${match.available ? '' : ' (недоступен)'}`;
+		}
+		if (tag === 'direct') {
+			return 'Direct (WAN) - без туннеля';
+		}
+		return `Недоступный маршрут: ${tag}`;
+	}
+
 	function scrollToSettingsHashTarget() {
 		if (typeof window === "undefined") return;
 		if (window.location.hash !== "#downloads") return;
@@ -607,8 +619,13 @@ onMount(() => {
 				/>
 
 				<div class="card">
-					<div class="section-label">Обновление</div>
-					<UpdateSection bind:updateInfo />
+					<div class="section-label section-label-with-route">
+						<span>Обновление AWGM</span>
+						<span class="section-label-route" title={currentDownloadRouteLabel()}>
+							(через {currentDownloadRouteLabel()})
+						</span>
+					</div>
+					<UpdateSection bind:updateInfo downloadRouteLabel={currentDownloadRouteLabel()} />
 				</div>
 
 				<IntegrationsCard
@@ -919,6 +936,24 @@ onMount(() => {
 		gap: 0.375rem;
 		flex-shrink: 0;
 		align-items: center;
+	}
+
+	.section-label-with-route {
+		display: flex;
+		align-items: baseline;
+		gap: 0.45rem;
+		min-width: 0;
+	}
+
+	.section-label-route {
+		text-transform: none;
+		letter-spacing: normal;
+		font-weight: 500;
+		opacity: 0.9;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		min-width: 0;
 	}
 
 	.api-key-controls {

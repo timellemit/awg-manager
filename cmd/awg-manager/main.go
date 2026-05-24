@@ -31,6 +31,7 @@ import (
 	"github.com/hoaxisr/awg-manager/internal/diagnostics"
 	"github.com/hoaxisr/awg-manager/internal/dnscheck"
 	"github.com/hoaxisr/awg-manager/internal/dnsroute"
+	"github.com/hoaxisr/awg-manager/internal/downloader"
 	"github.com/hoaxisr/awg-manager/internal/events"
 	"github.com/hoaxisr/awg-manager/internal/hydraroute"
 	"github.com/hoaxisr/awg-manager/internal/logging"
@@ -1023,6 +1024,12 @@ func main() {
 	if err := deviceProxySvc.Reconcile(context.Background()); err != nil {
 		bootLog.Warn("deviceproxy-reconcile", "", err.Error())
 	}
+	updaterService.SetDownloader(downloader.NewSettingsBackedService(
+		deviceProxySvc,
+		singboxOp,
+		sbOrch,
+		settingsStore,
+	))
 
 	srv.SetDeviceProxyService(deviceProxySvc)
 	// Note: legacy awg-* outbound cleanup happens lazily on first

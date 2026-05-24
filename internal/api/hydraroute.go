@@ -1,11 +1,9 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/hoaxisr/awg-manager/internal/deviceproxy"
 	"github.com/hoaxisr/awg-manager/internal/downloader"
@@ -208,64 +206,6 @@ type HydraRouteHandler struct {
 	downloadSvc *downloader.Service
 }
 
-type downloadSingboxAdapter struct {
-	op *singbox.Operator
-}
-
-var _ downloader.SingboxOperator = (*downloadSingboxAdapter)(nil)
-
-type downloadDeviceProxyAdapter struct {
-	svc *deviceproxy.Service
-}
-
-type downloadSettingsRouteProvider struct {
-	store *storage.SettingsStore
-}
-
-func (a *downloadDeviceProxyAdapter) ListDownloadOutbounds(ctx context.Context) []downloader.Outbound {
-	if a == nil || a.svc == nil {
-		return nil
-	}
-	src := a.svc.ListOutbounds(ctx)
-	out := make([]downloader.Outbound, 0, len(src))
-	for _, ob := range src {
-		out = append(out, downloader.Outbound{
-			Tag:    ob.Tag,
-			Kind:   ob.Kind,
-			Label:  ob.Label,
-			Detail: ob.Detail,
-		})
-	}
-	return out
-}
-
-func (a *downloadSingboxAdapter) IsRunning() (bool, int) {
-	return a.op.IsRunningPublic()
-}
-
-func (a *downloadSingboxAdapter) SetSelectorDefault(ctx context.Context, selectorTag, memberTag string) error {
-	return a.op.SetSelectorDefault(ctx, selectorTag, memberTag)
-}
-
-func (a *downloadSingboxAdapter) GetSelectorActive(ctx context.Context, selectorTag string) (string, error) {
-	return a.op.GetSelectorActive(ctx, selectorTag)
-}
-
-func (p *downloadSettingsRouteProvider) GetDownloadRoute(ctx context.Context) (*downloader.Route, error) {
-	if p == nil || p.store == nil {
-		return &downloader.Route{Tag: "direct"}, nil
-	}
-	st, err := p.store.Get()
-	if err != nil {
-		return nil, err
-	}
-	tag := strings.TrimSpace(st.Download.RouteTag)
-	if tag == "" {
-		tag = "direct"
-	}
-	return &downloader.Route{Tag: tag}, nil
-}
-
 // NewHydraRouteHandler creates a new HydraRoute settings handler.
 func NewHydraRouteHandler(svc *hydraroute.Service) *HydraRouteHandler {
 	return &HydraRouteHandler{
@@ -278,22 +218,14 @@ func (h *HydraRouteHandler) SetDeviceProxyService(svc *deviceproxy.Service) {
 	if h.downloadSvc == nil {
 		h.downloadSvc = downloader.NewService(downloader.Deps{})
 	}
-	if svc == nil {
-		h.downloadSvc.SetOutboundsProvider(nil)
-		return
-	}
-	h.downloadSvc.SetOutboundsProvider(&downloadDeviceProxyAdapter{svc: svc})
+	h.downloadSvc.SetOutboundsProvider(downloader.NewDeviceProxyOutboundsProvider(svc))
 }
 
 func (h *HydraRouteHandler) SetSingboxOperator(op *singbox.Operator) {
 	if h.downloadSvc == nil {
 		h.downloadSvc = downloader.NewService(downloader.Deps{})
 	}
-	if op == nil {
-		h.downloadSvc.SetSingboxOperator(nil)
-		return
-	}
-	h.downloadSvc.SetSingboxOperator(&downloadSingboxAdapter{op: op})
+	h.downloadSvc.SetSingboxOperator(downloader.NewSingboxOperatorAdapter(op))
 }
 
 func (h *HydraRouteHandler) SetSingboxOrchestrator(orch *singboxorch.Orchestrator) {
@@ -307,11 +239,7 @@ func (h *HydraRouteHandler) SetSettingsStore(store *storage.SettingsStore) {
 	if h.downloadSvc == nil {
 		h.downloadSvc = downloader.NewService(downloader.Deps{})
 	}
-	if store == nil {
-		h.downloadSvc.SetRouteProvider(nil)
-		return
-	}
-	h.downloadSvc.SetRouteProvider(&downloadSettingsRouteProvider{store: store})
+	h.downloadSvc.SetRouteProvider(downloader.NewSettingsRouteProvider(store))
 }
 
 func toDownloaderRoute(route *DownloadRouteDTO) *downloader.Route {

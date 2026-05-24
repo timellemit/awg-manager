@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hoaxisr/awg-manager/internal/deviceproxy"
 	"github.com/hoaxisr/awg-manager/internal/downloader"
 	"github.com/hoaxisr/awg-manager/internal/storage"
 )
@@ -44,9 +43,13 @@ func TestListDownloadOutbounds_NoDeviceProxy(t *testing.T) {
 }
 
 func TestDownloadDeviceProxyAdapter(t *testing.T) {
-	svc := &deviceproxy.Service{}
-	adapter := &downloadDeviceProxyAdapter{svc: svc}
-	list := adapter.ListDownloadOutbounds(context.Background())
+	adapter := downloader.NewDeviceProxyOutboundsProvider(nil)
+	if adapter != nil {
+		t.Fatalf("nil service should produce nil provider")
+	}
+	h := NewHydraRouteHandler(nil)
+	h.SetDeviceProxyService(nil)
+	list := h.downloadSvc.ListOutbounds(context.Background())
 	if len(list) == 0 {
 		t.Fatal("expected at least direct outbound")
 	}
@@ -56,7 +59,9 @@ func TestDownloadDeviceProxyAdapter(t *testing.T) {
 }
 
 func TestDownloadSingboxInterfaceAssertion(t *testing.T) {
-	var _ downloader.SingboxOperator = (*downloadSingboxAdapter)(nil)
+	if got := downloader.NewSingboxOperatorAdapter(nil); got != nil {
+		t.Fatalf("nil singbox op should produce nil adapter")
+	}
 }
 
 func TestDownloadSettingsRouteProvider_DefaultDirect(t *testing.T) {
@@ -65,7 +70,7 @@ func TestDownloadSettingsRouteProvider_DefaultDirect(t *testing.T) {
 	if _, err := store.Load(); err != nil {
 		t.Fatalf("load settings: %v", err)
 	}
-	p := &downloadSettingsRouteProvider{store: store}
+	p := downloader.NewSettingsRouteProvider(store)
 	route, err := p.GetDownloadRoute(context.Background())
 	if err != nil {
 		t.Fatalf("get route: %v", err)
@@ -86,7 +91,7 @@ func TestDownloadSettingsRouteProvider_UsesStoredTag(t *testing.T) {
 	if err := store.Save(st); err != nil {
 		t.Fatalf("save settings: %v", err)
 	}
-	p := &downloadSettingsRouteProvider{store: store}
+	p := downloader.NewSettingsRouteProvider(store)
 	route, err := p.GetDownloadRoute(context.Background())
 	if err != nil {
 		t.Fatalf("get route: %v", err)

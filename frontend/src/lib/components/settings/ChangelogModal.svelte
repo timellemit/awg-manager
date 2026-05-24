@@ -9,10 +9,11 @@
 		open: boolean;
 		fromVersion: string;
 		toVersion: string;
+		sourceLabel?: string;
 		onclose: () => void;
 	}
 
-	let { open, fromVersion, toVersion, onclose }: Props = $props();
+	let { open, fromVersion, toVersion, sourceLabel = '', onclose }: Props = $props();
 
 	let loading = $state(false);
 	let error = $state('');
@@ -38,6 +39,9 @@
 
 <Modal {open} title="Что нового" size="lg" {onclose}>
 	<div class="modal-body">
+		{#if sourceLabel}
+			<p class="source-msg">(получено через {sourceLabel})</p>
+		{/if}
 		{#if loading}
 			<LoadingSpinner />
 		{:else if error}
@@ -62,6 +66,11 @@
 		margin: 0;
 		padding: 12px 0;
 		color: var(--text-muted);
+	}
+	.source-msg {
+		margin: 0 0 8px 0;
+		color: var(--text-muted);
+		font-size: 0.95rem;
 	}
 	.state-error {
 		color: var(--error);

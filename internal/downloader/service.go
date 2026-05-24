@@ -20,6 +20,7 @@ const (
 	downloadProxySelectorTag = "awgm-download-selector"
 	downloadProxyListenHost  = "127.0.0.1"
 	downloadProxyListenPort  = 11998
+	downloadCleanupTimeout   = 5 * time.Second
 )
 
 type Deps struct {
@@ -189,10 +190,15 @@ func (s *Service) ResolveClient(ctx context.Context, route *Route) (*Lease, erro
 		Scheme: "http",
 		Host:   net.JoinHostPort(downloadProxyListenHost, fmt.Sprintf("%d", downloadProxyListenPort)),
 	}
+	transport := &http.Transport{
+		Proxy: http.ProxyURL(proxyURL),
+	}
+	if dt, ok := http.DefaultTransport.(*http.Transport); ok && dt != nil {
+		transport = dt.Clone()
+		transport.Proxy = http.ProxyURL(proxyURL)
+	}
 	client := &http.Client{
-		Transport: &http.Transport{
-			Proxy: http.ProxyURL(proxyURL),
-		},
+		Transport: transport,
 	}
 	lease := &Lease{
 		Client: client,
@@ -358,9 +364,11 @@ func (s *Service) readSelectorActiveWithRetry(ctx context.Context, op SingboxOpe
 
 func (s *Service) cleanupDownloadProxySlotLocked(op SingboxOperator, slot SlotController) {
 	if op != nil {
-		if err := op.SetSelectorDefault(context.Background(), downloadProxySelectorTag, "direct"); err != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), downloadCleanupTimeout)
+		if err := op.SetSelectorDefault(cleanupCtx, downloadProxySelectorTag, "direct"); err != nil {
 			slog.Warn("downloader: failed to restore selector to direct", "error", err)
 		}
+		cancel()
 	}
 	if slot == nil {
 		return
