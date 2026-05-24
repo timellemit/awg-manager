@@ -55,18 +55,28 @@ type OperatorNativeWG struct {
 	// to persist storage.AWGTunnel.ResolvedEndpointIP.
 	trackedMu sync.RWMutex
 	trackedIP map[string]string
+
+	// supportsASC reports native ASC firmware support. Default:
+	// ndmsinfo.SupportsWireguardASC; overridable in tests.
+	supportsASC func() bool
+	// hasProxySlot reports a live kmod proxy slot on a listen port. Default:
+	// kmod.HasSlotListening; overridable in tests.
+	hasProxySlot func(listenPort int) bool
 }
 
 // NewOperator creates a new NativeWG operator.
 func NewOperator(queries *query.Queries, commands *command.Commands, tr *transport.Client, appLogger logging.AppLogger) *OperatorNativeWG {
-	return &OperatorNativeWG{
-		queries:   queries,
-		commands:  commands,
-		transport: tr,
-		kmod:      NewKmodManager(appLogger),
-		appLog:    logging.NewScopedLogger(appLogger, logging.GroupTunnel, logging.SubOps),
-		resolveFn: netutil.ResolveEndpoint,
+	op := &OperatorNativeWG{
+		queries:     queries,
+		commands:    commands,
+		transport:   tr,
+		kmod:        NewKmodManager(appLogger),
+		appLog:      logging.NewScopedLogger(appLogger, logging.GroupTunnel, logging.SubOps),
+		resolveFn:   netutil.ResolveEndpoint,
+		supportsASC: ndmsinfo.SupportsWireguardASC,
 	}
+	op.hasProxySlot = op.kmod.HasSlotListening
+	return op
 }
 
 // SetHookNotifier sets the hook notifier for registering expected NDMS hooks.
@@ -460,6 +470,30 @@ func (o *OperatorNativeWG) Delete(ctx context.Context, stored *storage.AWGTunnel
 	return nil
 }
 
+// classifyNWGState decides the tunnel State for a NativeWG interface from parsed
+// RCI state. For the awg_proxy path (no ASC), conf=running with an offline peer is
+// StateBroken when the config is incoherent — NDMS peer not pointing at 127.0.0.1
+// or no live kmod slot on the peer's remote-port — otherwise StateStarting.
+// hasProxySlot is only consulted on the proxy path with an offline peer.
+func classifyNWGState(rci NWGState, supportsASC bool, hasProxySlot func(listenPort int) bool) tunnel.State {
+	switch {
+	case rci.ConfLayer == "running" && rci.PeerOnline:
+		return tunnel.StateRunning
+	case rci.ConfLayer == "running" && !rci.PeerOnline:
+		if supportsASC {
+			return tunnel.StateStarting
+		}
+		if rci.PeerRemoteAddr != "127.0.0.1" || !hasProxySlot(rci.PeerRemotePort) {
+			return tunnel.StateBroken
+		}
+		return tunnel.StateStarting
+	case rci.ConfLayer == "disabled":
+		return tunnel.StateStopped
+	default:
+		return tunnel.StateUnknown
+	}
+}
+
 // GetState returns the state of a NativeWG tunnel via RCI.
 // KmodManager does NOT participate in state detection — RCI is the single source of truth.
 func (o *OperatorNativeWG) GetState(ctx context.Context, stored *storage.AWGTunnel) tunnel.StateInfo {
@@ -494,21 +528,12 @@ func (o *OperatorNativeWG) GetState(ctx context.Context, stored *storage.AWGTunn
 
 	o.appLog.Debug("state", stored.Name, fmt.Sprintf("RCI state: conf=%s link=%v peer=%v", rciState.ConfLayer, rciState.LinkUp, rciState.PeerOnline))
 
-	// State matrix (simplified — no proxy/kmod tracking needed):
-	//   ConfLayer==running && PeerOnline     -> StateRunning
-	//   ConfLayer==running && !PeerOnline    -> StateStarting
-	//   ConfLayer==disabled                  -> StateStopped
-	//   !Exists                              -> StateNotCreated
-	switch {
-	case rciState.ConfLayer == "running" && rciState.PeerOnline:
-		info.State = tunnel.StateRunning
-	case rciState.ConfLayer == "running" && !rciState.PeerOnline:
-		info.State = tunnel.StateStarting
-	case rciState.ConfLayer == "disabled":
-		info.State = tunnel.StateStopped
-	default:
-		info.State = tunnel.StateUnknown
-	}
+	// State (see classifyNWGState):
+	//   running & peer online                         -> Running
+	//   running & peer offline & proxy & incoherent   -> Broken
+	//   running & peer offline (coherent / ASC)        -> Starting
+	//   disabled                                       -> Stopped
+	info.State = classifyNWGState(rciState, o.supportsASC(), o.hasProxySlot)
 
 	return info
 }
