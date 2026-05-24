@@ -215,15 +215,32 @@
 		return systemInfoInFlight;
 	}
 
-	async function refreshDownloadOutbounds() {
+	async function refreshDownloadOutbounds(showNotification = true) {
 		downloadOutboundsLoading = true;
 		downloadOutboundsError = '';
 		try {
 			const list = await api.listDownloadOutbounds();
 			downloadOutbounds = list;
+			if (showNotification) {
+				const tunnelCount = list.filter((ob) => ob.tag !== 'direct').length;
+				const availableTunnelCount = list.filter((ob) => ob.tag !== 'direct' && ob.available).length;
+				notifications.success(
+					tunnelCount > 0
+						? `Маршруты обновлены: найдено ${tunnelCount} туннелей (${availableTunnelCount} доступно)`
+						: 'Маршруты обновлены: туннели не найдены (доступен только Direct)'
+				);
+			}
 		} catch (e) {
 			downloadOutbounds = [];
-			downloadOutboundsError = e instanceof Error ? e.message : 'Не удалось загрузить список маршрутов';
+			const err = e as (Error & { status?: number; body?: { code?: string; message?: string } });
+			const code = err?.body?.code || '';
+			const message = err?.body?.message || err?.message || 'Не удалось загрузить список маршрутов';
+			const statusPart = err?.status ? ` [HTTP ${err.status}]` : '';
+			const codePart = code ? ` (${code})` : '';
+			downloadOutboundsError = `${message}${statusPart}${codePart}`;
+			if (showNotification) {
+				notifications.error(`Ошибка обновления маршрутов: ${downloadOutboundsError}`);
+			}
 		} finally {
 			downloadOutboundsLoading = false;
 		}
@@ -291,7 +308,7 @@ onMount(() => {
 			]);
 			settings = appSettings;
 			setGlobalSettings(appSettings);
-			await refreshDownloadOutbounds();
+			await refreshDownloadOutbounds(false);
 			scrollToSettingsHashTarget();
 		} catch (e) {
 			notifications.error(e instanceof Error ? e.message : "Не удалось загрузить настройки");
