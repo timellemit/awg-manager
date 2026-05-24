@@ -156,6 +156,35 @@ func TestParseRCIResponse_NoWireguardSection(t *testing.T) {
 	}
 }
 
+func TestParseRCIInterfaceResponse_PeerEndpoint(t *testing.T) {
+	const j = `{
+      "id": "Wireguard0",
+      "link": "up",
+      "wireguard": {
+        "listen-port": 42109,
+        "status": "up",
+        "peer": [{
+          "public-key": "k",
+          "remote-port": 51958,
+          "remote-endpoint-address": "127.0.0.1",
+          "online": false,
+          "last-handshake": 200
+        }]
+      },
+      "summary": { "layer": { "conf": "running" } }
+    }`
+	state, err := parseRCIInterfaceResponse([]byte(j))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	if state.PeerRemoteAddr != "127.0.0.1" {
+		t.Errorf("PeerRemoteAddr = %q, want 127.0.0.1", state.PeerRemoteAddr)
+	}
+	if state.PeerRemotePort != 51958 {
+		t.Errorf("PeerRemotePort = %d, want 51958", state.PeerRemotePort)
+	}
+}
+
 func TestParseRCIInterfaceList(t *testing.T) {
 	data := []byte(`{
 		"ISP": {"id": "ISP", "type": "PPPoE"},

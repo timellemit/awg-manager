@@ -17,16 +17,18 @@ const neverHandshake int64 = types.NeverHandshake
 // NWGState holds parsed state from an RCI response for a single
 // Wireguard interface.
 type NWGState struct {
-	Exists        bool
-	ConfLayer     string // "running" | "disabled"
-	LinkUp        bool
-	WGStatus      string // "up" | "down"
-	PeerOnline    bool
-	LastHandshake int64  // unix timestamp, 2147483647 = never
-	RxBytes       int64
-	TxBytes       int64
-	PeerVia       string // NDMS WAN name from peer "via" field (e.g. "PPPoE0")
-	Connected     string // RFC3339 timestamp converted from NDMS "connected" field (unix ts or string)
+	Exists         bool
+	ConfLayer      string // "running" | "disabled"
+	LinkUp         bool
+	WGStatus       string // "up" | "down"
+	PeerOnline     bool
+	LastHandshake  int64 // unix timestamp, 2147483647 = never
+	RxBytes        int64
+	TxBytes        int64
+	PeerVia        string // NDMS WAN name from peer "via" field (e.g. "PPPoE0")
+	PeerRemoteAddr string // peer "remote-endpoint-address" (127.0.0.1 for proxy path)
+	PeerRemotePort int    // peer "remote-port" (kmod proxy listen port for proxy path)
+	Connected      string // RFC3339 timestamp converted from NDMS "connected" field (unix ts or string)
 }
 
 // parseRCIInterfaceResponse parses a raw RCI JSON response for a single
@@ -66,6 +68,8 @@ func parseRCIInterfaceResponse(data []byte) (NWGState, error) {
 			state.RxBytes = peer.RxBytes
 			state.TxBytes = peer.TxBytes
 			state.PeerVia = peer.Via
+			state.PeerRemoteAddr = peer.RemoteEndpointAddress
+			state.PeerRemotePort = peer.RemotePort
 		}
 	}
 
@@ -125,4 +129,3 @@ func parseRCIInterfaceList(data []byte) ([]string, error) {
 	}
 	return names, nil
 }
-
