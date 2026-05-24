@@ -13,12 +13,16 @@
 	let error = $state<string | null>(null);
 	let outbound = $state<Record<string, any> | null>(null);
 	let protocol = $state<string>('');
+	let editableTag = $state('');
+	let initialOutboundFingerprint = '';
 
 	onMount(async () => {
 		try {
 			const r = await api.singboxGetTunnel(tag);
 			outbound = r.outbound as Record<string, any>;
 			protocol = outbound?.type ?? '';
+			editableTag = r.tag;
+			initialOutboundFingerprint = outboundFingerprint(outbound);
 		} catch (e) {
 			error = e instanceof Error ? e.message : String(e);
 		} finally {
@@ -28,11 +32,26 @@
 
 	async function save(): Promise<void> {
 		if (!outbound) return;
+		const nextTag = editableTag.trim();
+		if (!nextTag) {
+			error = 'Название / tag обязательно';
+			return;
+		}
 		saving = true;
 		error = null;
 		try {
-			const fresh = await api.singboxUpdateTunnel(tag, outbound);
-			singboxTunnels.applyMutationResponse(fresh);
+			outbound = { ...outbound, tag: nextTag };
+			const tagChanged = nextTag !== tag;
+			const outboundChanged = outboundFingerprint(outbound) !== initialOutboundFingerprint;
+			let fresh = $singboxTunnels.data ?? [];
+			if (tagChanged) {
+				fresh = await api.singboxRenameTunnel(tag, nextTag);
+				singboxTunnels.applyMutationResponse(fresh);
+			}
+			if (outboundChanged) {
+				fresh = await api.singboxUpdateTunnel(nextTag, outbound);
+				singboxTunnels.applyMutationResponse(fresh);
+			}
 			goto('/?tab=singbox');
 		} catch (e) {
 			error = e instanceof Error ? e.message : String(e);
@@ -72,6 +91,12 @@
 			.filter(Boolean);
 		return parts.length > 0 ? parts : undefined;
 	}
+
+	function outboundFingerprint(value: Record<string, any> | null): string {
+		if (!value) return '';
+		const { tag: _tag, ...rest } = value;
+		return JSON.stringify(rest);
+	}
 </script>
 
 <svelte:head>
@@ -107,8 +132,18 @@
 		<div class="py-12 text-center text-error-500">{error ?? 'Туннель не найден'}</div>
 	{:else}
 		<form onsubmit={(e) => { e.preventDefault(); save(); }}>
-			<div class="section">
+				<div class="section">
 				<h2 class="section-title">Основные параметры</h2>
+
+				<div class="form-group">
+					<label class="label" for="tag">Название / tag</label>
+					<input
+						id="tag"
+						class="input"
+						bind:value={editableTag}
+						autocomplete="off"
+					/>
+				</div>
 
 				<div class="form-group">
 					<label class="label" for="server">Сервер</label>

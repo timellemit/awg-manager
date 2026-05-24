@@ -1508,6 +1508,13 @@ class ApiClient {
 		});
 	}
 
+	async singboxRenameTunnel(oldTag: string, newTag: string): Promise<SingboxTunnel[]> {
+		return this.request('/singbox/tunnels/rename', {
+			method: 'PATCH',
+			body: JSON.stringify({ oldTag, newTag })
+		});
+	}
+
 	async singboxDeleteTunnel(tag: string): Promise<SingboxTunnel[]> {
 		return this.request(`/singbox/tunnels?tag=${encodeURIComponent(tag)}`, {
 			method: 'DELETE'
