@@ -15,6 +15,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hoaxisr/awg-manager/internal/logging"
@@ -30,6 +31,12 @@ import (
 	"github.com/hoaxisr/awg-manager/internal/tunnel/netutil"
 )
 
+const (
+	resolveAttempts       = 3
+	resolveAttemptTimeout = 1500 * time.Millisecond
+	resolveRetryGap       = 300 * time.Millisecond
+)
+
 // OperatorNativeWG manages tunnels via Keenetic native WireGuard + awg_proxy.ko.
 type OperatorNativeWG struct {
 	queries      *query.Queries
@@ -38,6 +45,16 @@ type OperatorNativeWG struct {
 	kmod         *KmodManager
 	appLog       *logging.ScopedLogger
 	hookNotifier tunnel.HookNotifier
+
+	// resolveFn resolves "host:port" to (ip, port). Defaults to
+	// netutil.ResolveEndpoint; overridable in tests.
+	resolveFn func(endpoint string) (string, int, error)
+
+	// trackedIP holds the last freshly-resolved endpoint IP per tunnel ID
+	// (NOT cache fallbacks). The orchestrator reads it via GetTrackedEndpointIP
+	// to persist storage.AWGTunnel.ResolvedEndpointIP.
+	trackedMu sync.RWMutex
+	trackedIP map[string]string
 }
 
 // NewOperator creates a new NativeWG operator.
@@ -48,6 +65,7 @@ func NewOperator(queries *query.Queries, commands *command.Commands, tr *transpo
 		transport: tr,
 		kmod:      NewKmodManager(appLogger),
 		appLog:    logging.NewScopedLogger(appLogger, logging.GroupTunnel, logging.SubOps),
+		resolveFn: netutil.ResolveEndpoint,
 	}
 }
 
@@ -126,8 +144,8 @@ func (o *OperatorNativeWG) createViaBatch(ctx context.Context, stored *storage.A
 	ndmsName := names.NDMSName
 
 	// Resolve endpoint hostname -> IP (for validation only at create time;
-	// the actual proxy endpoint is set at Start time)
-	endpointIP, endpointPort, err := netutil.ResolveEndpoint(stored.Peer.Endpoint)
+	// the actual proxy endpoint is set at Start time). Uses retry + cache fallback.
+	endpointIP, endpointPort, err := o.resolveEndpointWithFallback(stored)
 	if err != nil {
 		return 0, fmt.Errorf("resolve endpoint: %w", err)
 	}
@@ -242,13 +260,10 @@ func (o *OperatorNativeWG) startNative(ctx context.Context, stored *storage.AWGT
 		}
 	}
 
-	// Resolve endpoint (fallback to cached IP if DNS unavailable at boot)
-	endpointIP, endpointPort, err := netutil.ResolveEndpoint(stored.Peer.Endpoint)
+	// Resolve endpoint (retry + cached IP fallback if DNS unavailable at boot)
+	endpointIP, endpointPort, err := o.resolveEndpointWithFallback(stored)
 	if err != nil {
-		endpointIP, endpointPort, err = o.fallbackResolve(stored, err)
-		if err != nil {
-			return err
-		}
+		return err
 	}
 	o.appLog.Full("start", stored.Name, fmt.Sprintf("Resolving endpoint %s -> %s:%d", stored.Peer.Endpoint, endpointIP, endpointPort))
 
@@ -293,14 +308,11 @@ func (o *OperatorNativeWG) startProxy(ctx context.Context, stored *storage.AWGTu
 	names := NewNWGNames(stored.NWGIndex)
 	pubkey := stored.Peer.PublicKey
 
-	// Resolve endpoint — kmod proxy connects to this IP
-	// Fallback to cached IP if DNS unavailable at boot
-	endpointIP, endpointPort, err := netutil.ResolveEndpoint(stored.Peer.Endpoint)
+	// Resolve endpoint — kmod proxy connects to this IP.
+	// Retry + cached IP fallback if DNS unavailable at boot.
+	endpointIP, endpointPort, err := o.resolveEndpointWithFallback(stored)
 	if err != nil {
-		endpointIP, endpointPort, err = o.fallbackResolve(stored, err)
-		if err != nil {
-			return err
-		}
+		return err
 	}
 
 	// Ensure kernel module is loaded
@@ -612,7 +624,13 @@ func (o *OperatorNativeWG) EnsureKmodLoaded() error {
 func (o *OperatorNativeWG) RestoreKmodTunnel(ctx context.Context, stored *storage.AWGTunnel) error {
 	bindIface := o.ResolveActiveWAN(ctx, stored)
 
-	kmodCfg, err := buildKmodConfig(stored, bindIface)
+	// Resolve with retry + cached IP fallback — boot DNS on the router may be
+	// slow/uncached (this is the path that previously failed hard).
+	endpointIP, endpointPort, err := o.resolveEndpointWithFallback(stored)
+	if err != nil {
+		return fmt.Errorf("build kmod config: %w", err)
+	}
+	kmodCfg, err := buildKmodConfigResolved(stored, endpointIP, endpointPort, bindIface)
 	if err != nil {
 		return fmt.Errorf("build kmod config: %w", err)
 	}
@@ -694,16 +712,6 @@ func (o *OperatorNativeWG) nextFreeIndex(ctx context.Context) (int, error) {
 	return 0, fmt.Errorf("all %d Wireguard slots are occupied", MaxTunnels)
 }
 
-// buildKmodConfig resolves the endpoint and builds a KmodConfig.
-// Used by RestoreKmodTunnel where we don't need the resolved IP separately.
-func buildKmodConfig(stored *storage.AWGTunnel, bindIface string) (KmodConfig, error) {
-	ip, port, err := netutil.ResolveEndpoint(stored.Peer.Endpoint)
-	if err != nil {
-		return KmodConfig{}, fmt.Errorf("resolve endpoint: %w", err)
-	}
-	return buildKmodConfigResolved(stored, ip, port, bindIface)
-}
-
 // buildKmodConfigResolved builds a KmodConfig with a pre-resolved endpoint IP.
 // bindIface is the kernel interface name for SO_BINDTODEVICE (empty = no binding).
 func buildKmodConfigResolved(stored *storage.AWGTunnel, endpointIP string, endpointPort int, bindIface string) (KmodConfig, error) {
@@ -736,6 +744,68 @@ func (o *OperatorNativeWG) fallbackResolve(stored *storage.AWGTunnel, resolveErr
 	port, _ := strconv.Atoi(portStr)
 	o.appLog.Warn("resolve-endpoint", stored.Peer.Endpoint, "DNS failed, using cached IP "+stored.ResolvedEndpointIP)
 	return stored.ResolvedEndpointIP, port, nil
+}
+
+// resolveEndpointWithFallback resolves the tunnel's endpoint with a short retry
+// budget, then falls back to the cached ResolvedEndpointIP. On a fresh DNS
+// success it records the IP via trackEndpointIP (cache fallbacks are NOT tracked).
+func (o *OperatorNativeWG) resolveEndpointWithFallback(stored *storage.AWGTunnel) (string, int, error) {
+	var lastErr error
+	for attempt := 1; attempt <= resolveAttempts; attempt++ {
+		ip, port, err := o.resolveOnce(stored.Peer.Endpoint, resolveAttemptTimeout)
+		if err == nil {
+			o.trackEndpointIP(stored.ID, ip)
+			return ip, port, nil
+		}
+		lastErr = err
+		o.appLog.Debug("resolve-endpoint", stored.Peer.Endpoint,
+			fmt.Sprintf("attempt %d/%d failed: %v", attempt, resolveAttempts, err))
+		if attempt < resolveAttempts {
+			time.Sleep(resolveRetryGap)
+		}
+	}
+	return o.fallbackResolve(stored, lastErr)
+}
+
+// resolveOnce runs the injected resolver under a per-attempt timeout. A resolver
+// that outlives the timeout is abandoned (its goroutine finishes and the result
+// is discarded) and the attempt is reported as a timeout failure.
+func (o *OperatorNativeWG) resolveOnce(endpoint string, timeout time.Duration) (string, int, error) {
+	type result struct {
+		ip   string
+		port int
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		ip, port, err := o.resolveFn(endpoint)
+		ch <- result{ip, port, err}
+	}()
+	select {
+	case r := <-ch:
+		return r.ip, r.port, r.err
+	case <-time.After(timeout):
+		return "", 0, fmt.Errorf("resolve %s: timeout after %s", endpoint, timeout)
+	}
+}
+
+// trackEndpointIP records a freshly-resolved endpoint IP for a tunnel.
+// Lazy-inits the map so struct-literal construction (tests) is safe.
+func (o *OperatorNativeWG) trackEndpointIP(tunnelID, ip string) {
+	o.trackedMu.Lock()
+	defer o.trackedMu.Unlock()
+	if o.trackedIP == nil {
+		o.trackedIP = make(map[string]string)
+	}
+	o.trackedIP[tunnelID] = ip
+}
+
+// GetTrackedEndpointIP returns the last freshly-resolved endpoint IP for a
+// tunnel, or "" if none has been resolved this process lifetime.
+func (o *OperatorNativeWG) GetTrackedEndpointIP(tunnelID string) string {
+	o.trackedMu.RLock()
+	defer o.trackedMu.RUnlock()
+	return o.trackedIP[tunnelID]
 }
 
 // splitAddressMask splits a CIDR or bare IP into (address, mask).
