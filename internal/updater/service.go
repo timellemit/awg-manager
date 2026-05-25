@@ -107,7 +107,7 @@ func (s *Service) doCheck() {
 	s.appLog.Debug("check", "", "Checking for updates")
 
 	ctx := context.Background()
-	info := checkWithDownloader(ctx, s.version, s.downloader)
+	info := checkWithDownloader(ctx, s.version, channelStable, s.downloader)
 
 	s.mu.Lock()
 	s.cached = info
@@ -145,7 +145,7 @@ func (s *Service) CheckNow(ctx context.Context) *UpdateInfo {
 	}
 	s.mu.Unlock()
 
-	info := checkWithDownloader(ctx, s.version, s.downloader)
+	info := checkWithDownloader(ctx, s.version, channelStable, s.downloader)
 
 	// A user-forced refresh should also invalidate the changelog cache so
 	// the next "Что нового" click hits the repo server for fresh content.

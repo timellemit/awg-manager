@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -188,5 +189,57 @@ func TestCheck_HTTPError(t *testing.T) {
 	}
 	if info.Error == "" {
 		t.Fatal("expected error message")
+	}
+}
+
+// newMockDevelopServer serves gzipped Packages for /develop/<arch>/Packages.gz.
+func newMockDevelopServer(t *testing.T, packagesContent string, statusCode int) *httptest.Server {
+	gzData := gzipBytes(t, packagesContent)
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/develop/") {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.WriteHeader(statusCode)
+		if statusCode == http.StatusOK {
+			w.Write(gzData)
+		}
+	}))
+}
+
+func TestCheck_DevelopDetectsNewerRevision(t *testing.T) {
+	arch := archSuffix()
+	ipk := "awg-manager_2.11.2+r71_" + arch + "-kn.ipk"
+	body := "Package: awg-manager\nVersion: 2.11.2+r71\nFilename: " + ipk + "\n"
+
+	srv := newMockDevelopServer(t, body, http.StatusOK)
+	defer srv.Close()
+	withMockRepo(t, srv)
+
+	info := checkWithDownloader(context.Background(), "2.11.2+r70", "develop", newDefaultDownloader())
+	if !info.Available {
+		t.Fatal("expected Available=true: r71 > r70 on develop")
+	}
+	if info.LatestVersion != "2.11.2+r71" {
+		t.Errorf("LatestVersion = %q, want 2.11.2+r71", info.LatestVersion)
+	}
+	wantURL := srv.URL + "/develop/" + archSuffixToRepoDir(arch) + "/" + ipk
+	if info.DownloadURL != wantURL {
+		t.Errorf("DownloadURL = %q, want %q", info.DownloadURL, wantURL)
+	}
+}
+
+func TestCheck_DevelopSameRevisionUpToDate(t *testing.T) {
+	arch := archSuffix()
+	body := "Package: awg-manager\nVersion: 2.11.2+r70\nFilename: awg-manager_2.11.2+r70_" + arch + "-kn.ipk\n"
+
+	srv := newMockDevelopServer(t, body, http.StatusOK)
+	defer srv.Close()
+	withMockRepo(t, srv)
+
+	info := checkWithDownloader(context.Background(), "2.11.2+r70", "develop", newDefaultDownloader())
+	if info.Available {
+		t.Fatal("expected Available=false: same revision")
 	}
 }
