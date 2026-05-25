@@ -481,6 +481,10 @@ export interface HydraRouteStatus {
 	installed: boolean;
 	running: boolean;
 	version?: string;
+	pid?: number;
+	stalePid?: number;
+	processState?: 'not_installed' | 'stopped' | 'running' | 'dead';
+	lastError?: string;
 }
 
 export interface HydraRouteConfig {

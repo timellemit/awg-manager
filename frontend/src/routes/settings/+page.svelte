@@ -1,11 +1,12 @@
 <script lang="ts">
-	import { onDestroy, onMount } from "svelte";
+	import { onMount } from "svelte";
 	import { get } from "svelte/store";
 	import { afterNavigate } from "$app/navigation";
 	import { page } from "$app/stores";
 	import { api } from "$lib/api/client";
 	import { notifications } from "$lib/stores/notifications";
 	import { singboxStatus } from "$lib/stores/singbox";
+	import { hydrarouteStatus } from "$lib/stores/hydraroute";
 	import { PageContainer, PageHeader, LoadingSpinner } from "$lib/components/layout";
 	import { Toggle, Modal, Button, ConfirmModal } from "$lib/components/ui";
 	import {
@@ -31,7 +32,6 @@
 		SystemInfo,
 		Settings,
 		UpdateInfo,
-		HydraRouteStatus,
 	} from "$lib/types";
 	import {
 		USAGE_LEVEL_LABELS,
@@ -57,9 +57,6 @@
 	let updateInfo: UpdateInfo | null = $state(null);
 	let restarting = $state(false);
 	let restartConfirmOpen = $state(false);
-	let hydraStatus = $state<HydraRouteStatus | null>(null);
-	let hydraStatusLoading = $state(true);
-	let hydraProbeNote = $state<string | null>(null);
 	let hydraBusy = $state(false);
 	let singboxInstalling = $state(false);
 	let singboxInstallError = $state<string | null>(null);
@@ -69,7 +66,6 @@
 	let ndmsProxyBusy = $state(false);
 	let ndmsProxyConfirmOpen = $state(false);
 	let ndmsProxyConfirmEnable = $state(false); // true = подтверждение включения; false = выключения
-	let hydraProbeNoteTimer: ReturnType<typeof setTimeout> | null = null;
 	let systemInfoRefreshing = $state(false);
 	let systemInfoUpdatedAt = $state<string | null>(null);
 	let systemInfoInFlight: Promise<void> | null = null;
@@ -82,26 +78,14 @@
 	const singboxInstalled = $derived(singboxStatusValue?.installed ?? false);
 	const singboxRunning = $derived(singboxStatusValue?.running ?? false);
 	const ndmsProxyEnabled = $derived(singboxStatusValue?.ndmsProxyEnabled ?? true);
-	const hydraInstalled = $derived(hydraStatus?.installed ?? false);
-	const hydraRunning = $derived(hydraStatus?.running ?? false);
-
-	function setHydraProbeNote(note: string) {
-		hydraProbeNote = note;
-		if (hydraProbeNoteTimer) {
-			clearTimeout(hydraProbeNoteTimer);
-		}
-		hydraProbeNoteTimer = setTimeout(() => {
-			hydraProbeNote = null;
-			hydraProbeNoteTimer = null;
-		}, 4000);
-	}
-
-	onDestroy(() => {
-		if (hydraProbeNoteTimer) {
-			clearTimeout(hydraProbeNoteTimer);
-			hydraProbeNoteTimer = null;
-		}
-	});
+	const hydraStatusValue = $derived($hydrarouteStatus.data ?? null);
+	const hydraStatusLoading = $derived(
+		$hydrarouteStatus.lastFetchedAt === 0 &&
+		($hydrarouteStatus.status === 'idle' || $hydrarouteStatus.status === 'loading')
+	);
+	const hydraStatusError = $derived($hydrarouteStatus.error);
+	const hydraInstalled = $derived(hydraStatusValue?.installed ?? false);
+	const hydraRunning = $derived(hydraStatusValue?.running ?? false);
 
 	function handleNDMSProxyToggleClick(next: boolean) {
 		// next — желаемое состояние после клика. Открываем confirm-modal
@@ -156,7 +140,8 @@
 	async function controlHydra(action: 'start' | 'stop' | 'restart') {
 		hydraBusy = true;
 		try {
-			hydraStatus = await api.controlHydraRoute(action);
+			const fresh = await api.controlHydraRoute(action);
+			hydrarouteStatus.applyMutationResponse(fresh);
 			notifications.success(
 				action === 'restart' ? 'HydraRoute перезапущен' :
 				action === 'stop' ? 'HydraRoute остановлен' : 'HydraRoute запущен',
@@ -293,23 +278,6 @@ onMount(() => {
 				// Keep the page interactive; update widget can stay empty on transient errors.
 			});
 
-		try {
-			const hydraLoadStartedAt = Date.now();
-			hydraStatus = await api.getHydraRouteStatus();
-			setHydraProbeNote("данные получены");
-			// Keep a tiny visible loading phase so users can perceive that
-			// the probe actually happened, even on very fast responses.
-			const elapsed = Date.now() - hydraLoadStartedAt;
-			const minLoadingMs = 350;
-			if (elapsed < minLoadingMs) {
-				await new Promise((resolve) => setTimeout(resolve, minLoadingMs - elapsed));
-			}
-		} catch {
-			setHydraProbeNote("нет ответа");
-			/* ignore - HR may not be available */
-		} finally {
-			hydraStatusLoading = false;
-		}
 	})();
 
 	return () => {
@@ -651,9 +619,9 @@ onMount(() => {
 				<IntegrationsCard
 					singboxStatus={singboxStatusValue}
 					{singboxStatusLoading}
-					{hydraStatus}
+					hydraStatus={hydraStatusValue}
 					{hydraStatusLoading}
-					{hydraProbeNote}
+					hydraStatusError={hydraStatusError}
 					{singboxInstalling}
 					{singboxUpdating}
 					{singboxInstallError}

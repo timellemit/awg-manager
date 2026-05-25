@@ -1567,6 +1567,8 @@ const mockHydraRouteStatus = {
 	installed: true,
 	running: true,
 	version: '2.4.1',
+	pid: 2345,
+	processState: 'running',
 };
 
 const mockRoutingDnsRoutes = [

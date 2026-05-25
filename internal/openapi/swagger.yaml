@@ -1103,11 +1103,28 @@ definitions:
       installed:
         example: true
         type: boolean
+      lastError:
+        example: 'neo restart: exit status 1'
+        type: string
+      pid:
+        example: 12345
+        type: integer
+      processState:
+        enum:
+        - not_installed
+        - stopped
+        - running
+        - dead
+        example: running
+        type: string
       running:
         example: true
         type: boolean
+      stalePid:
+        example: 12345
+        type: integer
       version:
-        example: 0.3.1
+        example: 2.4.1
         type: string
     type: object
   api.HydraRouteStatusResponse:

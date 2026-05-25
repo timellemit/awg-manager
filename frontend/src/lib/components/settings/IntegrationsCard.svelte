@@ -11,7 +11,7 @@
 		singboxStatusLoading?: boolean;
 		hydraStatus: HydraRouteStatus | null;
 		hydraStatusLoading?: boolean;
-		hydraProbeNote?: string | null;
+		hydraStatusError?: string | null;
 		singboxInstalling: boolean;
 		singboxUpdating?: boolean;
 		singboxInstallError: string | null;
@@ -28,7 +28,7 @@
 		singboxStatusLoading = false,
 		hydraStatus,
 		hydraStatusLoading = false,
-		hydraProbeNote = null,
+		hydraStatusError = null,
 		singboxInstalling,
 		singboxUpdating = false,
 		singboxInstallError,
@@ -45,6 +45,9 @@
 	const singboxNeedsUpdate = $derived(singboxStatus?.updateAvailable ?? false);
 	const hydraInstalled = $derived(hydraStatus?.installed ?? false);
 	const hydraRunning = $derived(hydraStatus?.running ?? false);
+	const hydraProcessState = $derived(
+		hydraStatus?.processState ?? (hydraStatus?.running ? 'running' : hydraStatus?.installed ? 'stopped' : 'not_installed')
+	);
 	const singboxFatalLines = $derived.by(() => {
 		const raw = stripAnsi(singboxStatus?.lastError ?? '').trim();
 		if (!raw) return '';
@@ -211,7 +214,9 @@
 						ariaLabel={
 							hydraStatusLoading
 								? 'HydraRoute: получение данных'
-								: hydraInstalled && hydraRunning
+								: hydraProcessState === 'dead'
+									? 'HydraRoute: stale pid'
+									: hydraInstalled && hydraRunning
 									? 'HydraRoute работает'
 									: 'HydraRoute остановлен'
 						}
@@ -221,12 +226,24 @@
 						{#if hydraStatusLoading}
 							<span class="integration-sub">получаю данные…</span>
 						{:else if hydraInstalled}
-							<span class="integration-sub">{hydraRunning ? 'работает' : 'остановлен'}</span>
+							<span class="integration-sub">
+								v{hydraStatus?.version ?? '?'}
+								{#if hydraRunning && hydraStatus?.pid}
+									· pid {hydraStatus.pid}
+								{:else if hydraProcessState === 'dead' && hydraStatus?.stalePid}
+									· dead pid {hydraStatus.stalePid}
+								{:else}
+									· остановлен
+								{/if}
+							</span>
 						{:else}
 							<span class="integration-sub">не установлен</span>
 						{/if}
-						{#if !hydraStatusLoading && hydraProbeNote}
-							<span class="integration-probe-note">{hydraProbeNote}</span>
+						{#if !hydraRunning && hydraStatus?.lastError}
+							<span class="setting-description warning" title={hydraStatus.lastError}>{hydraStatus.lastError}</span>
+						{/if}
+						{#if !hydraStatusLoading && !hydraStatus && hydraStatusError}
+							<span class="setting-description warning">нет ответа: {hydraStatusError}</span>
 						{/if}
 						{#if downloadRouteLabel}
 							<span class="integration-route" title={downloadRouteLabel}>
@@ -303,12 +320,6 @@
 	.warning {
 		color: var(--color-warning);
 	}
-	.integration-probe-note {
-		font-size: 0.6875rem;
-		font-family: var(--font-mono);
-		color: var(--color-text-secondary);
-	}
-
 	.install-error-row {
 		display: inline-flex;
 		align-items: center;
