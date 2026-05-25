@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,30 +22,18 @@ func TestPingByIface_Success(t *testing.T) {
 	}))
 	defer tsrv.Close()
 
-	// Extract host:port from URL like http://127.0.0.1:12345/
-	var host string
-	var port int
-	fmt.Sscanf(tsrv.URL, "http://%s:%d", &host, &port)
-	if host == "" {
-		// Fallback: strip http:// prefix and trailing /
-		hostPort := tsrv.URL[len("http://"):]
-		if idx := len(hostPort) - 1; idx >= 0 && hostPort[idx] == '/' {
-			hostPort = hostPort[:idx]
-		}
-		// For IPv4 loopback the host isn't quoted, so Sscanf may have succeeded.
-		if host == "" {
-			// Use net.SplitHostPort
-			h, p, _ := net.SplitHostPort(hostPort)
-			host = h
-			fmt.Sscanf(p, "%d", &port)
-		}
+	hostPort := strings.TrimPrefix(tsrv.URL, "http://")
+	hostPort = strings.TrimSuffix(hostPort, "/")
+	host, portStr, err := net.SplitHostPort(hostPort)
+	if err != nil {
+		t.Fatalf("parse test server URL: %v", err)
 	}
+	var port int
+	fmt.Sscanf(portStr, "%d", &port)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// We can't bind to an interface in tests on non-Linux, but the request
-	// should succeed via loopback even without SO_BINDTODEVICE.
 	ms, err := s.PingByIface(ctx, "", host, port)
 	if err != nil {
 		t.Fatalf("PingByIface error: %v", err)

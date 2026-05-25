@@ -64,16 +64,6 @@ func (s *Service) GetInterfaceName(id string) (string, error) {
 	return s.resolveIfaceName(id), nil
 }
 
-// GetCurlOptions returns curl command-line arguments for routing traffic through the tunnel.
-// Deprecated: use GetInterfaceName with httpclient.CallConfig.Interface instead.
-func (s *Service) GetCurlOptions(id string) ([]string, error) {
-	iface, err := s.GetInterfaceName(id)
-	if err != nil {
-		return nil, err
-	}
-	return []string{"--interface", iface}, nil
-}
-
 // CheckTunnelRunning validates that the tunnel is available for testing.
 func (s *Service) CheckTunnelRunning(id string) error {
 	if !IsAWGID(id) {
@@ -98,7 +88,7 @@ func (s *Service) resolveIfaceName(id string) string {
 }
 
 // GetWANInterface returns the active WAN kernel interface for a tunnel.
-// Returns empty string if unknown (will fall back to unbound curl).
+// Returns empty string if unknown (will fall back to default route).
 func (s *Service) GetWANInterface(tunnelID string) string {
 	t := s.GetAWG(tunnelID)
 	if t == nil {

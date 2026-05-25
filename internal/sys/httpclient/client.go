@@ -26,7 +26,8 @@ type Metrics struct {
 
 // Result is the unified return type for all operations.
 type Result struct {
-	Body    string  // Response body (may be empty when discardBody is used)
+	Body    string      // Response body (may be empty when discardBody is used)
+	Headers http.Header // Response headers
 	Metrics Metrics
 }
 
@@ -132,8 +133,18 @@ func (c *Client) Do(ctx context.Context, cfg CallConfig) (*Result, error) {
 	timings := &traceTimings{}
 	req = req.WithContext(httptrace.WithClientTrace(req.Context(), buildTrace(timings)))
 
+	// Validate proxy URL early so traffic never leaks via WAN on parse failure.
+	var parsedProxy *url.URL
+	if cfg.ProxyURL != "" {
+		var err error
+		parsedProxy, err = url.Parse(cfg.ProxyURL)
+		if err != nil {
+			return nil, fmt.Errorf("httpclient: invalid proxy URL %q: %w", cfg.ProxyURL, err)
+		}
+	}
+
 	// Build per-call transport (interface binding + proxy).
-	transport := c.buildTransport(cfg)
+	transport := c.buildTransport(cfg, parsedProxy)
 	client := &http.Client{
 		Transport: transport,
 		Timeout:   cfg.MaxTime,
@@ -169,19 +180,15 @@ func (c *Client) Do(ctx context.Context, cfg CallConfig) (*Result, error) {
 	if cfg.DiscardBody {
 		_, _ = io.Copy(io.Discard, resp.Body)
 	} else {
-		data, readErr := io.ReadAll(io.LimitReader(resp.Body, 4*1024))
-		if readErr != nil {
-			// Not fatal — we still have status code and partial data.
-			// Log or ignore per project convention.
-		} else {
-			body = string(data)
-		}
+		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4*1024))
+		body = string(data)
 	}
 
 	metrics.TimeTotal = time.Since(start).Seconds()
 
 	return &Result{
 		Body:    body,
+		Headers: resp.Header,
 		Metrics: metrics,
 	}, nil
 }
@@ -207,7 +214,7 @@ func buildTrace(t *traceTimings) *httptrace.ClientTrace {
 // Each call gets its own transport because:
 //   - Interface binding is per-socket (SO_BINDTODEVICE on the dialer).
 //   - Proxy can vary per call.
-func (c *Client) buildTransport(cfg CallConfig) *http.Transport {
+func (c *Client) buildTransport(cfg CallConfig, parsedProxy *url.URL) *http.Transport {
 	t := c.baseTransport.Clone()
 
 	// Set up the custom dialer with interface binding.
@@ -221,11 +228,8 @@ func (c *Client) buildTransport(cfg CallConfig) *http.Transport {
 	}
 
 	// Set up proxy if specified.
-	if cfg.ProxyURL != "" {
-		proxyURL, err := url.Parse(cfg.ProxyURL)
-		if err == nil {
-			t.Proxy = http.ProxyURL(proxyURL)
-		}
+	if parsedProxy != nil {
+		t.Proxy = http.ProxyURL(parsedProxy)
 	}
 
 	// Enforce ForceAttemptHTTP2 = false — some VPN endpoints behind
@@ -246,4 +250,13 @@ func SecToMs(sec float64) int {
 		ms = 1
 	}
 	return ms
+}
+
+// ParseTime parses an HTTP Date header value. Returns zero time on failure.
+func ParseTime(s string) time.Time {
+	t, err := http.ParseTime(s)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
 }

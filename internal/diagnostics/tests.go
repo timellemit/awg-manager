@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -17,10 +16,6 @@ import (
 	"github.com/hoaxisr/awg-manager/internal/sys/osdetect"
 	"github.com/hoaxisr/awg-manager/internal/tunnel/netutil"
 )
-
-// curlPath was the absolute path to curl; removed now that all HTTP
-// traffic uses the Go-native httpclient package.
-// Kept as a no-op migration marker.
 
 // ipPath returns the absolute path to the iproute2 `ip` binary,
 // preferring /opt/sbin/ip then standard locations and falling back to
@@ -250,33 +245,30 @@ var clockSkewProbeTargets = []string{
 func (r *Runner) testClockSkew(ctx context.Context) TestResult {
 	res := TestResult{Name: "clock_skew", Description: "Расхождение времени с эталоном"}
 
-	client := &http.Client{Timeout: 5 * time.Second}
-
 	var (
 		serverTime time.Time
 		usedTarget string
 		lastErr    string
 	)
 	for _, target := range clockSkewProbeTargets {
-		req, err := http.NewRequestWithContext(ctx, http.MethodHead, target, nil)
+		result, err := httpclient.DefaultClient.Do(ctx, httpclient.CallConfig{
+			URL:         target,
+			Method:      "HEAD",
+			MaxTime:     5 * time.Second,
+			DiscardBody: true,
+		})
 		if err != nil {
 			lastErr = err.Error()
 			continue
 		}
-		resp, err := client.Do(req)
-		if err != nil {
-			lastErr = err.Error()
-			continue
-		}
-		dateHeader := resp.Header.Get("Date")
-		resp.Body.Close()
+		dateHeader := result.Headers.Get("Date")
 		if dateHeader == "" {
 			lastErr = "сервер не вернул Date header"
 			continue
 		}
-		t, err := http.ParseTime(dateHeader)
-		if err != nil {
-			lastErr = "не удалось распарсить Date: " + err.Error()
+		t := httpclient.ParseTime(dateHeader)
+		if t.IsZero() {
+			lastErr = "не удалось распарсить Date: " + dateHeader
 			continue
 		}
 		serverTime = t

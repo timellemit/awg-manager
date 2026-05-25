@@ -61,8 +61,8 @@ func (s *Service) checkHTTP(ctx context.Context, tunnelID string) (*Connectivity
 	res, err := httpclient.DefaultClient.Do(testCtx, httpclient.CallConfig{
 		URL:            connectivityURL,
 		Interface:      iface,
-		ConnectTimeout: 3,
-		MaxTime:        5,
+		ConnectTimeout: 3 * time.Second,
+		MaxTime:        5 * time.Second,
 		DiscardBody:    true,
 	})
 	if err != nil {
@@ -246,8 +246,8 @@ func CheckConnectivityByInterface(ctx context.Context, ifaceName string) *Connec
 	res, err := httpclient.DefaultClient.Do(testCtx, httpclient.CallConfig{
 		URL:            connectivityURL,
 		Interface:      ifaceName,
-		ConnectTimeout: 3,
-		MaxTime:        5,
+		ConnectTimeout: 3 * time.Second,
+		MaxTime:        5 * time.Second,
 		DiscardBody:    true,
 	})
 	if err != nil {

@@ -14,7 +14,6 @@ import (
 const (
 	connectivityURL = "http://connectivitycheck.gstatic.com/generate_204"
 	checkTimeout    = 7 * time.Second
-	curlMaxTime     = "5"
 )
 
 // checkHTTP performs HTTP 204 connectivity check through the tunnel.
@@ -25,6 +24,7 @@ func checkHTTP(ctx context.Context, ifaceName string) CheckResult {
 	res, err := httpclient.DefaultClient.Do(checkCtx, httpclient.CallConfig{
 		URL:            connectivityURL,
 		Interface:      ifaceName,
+		ConnectTimeout: 3 * time.Second,
 		MaxTime:        5 * time.Second,
 		DiscardBody:    true,
 	})
@@ -36,7 +36,12 @@ func checkHTTP(ctx context.Context, ifaceName string) CheckResult {
 	}
 
 	httpCode := res.Metrics.HTTPCode
-	latencyMs := int(res.Metrics.TimeTotal * 1000)
+	var latencyMs int
+	if res.Metrics.TimeConnect > 0 && res.Metrics.TimeConnect >= res.Metrics.TimeNameLookup {
+		latencyMs = int((res.Metrics.TimeConnect - res.Metrics.TimeNameLookup) * 1000)
+	} else {
+		latencyMs = int(res.Metrics.TimeTotal * 1000)
+	}
 
 	if httpCode == 204 {
 		return CheckResult{

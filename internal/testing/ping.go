@@ -3,6 +3,8 @@ package testing
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/hoaxisr/awg-manager/internal/sys/httpclient"
 )
@@ -18,15 +20,14 @@ func (s *Service) PingByIface(ctx context.Context, ifaceName, host string, port 
 	res, err := httpclient.DefaultClient.Do(ctx, httpclient.CallConfig{
 		URL:            target,
 		Interface:      ifaceName,
-		ConnectTimeout: 5,
-		MaxTime:        10,
+		ConnectTimeout: 5 * time.Second,
+		MaxTime:        10 * time.Second,
 		DiscardBody:    true,
 	})
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return 0, nil
 		}
-		// Mimic curl exit-code-28 "timed out" → 0ms (unreachable).
 		if isTimeoutError(err) {
 			return 0, nil
 		}
@@ -41,33 +42,16 @@ func (s *Service) PingByIface(ctx context.Context, ifaceName, host string, port 
 }
 
 // isTimeoutError reports whether an error from the HTTP client indicates a
-// timeout / unreachable host (curl exit code 28 equivalent).
+// timeout / unreachable host.
 func isTimeoutError(err error) bool {
 	if err == nil {
 		return false
 	}
 	msg := err.Error()
-	return containsAny(msg, "timeout", "timed out", "i/o timeout", "no route to host", "connection refused")
-}
-
-func containsAny(s string, subs ...string) bool {
-	for _, sub := range subs {
-		if contains(s, sub) {
+	for _, sub := range []string{"timeout", "timed out", "i/o timeout", "no route to host", "connection refused"} {
+		if strings.Contains(msg, sub) {
 			return true
 		}
 	}
 	return false
-}
-
-func contains(s, sub string) bool {
-	return len(s) >= len(sub) && (s == sub || len(sub) > 0 && indexOf(s, sub) >= 0)
-}
-
-func indexOf(s, sub string) int {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return i
-		}
-	}
-	return -1
 }
