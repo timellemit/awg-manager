@@ -24,7 +24,7 @@ SINGBOX_LOW_MEMORY="${SINGBOX_LOW_MEMORY:-1}"
 CRONET_GO_DIR="${CRONET_GO_DIR:-$HOME/cronet-go}"
 RELEASE_REPO="${RELEASE_REPO:-hoaxisr/awg-manager}"
 RELEASE_TAG="${RELEASE_TAG:-latest}"
-RELEASE_BASE_URL="${RELEASE_BASE_URL:-http://repo.hoaxisr.ru/singbox/$SINGBOX_VERSION}"
+RELEASE_BASE_URL="${RELEASE_BASE_URL:-https://github.com/$RELEASE_REPO/releases/download/$RELEASE_TAG}"
 export GOTOOLCHAIN="${GOTOOLCHAIN:-local}"
 
 case "$ENTWARE_ARCH" in
