@@ -1515,6 +1515,11 @@ export interface SingboxRouterDNSGlobals {
 	strategy: SingboxRouterDNSStrategy;
 }
 
+export interface SingboxRouterDNSRewrite {
+	pattern: string;
+	ips: string[];
+}
+
 // #endregion
 
 // ─────────────────────────────────────────────
