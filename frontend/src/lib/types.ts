@@ -1545,6 +1545,7 @@ export interface TunnelReferencedError {
 	tunnelId: string;
 	deviceProxy: boolean;
 	routerRules: number[];
+	routerOther: string[];
 }
 
 // #endregion

@@ -255,7 +255,8 @@ class ApiClient {
 			const details: TunnelReferencedError = body?.details ?? {
 				tunnelId: id,
 				deviceProxy: false,
-				routerRules: []
+				routerRules: [],
+				routerOther: []
 			};
 			const err = new Error('tunnel_referenced') as Error & {
 				details: TunnelReferencedError;

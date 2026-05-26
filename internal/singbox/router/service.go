@@ -1570,6 +1570,19 @@ func (s *ServiceImpl) RulesReferencing(tag string) []int {
 	return cfg.rulesReferencingOutbound(tag)
 }
 
+// OutboundReferenceLocations returns human-readable locations in the
+// router config that reference tag, EXCLUDING route.rules[...] (covered
+// by RulesReferencing). Used by the tunnel-delete guard to refuse
+// deletion of a tunnel still referenced via composite member, route
+// final, dns detour, or rule_set download_detour.
+func (s *ServiceImpl) OutboundReferenceLocations(tag string) []string {
+	cfg, err := s.loadRouterConfig()
+	if err != nil || cfg == nil {
+		return nil
+	}
+	return cfg.outboundReferencesExcludingRules(tag)
+}
+
 func (s *ServiceImpl) ListPolicies(ctx context.Context) ([]PolicyInfo, error) {
 	if s.deps.Policies == nil {
 		return nil, fmt.Errorf("access policy provider not configured")
