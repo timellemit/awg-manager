@@ -1505,9 +1505,12 @@ export interface SingboxRouterDNSRule {
 	domain_suffix?: string[];
 	domain?: string[];
 	domain_keyword?: string[];
+	domain_regex?: string[];
 	query_type?: string[];
 	server?: string;
-	action?: '' | 'route' | 'reject';
+	action?: '' | 'route' | 'reject' | 'predefined';
+	rcode?: string;
+	method?: string;
 }
 
 export interface SingboxRouterDNSGlobals {
