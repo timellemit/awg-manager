@@ -148,3 +148,41 @@ func TestParseDNSProxy_EmptyInput(t *testing.T) {
 		t.Errorf("want 0 proxies, got %d", len(proxies))
 	}
 }
+
+// TestParseDNSProxy_DoHEncryption verifies that applyEncryption correctly marks
+// an upstream as DoH when its address appears in proxy-https.server-https, and
+// that DoH wins over DoT when the address appears in both lists.
+func TestParseDNSProxy_DoHEncryption(t *testing.T) {
+	const raw = `{"proxy-status":[{
+		"proxy-name": "System",
+		"proxy-config": "dns_server = 127.0.0.1:40500 . # 1.1.1.1\ndns_server = 127.0.0.1:40501 . # 8.8.8.8\ndns_server = 127.0.0.1:40502 . # 9.9.9.9",
+		"proxy-stat": "",
+		"proxy-tls":  {"server-tls":  [{"address":"9.9.9.9","port":853,"sni":"dns.quad9.net","domain":""}]},
+		"proxy-https":{"server-https":[{"address":"1.1.1.1"},{"address":"9.9.9.9"}]}
+	}]}`
+
+	proxies, err := ParseDNSProxy([]byte(raw))
+	if err != nil {
+		t.Fatalf("ParseDNSProxy: %v", err)
+	}
+	if len(proxies) != 1 || len(proxies[0].Upstreams) != 3 {
+		t.Fatalf("unexpected shape: %+v", proxies)
+	}
+	byAddr := map[string]DNSUpstream{}
+	for _, u := range proxies[0].Upstreams {
+		byAddr[u.Address] = u
+	}
+
+	// 1.1.1.1 — DoH only
+	if u := byAddr["1.1.1.1"]; u.Encryption != "DoH" {
+		t.Errorf("1.1.1.1: want DoH, got %q", u.Encryption)
+	}
+	// 8.8.8.8 — neither list → plain
+	if u := byAddr["8.8.8.8"]; u.Encryption != "plain" {
+		t.Errorf("8.8.8.8: want plain, got %q", u.Encryption)
+	}
+	// 9.9.9.9 — in both lists: DoH must win
+	if u := byAddr["9.9.9.9"]; u.Encryption != "DoH" {
+		t.Errorf("9.9.9.9: want DoH (DoH>DoT), got %q", u.Encryption)
+	}
+}

@@ -3,6 +3,7 @@ package diagnostics
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 )
@@ -126,7 +127,7 @@ func parseConfig(cfg string) (ups []DNSUpstream, static []DNSStaticRecord, rb DN
 				static = append(static, r)
 			}
 		case strings.HasPrefix(line, "norebind_ctl"):
-			rb.Enabled = strings.Contains(line, "on")
+			rb.Enabled = afterEquals(line) == "on"
 		case strings.HasPrefix(line, "norebind_ip4net"):
 			if v := afterEquals(line); v != "" {
 				rb.Nets = append(rb.Nets, v)
@@ -177,7 +178,7 @@ func parseDNSServer(line string) (DNSUpstream, bool) {
 			addrPart = comment[:at]
 			u.SNI = comment[at+1:]
 		}
-		if host, portStr, ok := splitHostPort(addrPart); ok {
+		if host, portStr, err := net.SplitHostPort(addrPart); err == nil {
 			u.Address = host
 			u.Port = atoiSafe(portStr)
 		} else {
@@ -268,13 +269,15 @@ func applyEncryption(ups []DNSUpstream, tls []dnsTLSEntry, https []dnsHTTPSEntry
 		switch {
 		case httpsAddr[ups[i].Address]:
 			ups[i].Encryption = "DoH"
-		case hasKey(tlsByAddr, ups[i].Address):
-			ups[i].Encryption = "DoT"
-			if ups[i].SNI == "" {
-				ups[i].SNI = tlsByAddr[ups[i].Address]
-			}
 		default:
-			ups[i].Encryption = "plain"
+			if sni, ok := tlsByAddr[ups[i].Address]; ok {
+				ups[i].Encryption = "DoT"
+				if ups[i].SNI == "" {
+					ups[i].SNI = sni
+				}
+			} else {
+				ups[i].Encryption = "plain"
+			}
 		}
 	}
 }
@@ -309,11 +312,6 @@ func afterColon(line string) string {
 func atoiSafe(s string) int {
 	n, _ := strconv.Atoi(strings.TrimSpace(s))
 	return n
-}
-
-func hasKey(m map[string]string, k string) bool {
-	_, ok := m[k]
-	return ok
 }
 
 // splitHostPort splits "1.2.3.4:853" -> ("1.2.3.4","853",true). No colon -> false.
