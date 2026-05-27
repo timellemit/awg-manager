@@ -242,6 +242,39 @@ func stateToStatus(s tunnel.State) string {
 	}
 }
 
+// overlayPendingStatus refines the display status for a NativeWG tunnel the RCI
+// classifier reports as Broken. During boot bring-up such a tunnel is not
+// broken — NDMS raised its WireGuard but awg-manager has not yet attached the
+// kmod proxy. quiescentUntil is the orchestrator's per-tunnel bring-up window
+// (zero if no bring-up was attempted this session). now is injected for tests.
+// Only non-ASC nwg ever produces StateBroken from classifyNWGState; kernel and
+// every non-Broken state pass through unchanged.
+func overlayPendingStatus(rawState tunnel.State, backend string, quiescentUntil, now time.Time) string {
+	base := stateToStatus(rawState)
+	if backend != "nativewg" || rawState != tunnel.StateBroken {
+		return base
+	}
+	if quiescentUntil.IsZero() {
+		return stateToStatus(tunnel.StateNeedsStart) // bring-up not attempted yet
+	}
+	if now.Before(quiescentUntil) {
+		return stateToStatus(tunnel.StateStarting) // actively bringing up
+	}
+	return base // attempted, window elapsed, still broken (#183)
+}
+
+// statusForDisplay returns the UI status string for a tunnel, applying the
+// boot-pending overlay (see overlayPendingStatus). The per-tunnel quiescence
+// window comes from the orchestrator; if the orchestrator is not wired
+// (tests/edge) it falls back to the raw status via a zero window.
+func (h *TunnelsHandler) statusForDisplay(id, backend string, st tunnel.State) string {
+	var q time.Time
+	if h.orch != nil {
+		q = h.orch.QuiescentUntil(id)
+	}
+	return overlayPendingStatus(st, backend, q, time.Now())
+}
+
 // formatHandshake converts time to human-readable format.
 func formatHandshake(t time.Time) string {
 	if t.IsZero() {
@@ -459,30 +492,30 @@ func BuildTunnelResponse(r *http.Request, svc TunnelService, store *storage.AWGT
 
 // tunnelItem is the list-item DTO returned by List and used by SSE snapshots.
 type tunnelItem struct {
-	ID                        string                   `json:"id"`
-	Name                      string                   `json:"name"`
-	Type                      string                   `json:"type"`
-	Status                    string                   `json:"status"`
-	Enabled                   bool                     `json:"enabled"`
-	DefaultRoute              bool                     `json:"defaultRoute"`
-	ISPInterface              string                   `json:"ispInterface,omitempty"`
-	ISPInterfaceLabel         string                   `json:"ispInterfaceLabel,omitempty"`
-	ResolvedISPInterface      string                   `json:"resolvedIspInterface,omitempty"`
-	ResolvedISPInterfaceLabel string                   `json:"resolvedIspInterfaceLabel,omitempty"`
-	Endpoint                  string                   `json:"endpoint"`
-	Address                   string                   `json:"address"`
-	InterfaceName             string                   `json:"interfaceName"`
-	NDMSName                  string                   `json:"ndmsName,omitempty"`
-	HasAddressConflict        bool                     `json:"hasAddressConflict"`
-	RxBytes                   int64                    `json:"rxBytes"`
-	TxBytes                   int64                    `json:"txBytes"`
-	LastHandshake             string                   `json:"lastHandshake"`
-	Backend                   string                   `json:"backend"`
-	BackendType               string                   `json:"backendType,omitempty"`
-	AWGVersion                string                   `json:"awgVersion"`
-	MTU                       int                      `json:"mtu"`
-	StartedAt                 string                          `json:"startedAt,omitempty"`
-	PingCheck                 pingcheck.TunnelPingInfo        `json:"pingCheck"`
+	ID                        string                           `json:"id"`
+	Name                      string                           `json:"name"`
+	Type                      string                           `json:"type"`
+	Status                    string                           `json:"status"`
+	Enabled                   bool                             `json:"enabled"`
+	DefaultRoute              bool                             `json:"defaultRoute"`
+	ISPInterface              string                           `json:"ispInterface,omitempty"`
+	ISPInterfaceLabel         string                           `json:"ispInterfaceLabel,omitempty"`
+	ResolvedISPInterface      string                           `json:"resolvedIspInterface,omitempty"`
+	ResolvedISPInterfaceLabel string                           `json:"resolvedIspInterfaceLabel,omitempty"`
+	Endpoint                  string                           `json:"endpoint"`
+	Address                   string                           `json:"address"`
+	InterfaceName             string                           `json:"interfaceName"`
+	NDMSName                  string                           `json:"ndmsName,omitempty"`
+	HasAddressConflict        bool                             `json:"hasAddressConflict"`
+	RxBytes                   int64                            `json:"rxBytes"`
+	TxBytes                   int64                            `json:"txBytes"`
+	LastHandshake             string                           `json:"lastHandshake"`
+	Backend                   string                           `json:"backend"`
+	BackendType               string                           `json:"backendType,omitempty"`
+	AWGVersion                string                           `json:"awgVersion"`
+	MTU                       int                              `json:"mtu"`
+	StartedAt                 string                           `json:"startedAt,omitempty"`
+	PingCheck                 pingcheck.TunnelPingInfo         `json:"pingCheck"`
 	ConnectivityCheck         *storage.ConnectivityCheckConfig `json:"connectivityCheck,omitempty"`
 }
 
@@ -593,7 +626,7 @@ func (h *TunnelsHandler) listItems(ctx context.Context) ([]tunnelItem, error) {
 			ID:                        t.ID,
 			Name:                      t.Name,
 			Type:                      "awg",
-			Status:                    stateToStatus(t.State),
+			Status:                    h.statusForDisplay(t.ID, backend, t.State),
 			Enabled:                   t.Enabled,
 			DefaultRoute:              t.DefaultRoute,
 			ISPInterface:              ispInterface,
