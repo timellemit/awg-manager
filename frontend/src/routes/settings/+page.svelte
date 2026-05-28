@@ -44,6 +44,7 @@
 	} from "$lib/types/usageLevel";
 	import { usageLevel } from "$lib/stores/settings";
 	import { waitForBackendRestart } from "$lib/restartRecovery";
+	import { hasDevelopChannelQuizPassed } from "$lib/utils/developChannelGate";
 
 	const expandUsageLevel = $derived($page.url.searchParams.has('mode'));
 
@@ -459,11 +460,11 @@ onMount(() => {
 
 	function requestChannel(channel: 'stable' | 'develop') {
 		if (!settings || settings.updates.channel === channel) return;
-		if (channel === 'develop') {
+		if (channel === 'develop' && !hasDevelopChannelQuizPassed()) {
 			developGateOpen = true;
 			return;
 		}
-		void selectChannel('stable');
+		void selectChannel(channel);
 	}
 
 	async function selectChannel(channel: 'stable' | 'develop') {
