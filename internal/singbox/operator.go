@@ -2392,6 +2392,12 @@ func (o *Operator) Update(ctx context.Context) error {
 	if o.inst.MatchesRequired(ctx) {
 		return nil
 	}
+	if o.inst.EvaluateInstallState() == installer.InstallStateOutdatedNoSpace {
+		if o.installProgress != nil {
+			o.installProgress("update", "error", 0, 0, "недостаточно места для обновления")
+		}
+		return nil
+	}
 	report := func(phase string, downloaded, total int64, errMsg string) {
 		if o.installProgress != nil {
 			o.installProgress("update", phase, downloaded, total, errMsg)

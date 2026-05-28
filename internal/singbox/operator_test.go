@@ -1783,3 +1783,53 @@ func TestOperator_Install_NoSpace_ReturnsNil(t *testing.T) {
 		t.Fatalf("EvaluateInstallState=%q, want %q", got, installer.InstallStateMissingNoSpace)
 	}
 }
+
+func TestOperator_Update_NoSpace_ReturnsNil(t *testing.T) {
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "sing-box")
+	if err := os.WriteFile(binary, []byte("old-content"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	op := NewOperator(OperatorDeps{Dir: dir, Binary: binary})
+	inst := installer.New(binary, "test-arch", installer.BinarySpec{
+		Version: "1.2.3", URL: "u", SHA256: "different-sha", Size: 100 << 20,
+	}, nil)
+	inst.SetFreeDiskFn(func(string) (int64, bool) { return 50 << 20, true })
+	op.SetInstaller(inst)
+
+	if err := op.Update(context.Background()); err != nil {
+		t.Fatalf("Update returned error, expected nil: %v", err)
+	}
+	if got := inst.EvaluateInstallState(); got != installer.InstallStateOutdatedNoSpace {
+		t.Fatalf("EvaluateInstallState=%q, want %q", got, installer.InstallStateOutdatedNoSpace)
+	}
+}
+
+// same-version+same-sha → MatchesRequired==true → Update должен быть no-op
+// без обращения к gate (gate стоит ПОСЛЕ MatchesRequired early-return).
+func TestOperator_Update_SameVersionSameSHA_NoOp(t *testing.T) {
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "sing-box")
+	// Скрипт, выводящий точный version-format, который парсит installer.versionRe.
+	body := []byte("#!/bin/sh\necho 'sing-box version 1.2.3'\n")
+	sum := sha256.Sum256(body)
+	sha := hex.EncodeToString(sum[:])
+	if err := os.WriteFile(binary, body, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	op := NewOperator(OperatorDeps{Dir: dir, Binary: binary})
+	inst := installer.New(binary, "test-arch", installer.BinarySpec{
+		Version: "1.2.3", URL: "u", SHA256: sha, Size: 100 << 20,
+	}, nil)
+	// freeDisk специально мал — gate сработал бы, если бы достигся
+	inst.SetFreeDiskFn(func(string) (int64, bool) { return 1 << 10, true })
+	op.SetInstaller(inst)
+
+	if err := op.Update(context.Background()); err != nil {
+		t.Fatalf("Update returned error, expected no-op nil: %v", err)
+	}
+	// Бинарь не тронут — Update вернулся через MatchesRequired до gate'а.
+	if _, err := os.Stat(binary); err != nil {
+		t.Fatalf("binary disappeared: %v", err)
+	}
+}
