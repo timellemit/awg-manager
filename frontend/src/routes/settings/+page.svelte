@@ -737,6 +737,7 @@ onMount(() => {
 						outbounds={$downloadOutbounds}
 						loading={$downloadOutboundsLoading}
 						error={$downloadOutboundsError}
+						routeSelectorEnabled={singboxInstalled || singboxStatusLoading}
 						onRefresh={refreshDownloadOutbounds}
 						onSelectRoute={selectDownloadRoute}
 					/>
