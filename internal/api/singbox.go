@@ -33,6 +33,9 @@ type SingboxStatusData struct {
 	CurrentSHA256    string   `json:"currentSha256,omitempty" example:"76e67bb07b5c2bf4cef108c2f21a5ffaa684d124c21ffe220fc89b39cf1de934"`
 	RequiredSHA256   string   `json:"requiredSha256,omitempty" example:"76e67bb07b5c2bf4cef108c2f21a5ffaa684d124c21ffe220fc89b39cf1de934"`
 	UpdateAvailable  bool     `json:"updateAvailable" example:"false"`
+	InstallState  string `json:"installState" example:"outdated_no_space"`
+	RequiredBytes int64  `json:"requiredBytes" example:"32145678"`
+	FreeBytes     int64  `json:"freeBytes" example:"8221456"`
 }
 
 func singboxStatusData(s singbox.Status) SingboxStatusData {
@@ -51,6 +54,9 @@ func singboxStatusData(s singbox.Status) SingboxStatusData {
 		CurrentSHA256:    s.CurrentSHA256,
 		RequiredSHA256:   s.RequiredSHA256,
 		UpdateAvailable:  s.UpdateAvailable,
+		InstallState:     s.InstallState,
+		RequiredBytes:    s.RequiredBytes,
+		FreeBytes:        s.FreeBytes,
 	}
 }
 
