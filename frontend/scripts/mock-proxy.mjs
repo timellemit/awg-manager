@@ -892,36 +892,40 @@ const AWG_BASE_LATENCY = (() => {
 	return map;
 })();
 
-function buildConnectivityMatrixEvent() {
+function buildConnectivityMatrixEvent({ forced = false } = {}) {
 	const nowIso = new Date().toISOString();
-	const selfTarget = { id: 'self', name: 'Self-check', host: '', url: '' };
+	const targets = [
+		{ id: 'self', name: 'Self-check', host: '', url: '' },
+		{ id: 'dns-cf', name: 'Cloudflare DNS', host: '1.1.1.1', url: '' },
+		{ id: 'dns-google', name: 'Google DNS', host: '8.8.8.8', url: '' },
+		{ id: 'dns-quad9', name: 'Quad9 DNS', host: '9.9.9.9', url: '' },
+		{ id: 'cc-gstatic', name: 'connectivitycheck.gstatic.com', host: 'connectivitycheck.gstatic.com', url: '' },
+	];
 
 	const cells = [];
 	const tunnelEntries = [];
+	const profiles = new Map();
+
+	function hashNumber(...parts) {
+		let h = 0;
+		for (const part of parts) {
+			const text = String(part ?? '');
+			for (let i = 0; i < text.length; i++) h = ((h << 5) - h + text.charCodeAt(i)) | 0;
+		}
+		return Math.abs(h);
+	}
+
+	function addTunnel(row, profile) {
+		tunnelEntries.push(row);
+		profiles.set(row.id, profile);
+	}
 
 	for (const t of MOCK_AWG_TUNNELS) {
 		const base = AWG_BASE_LATENCY[t.id] ?? null;
 		const isActive = t.status === 'running' || t.status === 'broken';
 		const pingFailed = t.pingCheck?.status === 'failed';
 		const selfCheckFail = MOCK_AWG_SELF_CHECK_FAIL.has(t.id);
-
-		// Add small jitter (±12ms) so the value visibly fluctuates
-		const jitter = Math.floor(Math.random() * 25) - 12;
-		const latency = base !== null && isActive && !pingFailed && !selfCheckFail
-			? Math.max(10, Math.min(300, base + jitter))
-			: null;
-
-		cells.push({
-			targetId: selfTarget.id,
-			tunnelId: t.id,
-			latencyMs: latency,
-			ok: isActive && !pingFailed && !selfCheckFail,
-			activeForRestart: false,
-			isSelf: true,
-			ts: nowIso,
-		});
-
-		tunnelEntries.push({
+		addTunnel({
 			id: t.id,
 			name: t.name,
 			ifaceName: t.interfaceName,
@@ -932,11 +936,116 @@ function buildConnectivityMatrixEvent() {
 			backend: t.backend,
 			awgVersion: t.awgVersion,
 			defaultRoute: !!t.defaultRoute,
+		}, {
+			base,
+			up: base !== null && isActive && !pingFailed && !selfCheckFail,
+			blankTargets: new Set(),
+			failedTargets: pingFailed || selfCheckFail ? new Set(targets.map((x) => x.id)) : new Set(),
 		});
 	}
 
+	for (const t of MOCK_SYSTEM_TUNNELS) {
+		const id = `sys-${t.id}`;
+		const up = t.connected !== false && t.status === 'up';
+		addTunnel({
+			id,
+			name: t.description || t.interfaceName || t.id,
+			ifaceName: t.interfaceName,
+			pingcheckTarget: '',
+			selfTarget: '',
+			selfMethod: 'system',
+			source: 'system',
+		}, {
+			base: up ? 35 + (hashNumber(id) % 90) : null,
+			up,
+			blankTargets: new Set(),
+			failedTargets: up ? new Set(['dns-quad9']) : new Set(targets.map((x) => x.id)),
+		});
+	}
+
+	for (const t of MOCK_SINGBOX_TUNNELS) {
+		const connected = !!(t.running && t.connectivity?.connected);
+		const base = connected ? (Number(t.connectivity?.latency) || 60 + (hashNumber(t.tag) % 220)) : null;
+		addTunnel({
+			id: t.tag,
+			name: t.tag,
+			ifaceName: t.proxyInterface,
+			pingcheckTarget: '',
+			selfTarget: '',
+			selfMethod: 'disabled',
+			source: 'singbox',
+			singboxTag: t.tag,
+			clashDelay: connected ? base : undefined,
+			urltestGroup: connected ? 'auto' : '',
+			protocol: t.protocol,
+			security: t.security,
+			transport: t.transport,
+		}, {
+			base,
+			up: connected,
+			blankTargets: new Set(['self']),
+			failedTargets: connected ? new Set() : new Set(targets.map((x) => x.id)),
+		});
+	}
+
+	for (const sub of mockSubscriptions) {
+		const activeTag = String(sub?.activeMember || '');
+		if (!activeTag) continue;
+		const member = (sub.members ?? []).find((m) => m.tag === activeTag) ?? null;
+		const enabled = sub.enabled !== false && !(sub.lastError && String(sub.lastError).trim() !== '');
+		const base = enabled ? 45 + (hashNumber(activeTag) % 160) : null;
+		addTunnel({
+			id: activeTag,
+			name: sub.label || sub.selectorTag || activeTag,
+			ifaceName: sub.proxyIndex >= 0 ? `t2s${sub.proxyIndex}` : sub.inboundTag,
+			pingcheckTarget: '',
+			selfTarget: '',
+			selfMethod: 'disabled',
+			source: 'singbox',
+			singboxTag: activeTag,
+			clashDelay: enabled ? base : undefined,
+			urltestGroup: sub.mode === 'urltest' ? (sub.selectorTag || 'urltest') : '',
+			subscription: true,
+			protocol: member?.protocol,
+			security: member?.security,
+			transport: member?.transport,
+		}, {
+			base,
+			up: enabled,
+			blankTargets: new Set(['self']),
+			failedTargets: enabled ? new Set() : new Set(targets.map((x) => x.id)),
+		});
+	}
+
+	for (let ti = 0; ti < targets.length; ti++) {
+		const target = targets[ti];
+		for (let vi = 0; vi < tunnelEntries.length; vi++) {
+			const tunnel = tunnelEntries[vi];
+			const profile = profiles.get(tunnel.id) ?? {};
+			const blank = profile.blankTargets?.has(target.id);
+			const failed = !profile.up || profile.failedTargets?.has(target.id);
+			const base = Number(profile.base) || 80;
+			const hash = hashNumber(target.id, tunnel.id);
+			const drift = Math.round(Math.sin((Date.now() / 1800) + hash) * 9);
+			const forceJitter = forced ? Math.floor(Math.random() * 15) - 7 : 0;
+			const latency = blank || failed
+				? null
+				: Math.max(10, Math.min(520, base + (hash % 55) + drift + forceJitter + ti * 6));
+
+			cells.push({
+				targetId: target.id,
+				tunnelId: tunnel.id,
+				latencyMs: latency,
+				ok: latency !== null,
+				activeForRestart: tunnel.source === 'awg' && tunnel.defaultRoute && target.id === 'dns-google',
+				isSelf: target.id === 'self',
+				ts: nowIso,
+			});
+		}
+	}
+
 	return {
-		targets: [selfTarget],
+		targets,
 		tunnels: tunnelEntries,
 		cells,
 		updatedAt: nowIso,
@@ -3253,91 +3362,8 @@ const server = http.createServer(async (req, res) => {
 	}
 
 	if (req.method === 'GET' && path === '/monitoring/matrix') {
-		const forced = (req.url ?? '').includes('force=1');
-		fetchJSON('/monitoring/matrix').then(({ status, body }) => {
-			if (body && typeof body === 'object' && body.data) {
-				const data = body.data;
-				enrichMonitoringMatrixAwgTunnels(data.tunnels);
-				// On force=1 jitter the synthetic delay so the user sees the badge change.
-				const veespDelay = forced ? 40 + Math.floor(Math.random() * 240) : 78;
-				data.tunnels = [
-					...(data.tunnels ?? []),
-					{
-						id: 'veesp',
-						name: 'veesp',
-						ifaceName: 't2s0',
-						pingcheckTarget: '',
-						selfTarget: '',
-						selfMethod: 'disabled',
-						source: 'singbox',
-						singboxTag: 'veesp',
-						clashDelay: veespDelay,
-						urltestGroup: 'auto',
-						subscription: true,
-						protocol: 'vless',
-						security: 'reality',
-						transport: 'tcp',
-					},
-					{
-						id: 'prague',
-						name: 'prague',
-						ifaceName: 't2s1',
-						pingcheckTarget: '',
-						selfTarget: '',
-						selfMethod: 'disabled',
-						source: 'singbox',
-						singboxTag: 'prague',
-						protocol: 'vless',
-						security: 'tls',
-						transport: 'grpc',
-						// no urltest data — UI should NOT show the badge
-					},
-				];
-				const targets = [
-					{ id: 'dns-cf', name: 'Cloudflare DNS', host: '1.1.1.1', url: '' },
-					{ id: 'dns-google', name: 'Google DNS', host: '8.8.8.8', url: '' },
-					{ id: 'dns-quad9', name: 'Quad9 DNS', host: '9.9.9.9', url: '' },
-					{ id: 'cc-gstatic', name: 'connectivitycheck.gstatic.com', host: 'connectivitycheck.gstatic.com', url: '' },
-				];
-				data.targets = targets;
-
-				const primaryTunnelId = (data.tunnels ?? [])[0]?.id ?? '';
-				const nowIso = new Date().toISOString();
-				const baseLatencies = [84, 77, 79, 118];
-				const jitter = forced ? Math.floor(Math.random() * 9) - 4 : 0;
-
-				const cells = [];
-				for (let ti = 0; ti < targets.length; ti++) {
-					const target = targets[ti];
-					for (const tun of data.tunnels ?? []) {
-						if (tun.id === primaryTunnelId) {
-							cells.push({
-								targetId: target.id,
-								tunnelId: tun.id,
-								latencyMs: Math.max(15, baseLatencies[ti] + jitter),
-								ok: true,
-								activeForRestart: ti === 1,
-								isSelf: false,
-								ts: nowIso,
-							});
-						} else {
-							cells.push({
-								targetId: target.id,
-								tunnelId: tun.id,
-								latencyMs: null,
-								ok: false,
-								activeForRestart: false,
-								isSelf: false,
-								ts: nowIso,
-							});
-						}
-					}
-				}
-				data.cells = cells;
-				if (forced) data.updatedAt = new Date().toISOString();
-			}
-			send(res, status, body);
-		});
+		const forced = url.searchParams.get('force') === '1' || url.searchParams.get('force') === 'true';
+		send(res, 200, { success: true, data: buildConnectivityMatrixEvent({ forced }) });
 		return;
 	}
 

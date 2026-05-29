@@ -972,6 +972,68 @@
 		outline-offset: 2px;
 	}
 
+	/* Desktop monitoring: keep the visibility toggle inline with the tunnel name.
+	   The matrix eye is a lightweight icon action, not a red exclusion chip. */
+	@media (min-width: 769px) {
+		.th-tunnel > .tunnel-head {
+			display: inline-flex;
+			flex-direction: row;
+			align-items: center;
+			justify-content: center;
+			gap: 0.25rem;
+			width: 100%;
+			min-width: 0;
+		}
+
+		.th-tunnel > .tunnel-head > .tunnel-title-row,
+		.th-tunnel > .tunnel-head > .tunnel-toggle-row {
+			width: auto;
+			min-width: 0;
+		}
+
+		.th-tunnel > .tunnel-head > .tunnel-title-row {
+			flex: 0 1 auto;
+			justify-content: center;
+			text-align: center;
+		}
+
+		.th-tunnel > .tunnel-head > .tunnel-toggle-row {
+			flex: 0 0 auto;
+			justify-content: center;
+		}
+
+		.th-tunnel > .tunnel-head > .tunnel-toggle-row > .exclude-btn,
+		.th-tunnel > .tunnel-head > .tunnel-toggle-row > .exclude-btn.exclude-btn-restore {
+			width: 22px;
+			height: 22px;
+			padding: 0;
+			border: 0;
+			border-radius: var(--radius-sm);
+			background: transparent;
+			color: var(--color-text-muted);
+			font-size: 0;
+			box-shadow: none;
+		}
+
+		.th-tunnel > .tunnel-head > .tunnel-toggle-row > .exclude-btn::before {
+			width: 14px;
+			height: 14px;
+		}
+
+		.th-tunnel > .tunnel-head > .tunnel-toggle-row > .exclude-btn:hover,
+		.th-tunnel > .tunnel-head > .tunnel-toggle-row > .exclude-btn.exclude-btn-restore:hover {
+			background: var(--color-bg-hover);
+			border-color: transparent;
+			color: var(--color-text-primary);
+		}
+
+		.th-tunnel > .tunnel-head > .tunnel-toggle-row > .exclude-btn:focus-visible {
+			outline: 2px solid color-mix(in srgb, var(--color-accent) 45%, transparent);
+			outline-offset: 2px;
+			box-shadow: none;
+		}
+	}
+
 	@media (max-width: 768px) {
 		.mobile-tunnel-title-row :global(.badge) {
 			flex: 0 0 auto;
