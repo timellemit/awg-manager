@@ -668,7 +668,7 @@ func (o *OperatorNativeWG) RestoreKmodTunnel(ctx context.Context, stored *storag
 	if err != nil {
 		return fmt.Errorf("build kmod config: %w", err)
 	}
-	result, err := o.kmod.AddTunnel(stored.ID, kmodCfg)
+	result, err := o.kmod.RestoreTunnel(stored.ID, kmodCfg)
 	if err != nil {
 		return err
 	}
