@@ -14,6 +14,9 @@
   import { openAddWizard } from './addWizardStore';
   import RuleCard from './RuleCard.svelte';
   import { singboxRuleToCard } from './adapters';
+  import { api } from '$lib/api/client';
+  import { notifications } from '$lib/stores/notifications';
+  import { syncTunnelDnsRule } from './emptyStateActions';
   import type { RuleCardData } from './types';
 
   const rules = singboxRouterStore.rules;
@@ -50,6 +53,18 @@
     if (n >= 2 && n <= 4) return 'правила';
     return 'правил';
   }
+
+  async function handleDelete(index: number) {
+    if (!confirm(`Удалить правило #${String(index + 1).padStart(2, '0')}?`)) return;
+    try {
+      await api.singboxRouterDeleteRule(index);
+      await syncTunnelDnsRule();
+      await singboxRouterStore.loadAll();
+      notifications.success('Правило удалено');
+    } catch (e) {
+      notifications.error(`Ошибка: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
 </script>
 
 <section class="rules-panel">
@@ -79,7 +94,7 @@
   {:else}
     <div class="cards">
       {#each cards as card, i (card.id)}
-        <RuleCard {card} index={i} />
+        <RuleCard {card} index={i} onDelete={() => handleDelete(i)} />
       {/each}
     </div>
   {/if}
