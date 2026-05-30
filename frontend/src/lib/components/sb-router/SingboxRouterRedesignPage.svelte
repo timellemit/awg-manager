@@ -1,7 +1,7 @@
 <script lang="ts">
   import { page } from '$app/stores';
   import { singboxRouter as singboxRouterStore } from '$lib/stores/singboxRouter';
-  import { DeviceProxySubTab } from '$lib/components/singbox-routing';
+  import { DeviceProxySubTab, StagingBanner } from '$lib/components/singbox-routing';
   import SettingsDrawer from './SettingsDrawer.svelte';
   import { ConnectionsSubTab } from '$lib/components/routing/singboxRouter';
   import {
@@ -31,6 +31,7 @@
 </script>
 
 <PageShell engineStatus={sbEngineStatus}>
+  <StagingBanner />
   {#if activeSingboxSub === 'deviceproxy'}
     <DeviceProxySubTab />
   {:else if activeSingboxSub === 'connections'}
