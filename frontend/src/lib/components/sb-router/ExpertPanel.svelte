@@ -1,6 +1,6 @@
 <!--
   Источник дизайна: singbox-router/project/screens/MainExpert.jsx (MainExpertScreen)
-  Главная композиция Expert вида — заменяет старый SingboxRoutingPage.
+  Главная композиция Expert вида (полный набор: правила, rule-sets, outbounds, DNS, движок, прокси).
 
   Адаптации от шаблона:
   - onSaved → onSave (реальный prop у всех 5 модалов)
@@ -44,10 +44,6 @@
   import CompositeOutboundEditModal from '$lib/components/routing/singboxRouter/CompositeOutboundEditModal.svelte';
   import DNSServerEditModal from '$lib/components/routing/singboxRouter/DNSServerEditModal.svelte';
   import DNSRuleEditModal from '$lib/components/routing/singboxRouter/DNSRuleEditModal.svelte';
-  interface Props { readOnly?: boolean }
-  let { readOnly = false }: Props = $props();
-
-  const readOnlyActionTitle = 'Alpha-preview: на реальном роутере изменения отключены. Для изменений используйте рабочий интерфейс.';
 
   // Store subscriptions
   const storeStatus = singboxRouterStore.status;
@@ -132,7 +128,6 @@
 
   // Rule handlers
   async function handleDeleteRule(idx: number) {
-    if (readOnly) return;
     if (!confirm(`Удалить правило #${idx}?`)) return;
     try {
       await api.singboxRouterDeleteRule(idx);
@@ -144,7 +139,6 @@
   }
 
   async function handleMoveRule(idx: number, dir: 'up' | 'down') {
-    if (readOnly) return;
     const to = dir === 'up' ? idx - 1 : idx + 1;
     if (to < 0 || to >= $storeRules.length) return;
     try {
@@ -157,7 +151,6 @@
 
   // Rule save handlers (called by modals)
   async function handleRuleSave(rule: SingboxRouterRule) {
-    if (readOnly) return;
     if (ruleEditIdx !== null) {
       await api.singboxRouterUpdateRule(ruleEditIdx, rule);
     } else {
@@ -169,7 +162,6 @@
 
   // RuleSet handlers
   async function handleDeleteRs(tag: string) {
-    if (readOnly) return;
     if (!confirm(`Удалить набор «${tag}»?`)) return;
     try {
       await api.singboxRouterDeleteRuleSet(tag);
@@ -181,14 +173,12 @@
   }
 
   async function handleRsAddSave(rs: SingboxRouterRuleSet) {
-    if (readOnly) return;
     await api.singboxRouterAddRuleSet(rs);
     rsAddOpen = false;
     await singboxRouterStore.loadAll();
   }
 
   async function handleRsEditSave(rs: SingboxRouterRuleSet) {
-    if (readOnly) return;
     if (rsEditTag !== null) {
       await api.singboxRouterUpdateRuleSet(rsEditTag, rs);
     }
@@ -198,14 +188,12 @@
 
   // Outbound handlers
   async function handleOutboundAddSave(o: SingboxRouterOutbound) {
-    if (readOnly) return;
     await api.singboxRouterAddOutbound(o);
     outboundAddOpen = false;
     await singboxRouterStore.loadAll();
   }
 
   async function handleOutboundEditSave(o: SingboxRouterOutbound) {
-    if (readOnly) return;
     if (outboundEditTag !== null) {
       await api.singboxRouterUpdateOutbound(outboundEditTag, o);
     }
@@ -215,14 +203,12 @@
 
   // DNS server handlers
   async function handleDnsServerAddSave(server: SingboxRouterDNSServer) {
-    if (readOnly) return;
     await api.singboxRouterAddDNSServer(server);
     dnsServerAddOpen = false;
     await singboxRouterStore.loadAll();
   }
 
   async function handleDnsServerEditSave(server: SingboxRouterDNSServer) {
-    if (readOnly) return;
     if (dnsServerEditTag !== null) {
       await api.singboxRouterUpdateDNSServer(dnsServerEditTag, server);
     }
@@ -232,14 +218,12 @@
 
   // DNS rule handlers
   async function handleDnsRuleAddSave(rule: SingboxRouterDNSRule) {
-    if (readOnly) return;
     await api.singboxRouterAddDNSRule(rule);
     dnsRuleAddOpen = false;
     await singboxRouterStore.loadAll();
   }
 
   async function handleDnsRuleEditSave(rule: SingboxRouterDNSRule) {
-    if (readOnly) return;
     if (dnsRuleEditIdx !== null) {
       await api.singboxRouterUpdateDNSRule(dnsRuleEditIdx, rule);
     }
@@ -271,16 +255,14 @@
         title="Правила маршрутизации"
         count={String($storeRules.length)}
         actionLabel="+ Правило"
-        actionDisabled={readOnly}
-        actionTitle={readOnly ? readOnlyActionTitle : undefined}
-        onAction={() => { if (!readOnly) openAddWizard(); }}
+        onAction={() => openAddWizard()}
       >
         <div class="panel-cap">first-match-wins · final → direct</div>
         <RoutingTable
           bare
           rules={$storeRules}
           outbounds={$storeOutbounds}
-          onEdit={(idx) => { if (!readOnly) ruleEditIdx = idx; }}
+          onEdit={(idx) => (ruleEditIdx = idx)}
           onDelete={handleDeleteRule}
           onMove={handleMoveRule}
         />
@@ -290,15 +272,13 @@
         title="Rule-sets"
         count={String($storeRuleSets.length)}
         actionLabel="+ Набор"
-        actionDisabled={readOnly}
-        actionTitle={readOnly ? readOnlyActionTitle : undefined}
-        onAction={() => { if (!readOnly) rsAddOpen = true; }}
+        onAction={() => (rsAddOpen = true)}
       >
         <div class="panel-cap">наборы доменов и IP, на которые ссылаются правила</div>
         <RuleSetsTable
           bare
           ruleSets={$storeRuleSets}
-          onEdit={(tag) => { if (!readOnly) rsEditTag = tag; }}
+          onEdit={(tag) => (rsEditTag = tag)}
           onDelete={handleDeleteRs}
         />
       </SidePanel>
@@ -309,13 +289,11 @@
         title="Outbounds"
         count={String($storeOutbounds.length)}
         actionLabel="+ Composite"
-        actionDisabled={readOnly}
-        actionTitle={readOnly ? readOnlyActionTitle : undefined}
-        onAction={() => { if (!readOnly) outboundAddOpen = true; }}
+        onAction={() => (outboundAddOpen = true)}
       >
         <OutboundsCompact
           outbounds={$storeOutbounds}
-          onEdit={(tag) => { if (!readOnly) outboundEditTag = tag; }}
+          onEdit={(tag) => (outboundEditTag = tag)}
         />
       </SidePanel>
 
@@ -323,18 +301,14 @@
         title="DNS-серверы"
         count={String($storeDnsServers.length)}
         actionLabel="+ Сервер"
-        actionDisabled={readOnly}
-        actionTitle={readOnly ? readOnlyActionTitle : undefined}
-        onAction={() => { if (!readOnly) dnsServerAddOpen = true; }}
+        onAction={() => (dnsServerAddOpen = true)}
       >
         <DnsServersCompact
           servers={$storeDnsServers}
           rules={$storeDnsRules}
-          onEditServer={(tag) => { if (!readOnly) dnsServerEditTag = tag; }}
-          onEditRule={(idx) => { if (!readOnly) dnsRuleEditIdx = idx; }}
-          onAddRule={() => { if (!readOnly) dnsRuleAddOpen = true; }}
-          addRuleDisabled={readOnly}
-          addRuleTitle={readOnly ? readOnlyActionTitle : undefined}
+          onEditServer={(tag) => (dnsServerEditTag = tag)}
+          onEditRule={(idx) => (dnsRuleEditIdx = idx)}
+          onAddRule={() => (dnsRuleAddOpen = true)}
         />
       </SidePanel>
 

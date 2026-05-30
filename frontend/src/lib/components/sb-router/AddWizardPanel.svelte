@@ -37,8 +37,6 @@
   import { buildTemplateList } from './templatesData';
   import { submitWizard, ValidationError } from './addWizardActions';
   import MobileBottomBar from './MobileBottomBar.svelte';
-  interface Props { readOnly?: boolean }
-  let { readOnly = false }: Props = $props();
 
   const outbounds = singboxRouterStore.outbounds;
   const presets = singboxRouterStore.presets;
@@ -89,10 +87,6 @@
   let submitting = $state(false);
 
   async function doSave(continueAfter: boolean) {
-    if (readOnly) {
-      notifications.warning('Новый дизайн открыт в режиме предпросмотра; изменения выполняйте в рабочем интерфейсе.');
-      return;
-    }
     if (!canSave) return;
     submitting = true;
     try {
@@ -162,7 +156,7 @@
     </div>
 
     <WizardStep n={1} title="Что направить" hint="выберите шаблон или опишите вручную" active={true}>
-      <button type="button" class="picker-btn" onclick={() => openTemplatesModal()} disabled={readOnly}>
+      <button type="button" class="picker-btn" onclick={() => openTemplatesModal()}>
         <div class="picker-icon">+</div>
         <div class="picker-text">
           <div class="picker-title">Выбрать из готовых шаблонов</div>
@@ -216,7 +210,7 @@
             <div class="tunnel-chips">
               {#each tunnelOutbounds as ob (ob.tag)}
                 {@const selected = $wizardTunnelTag === ob.tag}
-                <button type="button" class="t-chip" class:selected onclick={() => setTunnelTag(ob.tag)} disabled={readOnly}>
+                <button type="button" class="t-chip" class:selected onclick={() => setTunnelTag(ob.tag)}>
                   <Zap size={12} />
                   <span class="tag">{ob.tag}</span>
                   <span class="ttype">· {ob.type}</span>
@@ -243,10 +237,10 @@
     <div class="actions desktop-only">
       <Button variant="ghost" size="md" onclick={closeAddWizard} disabled={submitting}>Отмена</Button>
       <div class="actions-right">
-        <Button variant="secondary" size="md" onclick={() => doSave(true)} disabled={readOnly || !canSave || submitting}>
+        <Button variant="secondary" size="md" onclick={() => doSave(true)} disabled={!canSave || submitting}>
           + Добавить ещё одно
         </Button>
-        <Button variant="primary" size="md" onclick={() => doSave(false)} disabled={readOnly || !canSave || submitting} iconBefore={iconCheck}>
+        <Button variant="primary" size="md" onclick={() => doSave(false)} disabled={!canSave || submitting} iconBefore={iconCheck}>
           Сохранить
         </Button>
       </div>
@@ -255,7 +249,7 @@
     <MobileBottomBar>
       <Button variant="ghost" size="sm" onclick={closeAddWizard} disabled={submitting}>Отмена</Button>
       <div style="flex:1"></div>
-      <Button variant="primary" size="sm" onclick={() => doSave(false)} disabled={readOnly || !canSave || submitting} iconBefore={iconCheck}>
+      <Button variant="primary" size="sm" onclick={() => doSave(false)} disabled={!canSave || submitting} iconBefore={iconCheck}>
         Сохранить
       </Button>
     </MobileBottomBar>

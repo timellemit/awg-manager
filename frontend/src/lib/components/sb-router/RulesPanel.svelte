@@ -18,8 +18,6 @@
   import RuleCard from './RuleCard.svelte';
   import { singboxRuleToCard } from './adapters';
   import type { RuleCardData } from './types';
-  interface Props { readOnly?: boolean }
-  let { readOnly = false }: Props = $props();
 
   const rules = singboxRouterStore.rules;
   const ruleSets = singboxRouterStore.ruleSets;
@@ -27,8 +25,8 @@
 
   // Триггерим полную загрузку при mount'е. Без этого панель в Beginner
   // mode при первом заходе показывает empty state до тех пор пока юзер
-  // не переключится в Expert (там SingboxRoutingPage.onMount делает
-  // loadAll). Симметрично с тем как Expert грузит данные.
+  // не переключится в Expert (там данные грузятся через store.loadAll
+  // на mount'е панели). Симметрично с тем как Expert грузит данные.
   onMount(() => {
     void singboxRouterStore.loadAll();
   });
@@ -67,10 +65,10 @@
       <div class="counter">
         {count} {pluralRules(count)}
       </div>
-      <Button variant="primary" size="sm" onclick={() => openTemplatesModal()} disabled={readOnly}>
+      <Button variant="primary" size="sm" onclick={() => openTemplatesModal()}>
         + Из шаблона
       </Button>
-      <Button variant="secondary" size="sm" onclick={() => openAddWizard()} disabled={readOnly}>
+      <Button variant="secondary" size="sm" onclick={() => openAddWizard()}>
         + Правило
       </Button>
       <Button variant="secondary" size="sm" onclick={(_e) => openTrace()}>

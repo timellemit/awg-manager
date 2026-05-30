@@ -20,8 +20,6 @@
     applyRecipe, createDefaultPolicy, setAutoDetectWan, setManualWan, enableEngine,
   } from './emptyStateActions';
   import { openAddWizard } from './addWizardStore';
-  interface Props { readOnly?: boolean }
-  let { readOnly = false }: Props = $props();
 
   const status = singboxRouterStore.status;
   const settings = singboxRouterStore.settings;
@@ -56,7 +54,6 @@
   }
 
   async function handlePolicy() {
-    if (readOnly) return;
     busyStep = 'policy';
     try {
       await createDefaultPolicy();
@@ -69,7 +66,6 @@
   }
 
   async function handleAutoWan() {
-    if (readOnly) return;
     busyStep = 'wan';
     try {
       await setAutoDetectWan();
@@ -82,7 +78,6 @@
   }
 
   async function handleManualWan(e: Event) {
-    if (readOnly) return;
     const iface = (e.currentTarget as HTMLSelectElement).value;
     if (!iface) return;
     busyStep = 'wan';
@@ -97,7 +92,6 @@
   }
 
   async function handleEnable() {
-    if (readOnly) return;
     busyStep = 'enable';
     try {
       await enableEngine();
@@ -110,7 +104,6 @@
   }
 
   async function handleRecipe(id: string) {
-    if (readOnly) return;
     try {
       await applyRecipe(id);
     } catch (e) {
@@ -127,9 +120,6 @@
   <EmptyHero />
 
   <section class="section">
-    {#if readOnly}
-      <p class="hint-mini">Alpha-preview: на реальном роутере действия отключены. Для изменений используйте рабочий интерфейс.</p>
-    {/if}
     <header class="sec-head">
       <h3 class="sec-title">Запустить за 3 шага</h3>
       <p class="sec-sub">После запуска вы сможете вернуться и настроить правила</p>
@@ -150,7 +140,7 @@
               variant="primary"
               size="md"
               fullWidth
-              disabled={readOnly || busyStep !== null}
+              disabled={busyStep !== null}
               onclick={handlePolicy}
               iconBefore={iconPlus}
             >
@@ -177,7 +167,7 @@
               variant="primary"
               size="md"
               fullWidth
-              disabled={readOnly || !step1Done || busyStep !== null}
+              disabled={!step1Done || busyStep !== null}
               onclick={handleAutoWan}
               iconBefore={iconGlobe}
             >
@@ -191,7 +181,7 @@
               <span class="manual-label">или вручную:</span>
               <select
                 class="wan-select"
-                disabled={readOnly || busyStep !== null}
+                disabled={busyStep !== null}
                 onchange={handleManualWan}
               >
                 <option value="">— выберите интерфейс —</option>
@@ -223,7 +213,7 @@
               variant="primary"
               size="md"
               fullWidth
-              disabled={readOnly || !step1Done || !step2Done || busyStep !== null}
+              disabled={!step1Done || !step2Done || busyStep !== null}
               onclick={handleEnable}
               iconBefore={iconPower}
             >
@@ -256,7 +246,7 @@
     {#if step3Done}
       <div class="post-enable">
         <p class="post-text">Движок запущен. Создайте первое правило, чтобы трафик пошёл через туннель.</p>
-        <Button variant="primary" size="md" onclick={() => openAddWizard()} iconBefore={iconPlus} disabled={readOnly}>
+        <Button variant="primary" size="md" onclick={() => openAddWizard()} iconBefore={iconPlus}>
           Создать первое правило
         </Button>
       </div>
