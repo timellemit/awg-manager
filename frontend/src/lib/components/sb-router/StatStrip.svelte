@@ -26,7 +26,7 @@
   }
 </script>
 
-<div class="strip">
+<div class="strip" style:--cols={cells.length}>
   {#each cells as cell, i (i)}
     <div class="cell" class:last={i === cells.length - 1}>
       <div class="label">{cell.label}</div>
@@ -38,7 +38,7 @@
 <style>
   .strip {
     display: grid;
-    grid-template-columns: repeat(6, 1fr);
+    grid-template-columns: repeat(var(--cols, 6), minmax(0, 1fr));
     gap: 0;
     margin-bottom: 24px;
     background: var(--bg-secondary);
