@@ -12,6 +12,7 @@ export interface FinishSetupArgs {
   selectedTemplates: string[];
   customFields: CustomMatcherFields;
   groups: TemplateGroup[];
+  tunneledRuleSetTags: string[];
 }
 
 export async function finishSetup(args: FinishSetupArgs): Promise<SubmitResult> {
@@ -22,6 +23,11 @@ export async function finishSetup(args: FinishSetupArgs): Promise<SubmitResult> 
     tunnelTag: args.tunnelTag,
     groups: args.groups,
   });
+  try {
+    await applyDnsDefaults(args.tunnelTag, args.tunneledRuleSetTags);
+  } catch (e) {
+    result.failures.push({ id: 'dns', error: e instanceof Error ? e.message : String(e) });
+  }
   await api.singboxRouterPutRouteFinal('direct');
   await mergeAndSaveSettings({
     deviceMode: 'all',

@@ -34,6 +34,16 @@
 
   const hasServices = $derived($templatesSelection.size > 0);
 
+  const tunneledRuleSetTags = $derived.by(() => {
+    const tags = new Set<string>();
+    for (const p of $presets) {
+      if ($templatesSelection.has(`svc:${p.id}`)) {
+        for (const rs of p.ruleSets ?? []) tags.add(rs.tag);
+      }
+    }
+    return Array.from(tags);
+  });
+
   const step1Done = $derived(selectedTunnel !== null);
   const step2Done = $derived(step1Done && hasServices);
   const canFinish = $derived(step1Done && step2Done && !finishing);
@@ -47,6 +57,7 @@
         selectedTemplates: Array.from(get(templatesSelection)),
         customFields: { domainSuffix: '', ipCidr: '', sourceIpCidr: '', port: '', ruleSetTags: new Set<string>() },
         groups,
+        tunneledRuleSetTags,
       });
       if (result.failures.length === 0) {
         notifications.success('Готово — sing-box запущен');

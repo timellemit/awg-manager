@@ -52,11 +52,16 @@ describe('emptyStateActions', () => {
       selectedTemplates: ['svc:netflix'],
       customFields: empty,
       groups: [],
+      tunneledRuleSetTags: ['geosite-netflix'],
     });
     expect(submitWizard).toHaveBeenCalledWith(
       expect.objectContaining({ outboundCategory: 'tunnel', tunnelTag: 'wg-nl', selectedTemplates: ['svc:netflix'] }),
     );
     expect(api.singboxRouterPutRouteFinal).toHaveBeenCalledWith('direct');
+    expect(api.singboxRouterPutDNSGlobals).toHaveBeenCalledWith(
+      expect.objectContaining({ final: 'dns-direct' }),
+    );
+    expect(api.singboxRouterEnable).toHaveBeenCalled();
     expect(mergeAndSaveSettings).toHaveBeenCalledWith(
       expect.objectContaining({ deviceMode: 'all', wanAutoDetect: true, wanInterface: '', snifferEnabled: true }),
     );
