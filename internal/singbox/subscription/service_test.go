@@ -36,6 +36,7 @@ type fakeMutator struct {
 	removedProxies   []int
 	selectedSelector []string          // "selectorTag→memberTag" pairs recorded by SelectClashProxy
 	clashActiveByTag map[string]string // selectorTag → live active member
+	declaredTags     []string          // DeclaredOutboundTags result; nil = no-op (no pruning)
 }
 
 func (f *fakeMutator) AllocListenPort() (uint16, error) {
@@ -86,6 +87,7 @@ func (f *fakeMutator) RemoveProxy(_ context.Context, idx int) error {
 	return nil
 }
 func (f *fakeMutator) Reload(ctx context.Context) error { return nil }
+func (f *fakeMutator) DeclaredOutboundTags() []string   { return f.declaredTags }
 func (f *fakeMutator) SelectClashProxy(selectorTag, memberTag string) error {
 	f.selectedSelector = append(f.selectedSelector, selectorTag+"→"+memberTag)
 	return nil
@@ -256,6 +258,50 @@ func TestService_Refresh_AddsNewMember(t *testing.T) {
 	updated, _ := store.Get(sub.ID)
 	if len(updated.MemberTags) != 2 {
 		t.Errorf("MemberTags after refresh=%d want 2", len(updated.MemberTags))
+	}
+}
+
+// Root-cause-B: a server that flush() dropped (absent from the declared/
+// emitted set) must be pruned from stored MemberTags on refresh, so it
+// can't be re-introduced as a dangling group member later.
+func TestService_Refresh_PrunesUndeclaredMember(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("vless://3a3b1c2e-9999-4321-aaaa-1234567890ab@example.com:443?security=tls&sni=h\n" +
+			"trojan://p@example.com:444?security=tls&sni=h\n"))
+	}))
+	defer srv.Close()
+
+	store, _ := NewStore(filepath.Join(t.TempDir(), "sub.json"))
+	mutator := &fakeMutator{}
+	svc := NewService(store, mutator)
+	withLegacySetupNoop(svc)
+
+	sub, err := svc.Create(context.Background(), CreateInput{Label: "test", URL: srv.URL, Enabled: true})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	// First refresh: declaredTags nil → no pruning, both members materialize.
+	if _, err := svc.Refresh(context.Background(), sub.ID); err != nil {
+		t.Fatalf("Refresh#1: %v", err)
+	}
+	updated, _ := store.Get(sub.ID)
+	if len(updated.MemberTags) != 2 {
+		t.Fatalf("after refresh#1 MemberTags=%d want 2", len(updated.MemberTags))
+	}
+
+	// Simulate flush dropping the 2nd server: the slot now declares only the
+	// group + the first server. Second refresh must prune the undeclared one.
+	keep := updated.MemberTags[0]
+	mutator.declaredTags = []string{sub.SelectorTag, keep}
+	if _, err := svc.Refresh(context.Background(), sub.ID); err != nil {
+		t.Fatalf("Refresh#2: %v", err)
+	}
+	updated2, _ := store.Get(sub.ID)
+	if len(updated2.MemberTags) != 1 || updated2.MemberTags[0] != keep {
+		t.Fatalf("after refresh#2 MemberTags=%v want [%s]", updated2.MemberTags, keep)
+	}
+	if updated2.ActiveMember != keep {
+		t.Fatalf("ActiveMember=%q want %q", updated2.ActiveMember, keep)
 	}
 }
 

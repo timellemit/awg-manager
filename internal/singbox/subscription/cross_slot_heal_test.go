@@ -59,3 +59,31 @@ func TestCleanCrossSlotUnknownRefs_DropsEmptyGroup(t *testing.T) {
 		t.Fatalf("empty group should be dropped, got %d outbounds", len(cfg.Outbounds))
 	}
 }
+
+// Root-cause-B: a server flush() dropped (not in the declared/emitted set)
+// must be pruned from the stored members, so later group rebuilds don't
+// re-reference it as a dangling member. ActiveMember reconciliation is left
+// to Store.SetMembers; here we only verify the member pruning.
+func TestFilterDeclaredMembers(t *testing.T) {
+	members := []MemberInfo{{Tag: "s1"}, {Tag: "s2"}, {Tag: "dropped"}}
+	declared := map[string]bool{"s1": true, "s2": true, "grp": true} // "dropped" missing
+
+	kept, droppedTags := filterDeclaredMembers(members, declared)
+
+	if len(kept) != 2 || kept[0].Tag != "s1" || kept[1].Tag != "s2" {
+		t.Fatalf("kept = %+v, want [s1 s2]", kept)
+	}
+	if len(droppedTags) != 1 || droppedTags[0] != "dropped" {
+		t.Fatalf("droppedTags = %v, want [dropped]", droppedTags)
+	}
+}
+
+// When the mutator can't report declared tags (empty), members pass through
+// unchanged — never nuke everything on missing data.
+func TestFilterDeclaredMembers_EmptyDeclaredIsNoop(t *testing.T) {
+	members := []MemberInfo{{Tag: "s1"}, {Tag: "s2"}}
+	kept, droppedTags := filterDeclaredMembers(members, map[string]bool{})
+	if len(kept) != 2 || len(droppedTags) != 0 {
+		t.Fatalf("empty declared must be no-op: kept=%v dropped=%v", kept, droppedTags)
+	}
+}

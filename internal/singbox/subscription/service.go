@@ -38,6 +38,13 @@ type ConfigMutator interface {
 	// Returns ("", nil) when Clash is unreachable — callers treat this
 	// as "no live data" rather than as an error.
 	GetClashSelectorActive(selectorTag string) (string, error)
+	// DeclaredOutboundTags returns the outbound tags currently present in
+	// the committed subscriptions slot (after the last flush). The Service
+	// reconciles stored MemberTags against this so servers that flush
+	// dropped (sing-box rejected) don't linger and get re-introduced as
+	// dangling group members on later rebuilds. Empty slice = "can't
+	// report" (caller must treat as no-op, not as "drop everything").
+	DeclaredOutboundTags() []string
 }
 
 // Service is the subscription business-logic facade.
@@ -276,6 +283,17 @@ func (s *Service) refreshLocked(ctx context.Context, id string) (*RefreshResult,
 	for _, e := range diff.Existing {
 		newMembers = append(newMembers, toMemberInfo(e.Tag, e.Out))
 	}
+	// Reconcile against what actually materialized: flush() may have dropped
+	// servers sing-box rejected. Keeping them in MemberTags would re-create
+	// dangling group members on the next rebuild (cross-slot unknown-outbound).
+	declared := make(map[string]bool)
+	for _, t := range s.mutator.DeclaredOutboundTags() {
+		declared[t] = true
+	}
+	newMembers, prunedTags := filterDeclaredMembers(newMembers, declared)
+	if len(prunedTags) > 0 {
+		s.logWarn("subscription-refresh", id, fmt.Sprintf("pruned %d member(s) not materialized (dropped by validation): %s", len(prunedTags), strings.Join(prunedTags, ", ")))
+	}
 	if err := s.store.SetMembers(id, newMembers, diff.Orphan); err != nil {
 		return nil, err
 	}
@@ -298,6 +316,28 @@ func (s *Service) refreshLocked(ctx context.Context, id string) (*RefreshResult,
 	}
 	s.logInfo("subscription-refresh", id, fmt.Sprintf("done added=%d updated=%d orphaned=%d skipped_dup=%d skipped_vmess=%d skipped_other=%d parse_errors=%d", res.Added, res.Updated, res.Orphaned, res.SkippedDuplicate, res.SkippedVmess, res.SkippedOther, len(res.ParseErrors)))
 	return res, nil
+}
+
+// filterDeclaredMembers keeps only members whose outbound tag is actually
+// declared in the emitted slot, returning the kept members and the dropped
+// tags. flush() may silently drop servers sing-box rejects; without this the
+// stored MemberTags would keep referencing them and later group rebuilds
+// (SetActiveMember / add / replace / re-enable) would re-introduce dangling
+// members — the cross-slot unknown-outbound failure. When declared is empty
+// (mutator can't report) members pass through unchanged: never nuke
+// everything on missing data.
+func filterDeclaredMembers(members []MemberInfo, declared map[string]bool) (kept []MemberInfo, dropped []string) {
+	if len(declared) == 0 {
+		return members, nil
+	}
+	for _, m := range members {
+		if declared[m.Tag] {
+			kept = append(kept, m)
+		} else {
+			dropped = append(dropped, m.Tag)
+		}
+	}
+	return kept, dropped
 }
 
 // applyDiff commits the diff to sing-box config. Selector + mixed inbound +

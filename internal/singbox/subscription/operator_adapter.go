@@ -483,6 +483,26 @@ func (a *OperatorAdapter) flush() error {
 	return nil
 }
 
+// DeclaredOutboundTags returns the outbound tags present in the committed
+// subscriptions slot (after the last flush). The Service uses it to prune
+// stored MemberTags down to servers that actually materialized, so
+// flush-dropped servers don't linger as dangling group members.
+func (a *OperatorAdapter) DeclaredOutboundTags() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	tags := make([]string, 0, len(a.cfg.Outbounds))
+	for _, raw := range a.cfg.Outbounds {
+		ob, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if t := outboundTag(ob); t != "" {
+			tags = append(tags, t)
+		}
+	}
+	return tags
+}
+
 // cleanCrossSlotUnknownRefs removes member references (selector/urltest
 // "outbounds") to outbound tags that the cross-slot validator reported as
 // unknown-outbound for the subscriptions slot. This self-heals dangling
