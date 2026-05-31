@@ -1,5 +1,6 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
+    import { get } from 'svelte/store';
     import { goto } from '$app/navigation';
     import { page } from '$app/stores';
     import {
@@ -57,6 +58,21 @@
     let hydrarouteInstalled = $derived($routing.hydrarouteStatus?.installed ?? false);
     let hasDnsEngine = $derived(isOS5 || hydrarouteInstalled);
     let singboxInstalled = $derived($systemInfo.data?.singbox?.installed ?? false);
+
+    let pendingTab = $state<string | null>(null);
+
+    function requestTab(id: string): void {
+        const hasDraft = get(singboxRouterStore.staging)?.hasDraft ?? false;
+        if (activeTab === 'singbox' && id !== 'singbox' && hasDraft) {
+            pendingTab = id;
+            return;
+        }
+        activeTab = id as typeof activeTab;
+    }
+    function confirmLeave(): void {
+        if (pendingTab) activeTab = pendingTab as typeof activeTab;
+        pendingTab = null;
+    }
 
     // Search → edit rule integration
     let editRuleId = $state('');
@@ -273,7 +289,7 @@
     <Tabs
         tabs={tabItems}
         active={activeTab}
-        onchange={(id) => (activeTab = id as typeof activeTab)}
+        onchange={(id) => requestTab(id)}
         urlParam="tab"
         defaultTab="dns"
     />
@@ -326,6 +342,19 @@
     {/if}
     </div>
 </PageContainer>
+
+<Modal
+    open={pendingTab !== null}
+    title="Несохранённые правки маршрутизации"
+    size="sm"
+    onclose={() => (pendingTab = null)}
+>
+    <p>Правки sing-box сохранены как черновик, но <strong>ещё не применены</strong>. Если уйти с вкладки — маршрутизация не изменится, пока вы не нажмёте «Применить».</p>
+    {#snippet actions()}
+        <Button variant="ghost" size="md" onclick={() => (pendingTab = null)}>Остаться</Button>
+        <Button variant="primary" size="md" onclick={confirmLeave}>Уйти всё равно</Button>
+    {/snippet}
+</Modal>
 
 <Modal
     open={searchOpen}
