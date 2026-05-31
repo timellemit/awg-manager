@@ -15,7 +15,6 @@
 
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { goto } from '$app/navigation';
   import { singboxRouter as singboxRouterStore } from '$lib/stores/singboxRouter';
   import { notifications } from '$lib/stores/notifications';
   import { api } from '$lib/api/client';
@@ -27,7 +26,9 @@
     SingboxRouterOutbound,
     SingboxRouterDNSServer,
     SingboxRouterDNSRule,
+    DeviceProxyInstance,
   } from '$lib/types';
+  import { newDeviceProxyInstance } from '$lib/utils/deviceProxyInstance';
 
   import StatStrip, { type StatCellData } from './StatStrip.svelte';
   import SidePanel from './SidePanel.svelte';
@@ -36,6 +37,7 @@
   import OutboundsCompact from './OutboundsCompact.svelte';
   import DnsServersCompact from './DnsServersCompact.svelte';
   import DeviceProxyCompact from './DeviceProxyCompact.svelte';
+  import InboundSettingsDrawer from './InboundSettingsDrawer.svelte';
 
   import RuleEditModal from '$lib/components/routing/singboxRouter/RuleEditModal.svelte';
   import RuleSetAddModal from '$lib/components/routing/singboxRouter/RuleSetAddModal.svelte';
@@ -77,6 +79,29 @@
   let dnsServerAddOpen = $state(false);
   let dnsRuleEditIdx = $state<number | null>(null);
   let dnsRuleAddOpen = $state(false);
+
+  let inboundDrawerInstance = $state<DeviceProxyInstance | null>(null);
+  let inboundDrawerOpen = $state(false);
+  let dpReloadKey = $state(0);
+
+  function openInbound(in_: DeviceProxyInstance) {
+    inboundDrawerInstance = in_;
+    inboundDrawerOpen = true;
+  }
+  async function addInbound() {
+    let existing: DeviceProxyInstance[] = [];
+    try {
+      existing = await api.listDeviceProxyInstances();
+    } catch {
+      existing = [];
+    }
+    inboundDrawerInstance = newDeviceProxyInstance(existing);
+    inboundDrawerOpen = true;
+  }
+  function onInboundSaved() {
+    inboundDrawerOpen = false;
+    dpReloadKey += 1;
+  }
 
   onMount(() => {
     void singboxRouterStore.loadAll();
@@ -234,10 +259,6 @@
     dnsRuleEditIdx = null;
     await singboxRouterStore.loadAll();
   }
-
-  function navigateDeviceProxy() {
-    void goto('/routing?tab=singbox&sub=deviceproxy');
-  }
 </script>
 
 
@@ -327,12 +348,15 @@
       </SidePanel>
 
       <SidePanel
-        title="Прокси устройств"
+        title="Inbounds"
         count=""
-        actionLabel="Настроить →"
-        onAction={navigateDeviceProxy}
+        actionLabel="+ Добавить"
+        actionVariant="filled"
+        onAction={addInbound}
       >
-        <DeviceProxyCompact bare onConfigure={navigateDeviceProxy} />
+        {#key dpReloadKey}
+          <DeviceProxyCompact bare onSelect={openInbound} />
+        {/key}
       </SidePanel>
     </div>
   </div>
@@ -440,6 +464,15 @@
     ruleSetUsage={ruleSetUsageForDnsEdit}
     onClose={() => (dnsRuleEditIdx = null)}
     onSave={handleDnsRuleEditSave}
+  />
+{/if}
+
+{#if inboundDrawerInstance}
+  <InboundSettingsDrawer
+    instance={inboundDrawerInstance}
+    open={inboundDrawerOpen}
+    onClose={() => (inboundDrawerOpen = false)}
+    onSaved={onInboundSaved}
   />
 {/if}
 
