@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { api } from '$lib/api/client';
 	import { notifications } from '$lib/stores/notifications';
-	import { Button } from '$lib/components/ui';
+	import { Button, ConfirmModal } from '$lib/components/ui';
 	import CreateIcon from '$lib/components/ui/icons/CreateIcon.svelte';
 	import type { SingboxRouterDNSRewrite } from '$lib/types';
 	import DNSRewriteEditModal from './DNSRewriteEditModal.svelte';
@@ -17,13 +17,24 @@
 	let { rewrites, onChange, showHeader = true, addMode = $bindable(false) }: Props = $props();
 
 	let editIndex = $state<number | null>(null);
+	let deleteIndex = $state<number | null>(null);
+	let deleteBusy = $state(false);
 
-	async function remove(i: number): Promise<void> {
+	function requestDelete(i: number): void {
+		deleteIndex = i;
+	}
+
+	async function confirmDelete(): Promise<void> {
+		if (deleteIndex === null) return;
+		deleteBusy = true;
 		try {
-			await api.singboxRouterDeleteDNSRewrite(i);
+			await api.singboxRouterDeleteDNSRewrite(deleteIndex);
+			deleteIndex = null;
 			await onChange();
 		} catch (e) {
 			notifications.error((e as Error).message);
+		} finally {
+			deleteBusy = false;
 		}
 	}
 </script>
@@ -60,7 +71,7 @@
 				<span class="arrow">→</span>
 				<span class="ips mono">{rw.ips.join(', ')}</span>
 				<button class="icon-btn" onclick={() => (editIndex = i)} aria-label="Редактировать">✎</button>
-				<button class="icon-btn danger" onclick={() => remove(i)} aria-label="Удалить">✕</button>
+				<button class="icon-btn danger" onclick={() => requestDelete(i)} aria-label="Удалить">✕</button>
 			</div>
 		{/each}
 	</div>
@@ -89,6 +100,15 @@
 		}}
 	/>
 {/if}
+
+<ConfirmModal
+	open={deleteIndex !== null}
+	title="Удалить перезапись"
+	message={deleteIndex !== null ? `Удалить перезапись «${rewrites[deleteIndex]?.pattern ?? ''}»?` : ''}
+	busy={deleteBusy}
+	onConfirm={confirmDelete}
+	onClose={() => { if (!deleteBusy) deleteIndex = null; }}
+/>
 
 <style>
 	.header {

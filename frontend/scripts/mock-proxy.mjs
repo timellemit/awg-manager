@@ -1714,6 +1714,10 @@ let mockDNSRules = [
 		server: 'wizard-upstream',
 	},
 ];
+let mockDNSRewrites = [
+	{ pattern: 'finland10*.discord.media', ips: ['104.25.158.178'] },
+	{ pattern: '*.steamcontent.com', ips: ['23.55.171.10'] },
+];
 /** Built-in NDMS policy names (Policy0..PolicyN), same rule as backend accesspolicy. */
 function isStandardPolicyName(name) {
 	return /^Policy\d+$/.test(name);
@@ -3931,6 +3935,84 @@ const server = http.createServer(async (req, res) => {
 				const payload = JSON.parse(raw || '{}');
 				mockDNSRules.push(payload);
 				send(res, 200, { success: true, data: payload });
+			} catch (e) {
+				send(res, 400, { success: false, error: { code: 'INVALID_REQUEST', message: String(e) } });
+			}
+		});
+		return;
+	}
+
+	if (req.method === 'GET' && path === '/singbox/router/dns/rewrites/list') {
+		send(res, 200, { success: true, data: mockDNSRewrites });
+		return;
+	}
+
+	if (req.method === 'POST' && path === '/singbox/router/dns/rewrites/add') {
+		let raw = '';
+		req.on('data', (c) => (raw += c));
+		req.on('end', () => {
+			try {
+				const payload = JSON.parse(raw || '{}');
+				mockDNSRewrites.push(payload);
+				send(res, 200, { success: true, data: payload });
+			} catch (e) {
+				send(res, 400, { success: false, error: { code: 'INVALID_REQUEST', message: String(e) } });
+			}
+		});
+		return;
+	}
+
+	if (req.method === 'POST' && path === '/singbox/router/dns/rewrites/update') {
+		let raw = '';
+		req.on('data', (c) => (raw += c));
+		req.on('end', () => {
+			try {
+				const { index, rewrite } = JSON.parse(raw || '{}');
+				if (index < 0 || index >= mockDNSRewrites.length) {
+					send(res, 404, { success: false, error: { code: 'NOT_FOUND', message: 'rewrite not found' } });
+					return;
+				}
+				mockDNSRewrites[index] = rewrite;
+				send(res, 200, { success: true, data: rewrite });
+			} catch (e) {
+				send(res, 400, { success: false, error: { code: 'INVALID_REQUEST', message: String(e) } });
+			}
+		});
+		return;
+	}
+
+	if (req.method === 'POST' && path === '/singbox/router/dns/rewrites/delete') {
+		let raw = '';
+		req.on('data', (c) => (raw += c));
+		req.on('end', () => {
+			try {
+				const { index } = JSON.parse(raw || '{}');
+				if (index < 0 || index >= mockDNSRewrites.length) {
+					send(res, 404, { success: false, error: { code: 'NOT_FOUND', message: 'rewrite not found' } });
+					return;
+				}
+				mockDNSRewrites.splice(index, 1);
+				send(res, 200, { success: true, data: { ok: true } });
+			} catch (e) {
+				send(res, 400, { success: false, error: { code: 'INVALID_REQUEST', message: String(e) } });
+			}
+		});
+		return;
+	}
+
+	if (req.method === 'POST' && path === '/singbox/router/dns/rewrites/move') {
+		let raw = '';
+		req.on('data', (c) => (raw += c));
+		req.on('end', () => {
+			try {
+				const { from, to } = JSON.parse(raw || '{}');
+				if (from < 0 || from >= mockDNSRewrites.length || to < 0 || to >= mockDNSRewrites.length) {
+					send(res, 404, { success: false, error: { code: 'NOT_FOUND', message: 'rewrite not found' } });
+					return;
+				}
+				const [moved] = mockDNSRewrites.splice(from, 1);
+				mockDNSRewrites.splice(to, 0, moved);
+				send(res, 200, { success: true, data: { ok: true } });
 			} catch (e) {
 				send(res, 400, { success: false, error: { code: 'INVALID_REQUEST', message: String(e) } });
 			}
