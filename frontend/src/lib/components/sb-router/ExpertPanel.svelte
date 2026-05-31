@@ -69,6 +69,7 @@
   // Modal state
   let ruleEditIdx = $state<number | null>(null);
   let ruleAddOpen = $state(false);
+  let rewriteAddMode = $state(false);
   let rsEditTag = $state<string | null>(null);
   let rsAddOpen = $state(false);
   let outboundEditTag = $state<string | null>(null);
@@ -314,8 +315,19 @@
         />
       </SidePanel>
 
-      <SidePanel title="DNS-перезаписи" count={String($storeDnsRewrites.length)}>
-        <DNSRewritesList rewrites={$storeDnsRewrites} onChange={() => singboxRouterStore.loadAll()} />
+      <SidePanel
+        title="DNS-перезаписи"
+        count={String($storeDnsRewrites.length)}
+        actionLabel="+ Добавить"
+        actionVariant="filled"
+        onAction={() => (rewriteAddMode = true)}
+      >
+        <DNSRewritesList
+          rewrites={$storeDnsRewrites}
+          onChange={() => singboxRouterStore.loadAll()}
+          showHeader={false}
+          bind:addMode={rewriteAddMode}
+        />
       </SidePanel>
 
       <SidePanel

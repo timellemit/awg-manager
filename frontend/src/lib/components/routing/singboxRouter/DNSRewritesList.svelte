@@ -9,10 +9,13 @@
 	interface Props {
 		rewrites: SingboxRouterDNSRewrite[];
 		onChange: () => Promise<void> | void;
+		/** Показывать встроенный заголовок (счётчик + кнопка «Добавить»). */
+		showHeader?: boolean;
+		/** Режим добавления — bindable, чтобы триггерить add из родителя. */
+		addMode?: boolean;
 	}
-	let { rewrites, onChange }: Props = $props();
+	let { rewrites, onChange, showHeader = true, addMode = $bindable(false) }: Props = $props();
 
-	let addMode = $state(false);
 	let editIndex = $state<number | null>(null);
 
 	async function remove(i: number): Promise<void> {
@@ -29,12 +32,14 @@
 	<CreateIcon />
 {/snippet}
 
-<div class="header">
-	<div class="hint">{rewrites.length} перезаписей</div>
-	<Button variant="primary" size="sm" onclick={() => (addMode = true)} iconBefore={createIcon}>
-		Добавить
-	</Button>
-</div>
+{#if showHeader}
+	<div class="header">
+		<div class="hint">{rewrites.length} перезаписей</div>
+		<Button variant="primary" size="sm" onclick={() => (addMode = true)} iconBefore={createIcon}>
+			Добавить
+		</Button>
+	</div>
+{/if}
 
 {#if rewrites.length === 0}
 	<div class="empty-mild">
