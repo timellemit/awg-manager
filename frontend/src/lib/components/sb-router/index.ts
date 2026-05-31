@@ -85,7 +85,6 @@ export {
   type CustomMatcherFields,
 } from './addWizardStore';
 export {
-  composeCustomRule,
   resolveOutbound,
   submitWizard,
   ValidationError,

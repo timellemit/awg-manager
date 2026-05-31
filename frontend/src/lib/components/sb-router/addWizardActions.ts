@@ -1,5 +1,7 @@
 import { api } from '$lib/api/client';
-import type { SingboxRouterRule } from '$lib/types';
+import type { SingboxRouterRule, SingboxRouterRuleSet } from '$lib/types';
+import { parseInlineRuleList, isInlineRuleListEmpty } from '$lib/utils/singboxInlineRules';
+import { expandGeoLinesInInput } from '$lib/utils/singboxInlineGeoExpand';
 import { submitTemplates, type SubmitResult } from './templatesActions';
 import type { TemplateGroup } from './templatesData';
 import type { CustomMatcherFields, OutboundCategory } from './addWizardStore';
@@ -16,62 +18,32 @@ export function resolveOutbound(
   tunnelTag: string | null,
 ): string {
   if (category === 'tunnel') {
-    if (!tunnelTag) {
-      throw new ValidationError('Выберите туннель');
-    }
+    if (!tunnelTag) throw new ValidationError('Выберите туннель');
     return tunnelTag;
   }
   if (category === 'direct') return 'direct';
   return 'block';
 }
 
-function splitLines(text: string): string[] {
-  return text
-    .split('\n')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+/** Первый свободный тег custom-N среди существующих rule_set'ов. */
+export function nextCustomRuleSetTag(existing: string[]): string {
+  const set = new Set(existing);
+  let n = 1;
+  while (set.has(`custom-${n}`)) n++;
+  return `custom-${n}`;
 }
 
-function parsePorts(text: string): number[] {
-  const out: number[] = [];
-  for (const part of text.split(',')) {
-    const trimmed = part.trim();
-    if (!trimmed) continue;
-    const n = Number.parseInt(trimmed, 10);
-    if (Number.isFinite(n) && n > 0 && n < 65536) out.push(n);
-  }
-  return out;
-}
-
-export function composeCustomRule(
-  fields: CustomMatcherFields,
-  outboundOrBlock: string,
-): Partial<SingboxRouterRule> | null {
-  const domains = splitLines(fields.domainSuffix);
-  const ips = splitLines(fields.ipCidr);
-  const srcIps = splitLines(fields.sourceIpCidr);
-  const ports = parsePorts(fields.port);
-  const ruleSets = Array.from(fields.ruleSetTags);
-
-  const hasAny = domains.length > 0 || ips.length > 0 || srcIps.length > 0
-    || ports.length > 0 || ruleSets.length > 0;
-  if (!hasAny) return null;
-
-  const rule: Partial<SingboxRouterRule> = {};
-  if (domains.length > 0) rule.domain_suffix = domains;
-  if (ips.length > 0) rule.ip_cidr = ips;
-  if (srcIps.length > 0) rule.source_ip_cidr = srcIps;
-  if (ports.length > 0) rule.port = ports;
-  if (ruleSets.length > 0) rule.rule_set = ruleSets;
-
-  if (outboundOrBlock === 'block') {
-    rule.action = 'reject';
-  } else {
-    rule.outbound = outboundOrBlock;
-    rule.action = 'route';
-  }
-
-  return rule;
+/** Парсит smart-list (с geo-expand) в правила inline rule_set. Бросает ValidationError. */
+export async function parseCustomList(rulesList: string): Promise<Record<string, unknown>[]> {
+  if (isInlineRuleListEmpty(rulesList)) throw new ValidationError('Список пуст');
+  const { text } = await expandGeoLinesInInput(
+    rulesList,
+    async (kind, tag) => (await api.expandGeoTag(kind, tag)).lines,
+  );
+  const parsed = parseInlineRuleList(text);
+  if (parsed.errors.length > 0) throw new ValidationError(parsed.errors.join('\n'));
+  if (parsed.rules.length === 0) throw new ValidationError('Нет валидных строк');
+  return parsed.rules;
 }
 
 export interface SubmitWizardArgs {
@@ -80,15 +52,20 @@ export interface SubmitWizardArgs {
   outboundCategory: OutboundCategory;
   tunnelTag: string | null;
   groups: TemplateGroup[];
+  existingRuleSetTags: string[];
 }
 
 export async function submitWizard(args: SubmitWizardArgs): Promise<SubmitResult> {
   const outbound = resolveOutbound(args.outboundCategory, args.tunnelTag);
-  const customRule = composeCustomRule(args.customFields, outbound);
+  const hasCustom = !isInlineRuleListEmpty(args.customFields.rulesList);
 
-  if (args.selectedTemplates.length === 0 && customRule === null) {
+  if (args.selectedTemplates.length === 0 && !hasCustom) {
     throw new ValidationError('Выберите шаблон или опишите правило');
   }
+
+  // Кастом валидируем ДО любых сетевых вызовов — никаких частичных провалов из-за невалидного ввода.
+  let customRules: Record<string, unknown>[] | null = null;
+  if (hasCustom) customRules = await parseCustomList(args.customFields.rulesList);
 
   let combined: SubmitResult = { successes: [], failures: [] };
 
@@ -96,13 +73,22 @@ export async function submitWizard(args: SubmitWizardArgs): Promise<SubmitResult
     combined = await submitTemplates(args.selectedTemplates, outbound, args.groups);
   }
 
-  if (customRule !== null) {
+  if (customRules) {
     try {
-      await api.singboxRouterAddRule(customRule);
+      const tag = nextCustomRuleSetTag(args.existingRuleSetTags);
+      const rs: SingboxRouterRuleSet = { tag, type: 'inline', rules: customRules };
+      await api.singboxRouterAddRuleSet(rs);
+      const rule: Partial<SingboxRouterRule> = { rule_set: [tag] };
+      if (outbound === 'block') {
+        rule.action = 'reject';
+      } else {
+        rule.outbound = outbound;
+        rule.action = 'route';
+      }
+      await api.singboxRouterAddRule(rule as SingboxRouterRule);
       combined.successes.push('custom');
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      combined.failures.push({ id: 'custom', error: msg });
+      combined.failures.push({ id: 'custom', error: e instanceof Error ? e.message : String(e) });
     }
   }
 
