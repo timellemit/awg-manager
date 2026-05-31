@@ -60,7 +60,7 @@
   <!-- Order number -->
   <div class="order">{orderStr}</div>
 
-  <div class="handle-slot">
+  <div class="drag-slot">
     {#if !card.isSystem}
       <button
         type="button"
@@ -172,7 +172,7 @@
   }
   .is-system .order { color: var(--text-muted); }
 
-  .handle-slot {
+  .drag-slot {
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -301,38 +301,103 @@
     pointer-events: none;
   }
 
-  /* ── Mobile: stack vertically ── */
+  .action :global(.badge) {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* ── Mobile ── */
   @media (max-width: 768px) {
-    /*
-     * Direct grid children: .order | .main | .action | .right-slot
-     * Row 1: order + main (service tile) + right-slot (badge/menu)
-     * Row 2: .main continues — chips wrap below service tile (flex-wrap inside .main)
-     * Row 3 (full-width): .action with dashed top border
-     *
-     * We use named grid areas on the 3 top-row children and let .action
-     * span all columns on row 2.
-     */
     .card {
-      grid-template-columns: 28px 28px minmax(0, 1fr) auto;
-      grid-template-rows: auto auto;
+      grid-template-columns: 28px minmax(0, 1fr) auto;
       grid-template-areas:
-        "order handle main right"
-        "action action action action";
-      row-gap: 0;
-      column-gap: 10px;
+        "drag main right"
+        "order main right"
+        "action action action";
+      align-items: start;
+      gap: 8px 10px;
+      padding: 10px 12px;
     }
 
-    .order     { grid-area: order; align-self: start; padding-top: 4px; }
-    .handle-slot { grid-area: handle; align-self: start; }
-    .main      { grid-area: main; flex-wrap: wrap; align-items: flex-start; gap: 8px; }
-    .right-slot { grid-area: right; align-self: start; padding-top: 2px; }
+    .drag-slot {
+      grid-area: drag;
+      width: 28px;
+      min-width: 28px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
 
-    /* Arrow + OutboundTile — full-width row, dashed top border */
+    .drag-handle {
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      border-radius: 8px;
+    }
+
+    .order {
+      grid-area: order;
+      width: 28px;
+      text-align: center;
+      padding-top: 0;
+      font-size: 11px;
+      line-height: 1;
+    }
+
+    .main {
+      grid-area: main;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      gap: 8px;
+      flex-wrap: nowrap;
+    }
+
+    .main :global(.service-tile),
+    .generic-tile {
+      min-width: 0;
+    }
+
+    .chips {
+      width: 100%;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      min-width: 0;
+    }
+
+    .right-slot {
+      grid-area: right;
+      align-self: start;
+      display: flex;
+      gap: 6px;
+      padding-top: 0;
+    }
+
     .action {
       grid-area: action;
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
       border-top: 1px dashed var(--border);
       padding-top: 8px;
-      margin-top: 6px;
+      margin-top: 2px;
+    }
+
+    .card.is-system {
+      grid-template-columns: 28px minmax(0, 1fr) auto;
+      grid-template-areas:
+        "order main right"
+        "action action action";
+    }
+
+    .card.is-system .drag-slot {
+      display: none;
     }
   }
 </style>
