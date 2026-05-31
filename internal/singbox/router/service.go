@@ -596,7 +596,7 @@ func (s *ServiceImpl) Enable(ctx context.Context) error {
 		return err
 	}
 	cfg.Inbounds = ensureTProxyInbound(cfg.Inbounds)
-	cfg.Outbounds = stripLegacyAWGDirect(cfg.Outbounds)
+	cfg.Outbounds = stripAutoManagedDirect(cfg.Outbounds)
 	cfg.EnsureSystemRules(sr.SnifferEnabled)
 	// Settings was already loaded above; revalidate here in case the
 	// store is corrupted or hand-edited around a schema migration. We

@@ -697,13 +697,31 @@ func (c *RouterConfig) CompositeOutbounds() []Outbound {
 	return out
 }
 
-// stripLegacyAWGDirect filters out direct outbounds with bind_interface
-// set — these used to be written here pre-refactor; now they live in
-// 15-awg.json owned by awgoutbounds. Composite outbounds are kept.
-func stripLegacyAWGDirect(in []Outbound) []Outbound {
+// IsAutoManagedIface reports whether a kernel interface name is one that
+// awgoutbounds auto-generates a direct outbound for (managed AWG tunnels,
+// NativeWG, third-party WireGuard, our own tunnels, Keenetic sing-box
+// proxies). Direct outbounds bound to these live in 15-awg.json and must
+// not be duplicated in the user composite store. User VPNs (ipsec/ike/
+// sstp/openvpn/l2tp/pptp/ppp/eth/...) are NOT auto-managed.
+func IsAutoManagedIface(name string) bool {
+	n := strings.ToLower(name)
+	for _, p := range []string{"opkgtun", "awgm", "awg", "wg", "wireguard", "nwg", "t2s", "proxy"} {
+		if strings.HasPrefix(n, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// stripAutoManagedDirect filters out direct outbounds whose bind_interface
+// belongs to the awgoutbounds auto-managed set (these live in 15-awg.json,
+// owned by awgoutbounds). User-created direct outbounds bound to other VPN
+// interfaces (IPSec/IKEv2/etc.) are kept — they live here in 20-router.json.
+// Composite outbounds and bind_interface-less direct are always kept.
+func stripAutoManagedDirect(in []Outbound) []Outbound {
 	out := make([]Outbound, 0, len(in))
 	for _, o := range in {
-		if o.Type == "direct" && o.BindInterface != "" {
+		if o.Type == "direct" && o.BindInterface != "" && IsAutoManagedIface(o.BindInterface) {
 			continue
 		}
 		out = append(out, o)

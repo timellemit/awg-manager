@@ -153,19 +153,45 @@ func TestRenameOutboundReferences_RewritesEveryReference(t *testing.T) {
 	}
 }
 
-func TestStripLegacyAWGDirect(t *testing.T) {
+func TestStripAutoManagedDirect(t *testing.T) {
 	in := []Outbound{
-		{Type: "direct", Tag: "legacy-a", BindInterface: "t2s0"},
-		{Type: "direct", Tag: "direct"}, // no bind_interface — keep
-		{Type: "selector", Tag: "comp", Outbounds: []string{"awg-x"}},
-		{Type: "direct", Tag: "legacy-b", BindInterface: "nwg0"},
+		{Type: "direct", Tag: "legacy-a", BindInterface: "t2s0"},     // AWG kernel — strip
+		{Type: "direct", Tag: "direct"},                              // no bind_interface — keep
+		{Type: "selector", Tag: "comp", Outbounds: []string{"awg-x"}}, // composite — keep
+		{Type: "direct", Tag: "legacy-b", BindInterface: "nwg0"},     // NativeWG — strip
+		{Type: "direct", Tag: "ipsec-vpn", BindInterface: "ipsec0"},  // user VPN — keep
+		{Type: "direct", Tag: "ike", BindInterface: "ike0"},          // user VPN — keep
 	}
-	got := stripLegacyAWGDirect(in)
-	if len(got) != 2 {
-		t.Fatalf("want 2 outbounds (direct + selector), got %d (%+v)", len(got), got)
+	got := stripAutoManagedDirect(in)
+	if len(got) != 4 {
+		t.Fatalf("want 4 kept, got %d (%+v)", len(got), got)
 	}
-	if got[0].Tag != "direct" || got[1].Tag != "comp" {
-		t.Errorf("unexpected outbounds: %+v", got)
+	tags := map[string]bool{}
+	for _, o := range got {
+		tags[o.Tag] = true
+	}
+	for _, want := range []string{"direct", "comp", "ipsec-vpn", "ike"} {
+		if !tags[want] {
+			t.Errorf("expected %q kept, missing from %+v", want, got)
+		}
+	}
+	if tags["legacy-a"] || tags["legacy-b"] {
+		t.Errorf("auto-managed AWG/WG direct outbounds should be stripped: %+v", got)
+	}
+}
+
+func TestIsAutoManagedIface(t *testing.T) {
+	managed := []string{"opkgtun10", "awgm0", "awg-x", "wg0", "wireguard0", "nwg1", "t2s0", "Proxy3"}
+	for _, n := range managed {
+		if !IsAutoManagedIface(n) {
+			t.Errorf("IsAutoManagedIface(%q) = false, want true", n)
+		}
+	}
+	user := []string{"ipsec0", "ike0", "sstp0", "ppp0", "eth3", "L2TP0"}
+	for _, n := range user {
+		if IsAutoManagedIface(n) {
+			t.Errorf("IsAutoManagedIface(%q) = true, want false", n)
+		}
 	}
 }
 
