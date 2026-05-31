@@ -180,6 +180,17 @@ func TestStripAutoManagedDirect(t *testing.T) {
 	}
 }
 
+func TestUserDirectOutboundSurvivesStrip(t *testing.T) {
+	cfg := &RouterConfig{Outbounds: []Outbound{
+		{Type: "direct", Tag: "ipsec-vpn", BindInterface: "ipsec0"},
+		{Type: "direct", Tag: "awg-auto", BindInterface: "t2s0"},
+	}}
+	cfg.Outbounds = stripAutoManagedDirect(cfg.Outbounds)
+	if len(cfg.Outbounds) != 1 || cfg.Outbounds[0].Tag != "ipsec-vpn" {
+		t.Fatalf("user direct should survive, AWG stripped: %+v", cfg.Outbounds)
+	}
+}
+
 func TestIsAutoManagedIface(t *testing.T) {
 	managed := []string{"opkgtun10", "awgm0", "awg-x", "wg0", "wireguard0", "nwg1", "t2s0", "Proxy3"}
 	for _, n := range managed {
