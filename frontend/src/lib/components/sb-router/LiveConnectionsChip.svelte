@@ -15,6 +15,7 @@
   let engineOn = $derived($status?.enabled ?? false);
 
   const EMPTY: ConnectionsSnapshot = { connections: [], downloadTotal: 0, uploadTotal: 0, connectionsTotal: 0 };
+  const EMPTY_CLIENTS = new Map<string, string>();
   let snapshot = $state<ConnectionsSnapshot>(EMPTY);
   let wsStatus = $state<WSStatus>('connecting');
   let wsClose: (() => void) | null = null;
@@ -28,7 +29,7 @@
     if (engineOn && !wsClose) {
       wsClose = createClashWS<ClashConnectionsRaw>(
         '/api/singbox/clash/connections',
-        (raw) => { snapshot = parseSnapshot(raw, new Map()); },
+        (raw) => { snapshot = parseSnapshot(raw, EMPTY_CLIENTS); },
         (s) => { wsStatus = s; },
       );
     } else if (!engineOn && wsClose) {
