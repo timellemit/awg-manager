@@ -201,7 +201,7 @@
   }
   .header, .row {
     display: grid;
-    grid-template-columns: 24px 64px 92px minmax(0, 1fr) 96px 76px;
+    grid-template-columns: 24px 64px 92px minmax(0, 1fr) minmax(72px, 160px) 76px;
     align-items: center;
     gap: 8px;
     padding: 8px 14px;
@@ -271,6 +271,20 @@
   .action-badge-cell {
     min-width: 0;
     justify-self: center;
+  }
+  .outbound-cell {
+    min-width: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+  }
+  .outbound-cell :global(.badge) {
+    max-width: 100%;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .dash {
     color: var(--text-muted);
