@@ -31,6 +31,7 @@ import (
 	"github.com/hoaxisr/awg-manager/internal/hydraroute"
 	"github.com/hoaxisr/awg-manager/internal/openapi"
 	"github.com/hoaxisr/awg-manager/internal/orchestrator"
+	"github.com/hoaxisr/awg-manager/internal/presets"
 	"github.com/hoaxisr/awg-manager/internal/routing"
 	"github.com/hoaxisr/awg-manager/internal/singbox"
 	singboxorch "github.com/hoaxisr/awg-manager/internal/singbox/orchestrator"
@@ -121,6 +122,7 @@ type Server struct {
 	clashProxy             *api.ClashProxy
 	singboxOp              *singbox.Operator
 	singboxOrch            *singboxorch.Orchestrator
+	presetCatalog          *presets.Catalog
 	deviceProxySvc         *deviceproxy.Service
 	downloadSvc            *downloader.Service
 	monitoringService      *monitoring.Service
@@ -291,6 +293,11 @@ func (s *Server) SetDnsCheckService(svc *dnscheck.Service) {
 // SetSingboxOperator sets the sing-box operator so system info can report install status.
 func (s *Server) SetSingboxOperator(op *singbox.Operator) {
 	s.singboxOp = op
+}
+
+// SetPresetCatalog wires the unified preset catalog into the server.
+func (s *Server) SetPresetCatalog(c *presets.Catalog) {
+	s.presetCatalog = c
 }
 
 // SetDeviceProxyService wires the device-proxy service into the server
@@ -1195,6 +1202,12 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("/api/singbox/router/dns/rewrites/update", guarded(rw.Update))
 		mux.HandleFunc("/api/singbox/router/dns/rewrites/delete", guarded(rw.Delete))
 		mux.HandleFunc("/api/singbox/router/dns/rewrites/move", guarded(rw.Move))
+	}
+
+	// Unified preset catalog (protected, read-only in U0)
+	if s.presetCatalog != nil {
+		presetsHandler := api.NewPresetsHandler(s.presetCatalog)
+		mux.HandleFunc("/api/presets", guarded(presetsHandler.List))
 	}
 
 	// Static files (SPA) - must be last.
