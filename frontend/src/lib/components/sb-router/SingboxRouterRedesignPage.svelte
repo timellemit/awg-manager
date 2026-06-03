@@ -16,7 +16,6 @@
     EmptyState,
     ExpertPanel,
     mode as sbMode,
-    type EngineStatus,
   } from '$lib/components/sb-router';
 
   let activeSingboxSub = $derived($page.url.searchParams.get('sub'));
@@ -25,12 +24,6 @@
   const singboxRouterStatus = singboxRouterStore.status;
   const singboxRulesStore = singboxRouterStore.rules;
   let singboxRulesCount = $derived($singboxRulesStore.length);
-
-  let sbEngineStatus: EngineStatus = $derived.by(() => {
-    const s = $singboxRouterStatus;
-    if (!s || !s.installed) return 'unknown';
-    return s.enabled ? 'ok' : 'down';
-  });
 
   // Активен ли отдельный sub-вид (рендерится на всю страницу) — для кнопки «Назад».
   let inSubView = $derived(
@@ -54,7 +47,7 @@
   });
 </script>
 
-<PageShell engineStatus={sbEngineStatus} onOpenInspector={() => (inspectorOpen = true)} onOpenJson={() => (jsonOpen = true)}>
+<PageShell onOpenInspector={() => (inspectorOpen = true)} onOpenJson={() => (jsonOpen = true)}>
   <StagingBanner />
   {#if inSubView}
     <button type="button" class="sub-back" onclick={clearSub}>

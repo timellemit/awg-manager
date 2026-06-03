@@ -10,8 +10,14 @@
   import { openDrawer } from './drawerStore';
   import { openSourceDrawer } from './sourceDrawerStore';
   import { deriveRoutingSummary } from './flowData';
+  import {
+    bindLiveConnectionsStore,
+    liveConnectionsTraffic,
+  } from './liveConnectionsStore';
   import { pluralize, RULE_WORDS, TUNNEL_WORDS, DEVICE_WORDS } from '$lib/utils/pluralize';
   import type { RouterPolicy } from '$lib/types';
+
+  bindLiveConnectionsStore();
 
   const status = singboxRouterStore.status;
   const rulesStore = singboxRouterStore.rules;
@@ -78,6 +84,8 @@
     if (routeFinal === 'direct' && summary.tunneledRuleCount > 0) return 'остальной трафик';
     return null;
   });
+
+  let trafficText = $derived($liveConnectionsTraffic);
 </script>
 
 <div class="flow">
@@ -93,7 +101,9 @@
     <button type="button" class="node engine" class:glow={engineOn} onclick={openDrawer} aria-label="Настройки движка sing-box">
       <div class="cap acc">Движок sing-box</div>
       <div class="node-sub light">{engineSub}</div>
-      <div class="node-sub">{pluralize(rulesCount, RULE_WORDS)}{deviceMode === 'all' ? ' · весь роутер' : ''}</div>
+      <div class="node-sub">
+        {pluralize(rulesCount, RULE_WORDS)}{deviceMode === 'all' ? ' · весь роутер' : ''}{#if trafficText}<span class="traffic"> · {trafficText}</span>{/if}
+      </div>
     </button>
 
     <div class="arrow">›</div>
@@ -156,6 +166,7 @@
   .node-title { margin-top: 4px; font-weight: 600; }
   .node-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
   .node-sub.light { color: var(--text-secondary); font-size: 12px; }
+  .traffic { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-muted); }
   .arrow { color: var(--text-muted); font-size: 18px; text-align: center; }
   .branch { display: flex; flex-direction: column; gap: 7px; }
   .out { padding: 9px 12px; border-radius: 8px; background: var(--bg-primary); border: 1px solid var(--border); }
