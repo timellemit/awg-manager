@@ -1055,3 +1055,60 @@ func TestBuildRestoreInput_BypassTCPPortsBeforeCatchAll(t *testing.T) {
 		t.Errorf("TCP bypass rule appears AFTER catch-all REDIRECT — must be before it")
 	}
 }
+
+func TestBuildRestoreInput_IngressScope(t *testing.T) {
+	spec := RestoreInputSpec{PolicyMark: "0xffffaad", IngressInterfaces: []string{"nwg3"}}
+	got := buildRestoreInput(spec)
+
+	markRule := "-A PREROUTING -i nwg3 -m comment --comment AWGM-INGRESS -j MARK --set-xmark 0xffffaad/0xffffffff"
+	saveRule := "-A PREROUTING -i nwg3 -m comment --comment AWGM-INGRESS -j CONNMARK --save-mark --nfmask 0xffffffff --ctmask 0xffffffff"
+	jump := "-A PREROUTING -m connmark --mark 0xffffaad -m conntrack ! --ctstate INVALID -j " + ChainName
+
+	if !strings.Contains(got, markRule) {
+		t.Fatalf("missing MARK rule in:\n%s", got)
+	}
+	if !strings.Contains(got, saveRule) {
+		t.Fatalf("missing CONNMARK save rule in:\n%s", got)
+	}
+	if strings.Index(got, markRule) > strings.Index(got, jump) {
+		t.Fatalf("MARK rule must precede the connmark jump")
+	}
+}
+
+func TestBuildRestoreInput_IngressScope_MatchAllSkips(t *testing.T) {
+	spec := RestoreInputSpec{MatchAll: true, IngressInterfaces: []string{"nwg3"}}
+	if strings.Contains(buildRestoreInput(spec), "AWGM-INGRESS") {
+		t.Fatalf("ingress rules must be skipped in MatchAll mode")
+	}
+}
+
+func TestBuildRestoreInput_IngressScope_EmptyMarkSkips(t *testing.T) {
+	spec := RestoreInputSpec{PolicyMark: "", IngressInterfaces: []string{"nwg3"}}
+	if strings.Contains(buildRestoreInput(spec), "AWGM-INGRESS") {
+		t.Fatalf("ingress rules must be skipped when PolicyMark empty")
+	}
+}
+
+func TestWriteNetfilterHook_IngressScrub(t *testing.T) {
+	dir := t.TempDir()
+	old := netfilterHookPath
+	netfilterHookPath = filepath.Join(dir, "hook.sh")
+	defer func() { netfilterHookPath = old }()
+
+	if err := writeNetfilterHook(); err != nil {
+		t.Fatalf("writeNetfilterHook: %v", err)
+	}
+	data, _ := os.ReadFile(netfilterHookPath)
+	// Scrub must match BOTH quoted and unquoted `iptables -S` comment
+	// output (`--comment "AWGM-INGRESS"` and `--comment AWGM-INGRESS`):
+	// some iptables builds emit comments unquoted, and a quoted-only
+	// `grep -F` misses them, so the netfilter.d reload re-appends a
+	// duplicate of the rule it failed to scrub. The robust form is an
+	// ERE with an optional quote.
+	if !strings.Contains(string(data), `--comment "?AWGM-INGRESS`) {
+		t.Fatalf("hook script missing robust (quote-optional) AWGM-INGRESS scrub:\n%s", data)
+	}
+	if strings.Contains(string(data), `grep -F -- '--comment "AWGM-INGRESS"'`) {
+		t.Fatalf("hook still uses fragile quoted-only -F scrub for AWGM-INGRESS:\n%s", data)
+	}
+}

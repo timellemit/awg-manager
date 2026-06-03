@@ -78,6 +78,9 @@ type SingboxRouterSettingsData struct {
 	// BypassExtraPorts is a user-defined comma-separated list of extra
 	// port exclusions in "PORT UDP|TCP" format (e.g. "51820 UDP, 1194 TCP").
 	BypassExtraPorts string `json:"bypassExtraPorts,omitempty" example:"51820 UDP"`
+	// IngressInterfaces lists interface refs whose ingress traffic is
+	// redirected through the sing-box router (e.g. "managed:Wireguard3").
+	IngressInterfaces []string `json:"ingressInterfaces,omitempty" example:"managed:Wireguard3"`
 }
 
 // SingboxRouterSettingsResponse is the envelope for GET /singbox/router/settings.
@@ -1029,6 +1032,32 @@ func (h *SingboxRouterHandler) ListBindableInterfaces(w http.ResponseWriter, r *
 		return
 	}
 	ifaces, err := h.svc.ListBindableInterfaces(r.Context())
+	if err != nil {
+		response.InternalError(w, err.Error())
+		return
+	}
+	if ifaces == nil {
+		ifaces = []router.WANInterfaceInfo{}
+	}
+	response.Success(w, ifaces)
+}
+
+// ListIngressEligibleInterfaces returns interfaces eligible for sing-box ingress-scope.
+//
+//	@Summary		List ingress-eligible interfaces
+//	@Description	Returns router interfaces eligible for sing-box ingress-scope (bindable minus WAN minus LAN bridges). Used by the ingress multiselect in singbox-router settings.
+//	@Tags			singbox-router
+//	@Produce		json
+//	@Security		CookieAuth
+//	@Success		200	{object}	SingboxRouterWANInterfacesListResponse
+//	@Failure		500	{object}	APIErrorEnvelope
+//	@Router			/singbox/router/ingress-eligible-interfaces [get]
+func (h *SingboxRouterHandler) ListIngressEligibleInterfaces(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		response.MethodNotAllowed(w)
+		return
+	}
+	ifaces, err := h.svc.ListIngressEligibleInterfaces(r.Context())
 	if err != nil {
 		response.InternalError(w, err.Error())
 		return

@@ -38,6 +38,10 @@ type Service interface {
 	// outbound to (all interfaces minus auto-managed AWG/WG ones).
 	ListBindableInterfaces(ctx context.Context) ([]WANInterfaceInfo, error)
 
+	// ListIngressEligibleInterfaces returns interfaces eligible for
+	// sing-box ingress-scope (bindable minus WAN minus LAN bridges).
+	ListIngressEligibleInterfaces(ctx context.Context) ([]WANInterfaceInfo, error)
+
 	SetRouteFinal(ctx context.Context, tag string) error
 
 	ListRules(ctx context.Context) ([]Rule, error)
@@ -136,6 +140,7 @@ type WANInterfaceInfo struct {
 	Label    string `json:"label"`    // human-friendly: description or type-derived
 	Up       bool   `json:"up"`       // current up/down — info-only, never gates selection
 	Priority int    `json:"priority"` // NDMS priority (higher = preferred by user)
+	Type     string `json:"type"`     // NDMS-тип интерфейса: "Wireguard", "Bridge", "PPP", ...
 }
 
 // WANInterfaceLister is the narrow contract the service needs from the
@@ -151,6 +156,15 @@ type WANInterfaceLister interface {
 // awgoutbounds auto-managed set). Optional dep; nil = no existence check.
 type BindableInterfaceLister interface {
 	ListBindable(ctx context.Context) ([]WANInterfaceInfo, error)
+}
+
+// IngressResolver резолвит ref интерфейса ("managed:Wireguard3") в
+// kernel-имя ("nwg3"). Возвращает "" если не резолвится (сервер удалён /
+// интерфейс ещё не поднят). Реализуется адаптером в cmd/awg-manager
+// поверх InterfaceStore.ResolveSystemName (router не может импортить
+// internal/ndms — цикл через internal/tunnel/wan).
+type IngressResolver interface {
+	Resolve(ctx context.Context, ref string) string
 }
 
 // PolicyInfo is the public projection of one NDMS access policy that
@@ -248,6 +262,10 @@ type Deps struct {
 	// outbound to. Optional — when nil, ListBindableInterfaces returns an
 	// empty slice and bind_interface existence is not enforced.
 	BindableInterfaces BindableInterfaceLister
+	// IngressResolver резолвит managed:-ref'ы ingress-интерфейсов в
+	// kernel-имена на сборке спека. Optional — nil → managed:-ref'ы
+	// пропускаются (iface:-ref'ы резолвятся без него).
+	IngressResolver IngressResolver
 	// NetfilterPreflight is an optional override for the module-load /
 	// target-availability check that Enable and reconcileInstalled both
 	// call before every Install. When nil, prepareNetfilter runs the
@@ -289,6 +307,7 @@ type ServiceImpl struct {
 	currentLANBridges       []LANBridgeDNSRedir // last-discovered LAN-bridge (name, ndnproxy port) pairs; reconcile triggers re-install when this changes (e.g. NDMS hotspot reconfigured, bridge added/removed, port reassigned)
 	currentBypassPresets    []string
 	currentBypassExtraPorts string
+	currentIngress          []string // last-installed резолвленные ingress kernel-имена
 
 	// netfilterStateKnown tracks whether we know for certain that the
 	// installed iptables rules match the current desired state. It starts
@@ -324,6 +343,32 @@ func NewService(d Deps) *ServiceImpl {
 
 func (s *ServiceImpl) routerConfigPath() string {
 	return filepath.Join(s.deps.Singbox.ConfigDir(), "20-router.json")
+}
+
+func (s *ServiceImpl) resolveIngressInterfaces(ctx context.Context, refs []string) []string {
+	out := make([]string, 0, len(refs))
+	seen := map[string]bool{}
+	for _, ref := range refs {
+		var name string
+		switch {
+		case strings.HasPrefix(ref, "iface:"):
+			name = strings.TrimPrefix(ref, "iface:")
+		case strings.HasPrefix(ref, "managed:"):
+			if s.deps.IngressResolver != nil {
+				name = s.deps.IngressResolver.Resolve(ctx, ref)
+			}
+		}
+		if name == "" {
+			s.appLog.Warn("resolve-ingress", "", fmt.Sprintf("ingress ref %q не резолвится (сервер не поднят / кэш не готов), пропущен", ref))
+			continue
+		}
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	return out
 }
 
 func (s *ServiceImpl) ruleSetMaterializer() ruleSetMaterializer {
@@ -709,14 +754,20 @@ func (s *ServiceImpl) Enable(ctx context.Context) error {
 		}
 	}
 
+	var ingress []string
+	if policyMode {
+		ingress = s.resolveIngressInterfaces(ctx, sr.IngressInterfaces)
+	}
+
 	bypassUDP, bypassTCP, _ := resolveBypassPorts(sr.BypassPresets, sr.BypassExtraPorts)
 	if err := s.deps.IPTables.Install(ctx, RestoreInputSpec{
-		PolicyMark:     mark,
-		MatchAll:       !policyMode,
-		WANIPs:         wanIPs,
-		LANBridges:     lanBridges,
-		BypassUDPPorts: bypassUDP,
-		BypassTCPPorts: bypassTCP,
+		PolicyMark:        mark,
+		MatchAll:          !policyMode,
+		WANIPs:            wanIPs,
+		LANBridges:        lanBridges,
+		BypassUDPPorts:    bypassUDP,
+		BypassTCPPorts:    bypassTCP,
+		IngressInterfaces: ingress,
 	}); err != nil {
 		// Stop sing-box from listening on the now-orphan TPROXY port,
 		// but DO NOT corrupt the persisted user config. With orchestrator
@@ -737,6 +788,7 @@ func (s *ServiceImpl) Enable(ctx context.Context) error {
 	s.currentLANBridges = lanBridges
 	s.currentBypassPresets = sr.BypassPresets
 	s.currentBypassExtraPorts = sr.BypassExtraPorts
+	s.currentIngress = ingress
 	s.netfilterStateKnown = true
 
 	settings.SingboxRouter = sr
@@ -947,6 +999,7 @@ func (s *ServiceImpl) Disable(ctx context.Context) error {
 	s.currentLANBridges = nil
 	s.currentBypassPresets = nil
 	s.currentBypassExtraPorts = ""
+	s.currentIngress = nil
 	s.netfilterStateKnown = false
 
 	if s.deps.Orch != nil {
@@ -1038,6 +1091,11 @@ func (s *ServiceImpl) reconcileInstalled(ctx context.Context, sr storage.Singbox
 		lanBridges, _ = DiscoverLANBridges(ctx, mark)
 	}
 	lanBridgesChanged := !equalLANBridges(s.currentLANBridges, lanBridges)
+	var ingress []string
+	if policyMode {
+		ingress = s.resolveIngressInterfaces(ctx, sr.IngressInterfaces)
+	}
+	ingressChanged := !slices.Equal(s.currentIngress, ingress)
 	bypassPresetsChanged := !slices.Equal(s.currentBypassPresets, sr.BypassPresets)
 	bypassExtraChanged := s.currentBypassExtraPorts != sr.BypassExtraPorts
 
@@ -1048,7 +1106,7 @@ func (s *ServiceImpl) reconcileInstalled(ctx context.Context, sr storage.Singbox
 	// reconcileInstalled after startup always forces a full re-install
 	// regardless of what IsInstalled reports.
 	forceInitialSync := !s.netfilterStateKnown
-	needsInstall := forceInitialSync || markChanged || wanIPsChanged || lanBridgesChanged || bypassPresetsChanged || bypassExtraChanged
+	needsInstall := forceInitialSync || markChanged || wanIPsChanged || lanBridgesChanged || ingressChanged || bypassPresetsChanged || bypassExtraChanged
 
 	if needsInstall {
 		if forceInitialSync {
@@ -1062,12 +1120,13 @@ func (s *ServiceImpl) reconcileInstalled(ctx context.Context, sr storage.Singbox
 		bypassUDP, bypassTCP, _ := resolveBypassPorts(sr.BypassPresets, sr.BypassExtraPorts)
 		s.mu.Lock()
 		if err := s.deps.IPTables.Install(ctx, RestoreInputSpec{
-			PolicyMark:     mark,
-			MatchAll:       !policyMode,
-			WANIPs:         wanIPs,
-			LANBridges:     lanBridges,
-			BypassUDPPorts: bypassUDP,
-			BypassTCPPorts: bypassTCP,
+			PolicyMark:        mark,
+			MatchAll:          !policyMode,
+			WANIPs:            wanIPs,
+			LANBridges:        lanBridges,
+			BypassUDPPorts:    bypassUDP,
+			BypassTCPPorts:    bypassTCP,
+			IngressInterfaces: ingress,
 		}); err != nil {
 			s.mu.Unlock()
 			return err
@@ -1077,6 +1136,7 @@ func (s *ServiceImpl) reconcileInstalled(ctx context.Context, sr storage.Singbox
 		s.currentLANBridges = lanBridges
 		s.currentBypassPresets = sr.BypassPresets
 		s.currentBypassExtraPorts = sr.BypassExtraPorts
+		s.currentIngress = ingress
 		s.netfilterStateKnown = true
 		s.mu.Unlock()
 	}
@@ -1479,7 +1539,22 @@ func NormalizeSingboxRouterSettings(sr storage.SingboxRouterSettings) (storage.S
 	if _, _, err := parseExtraPorts(sr.BypassExtraPorts); err != nil {
 		return sr, fmt.Errorf("bypassExtraPorts: %w", err)
 	}
+	if err := validateIngressRefs(sr.IngressInterfaces); err != nil {
+		return sr, err
+	}
 	return sr, nil
+}
+
+func validateIngressRefs(refs []string) error {
+	for _, ref := range refs {
+		if !strings.HasPrefix(ref, "managed:") && !strings.HasPrefix(ref, "iface:") {
+			return fmt.Errorf("ingress interface ref %q must be prefixed managed: or iface:", ref)
+		}
+		if strings.TrimSpace(strings.SplitN(ref, ":", 2)[1]) == "" {
+			return fmt.Errorf("ingress interface ref %q has empty target", ref)
+		}
+	}
+	return nil
 }
 
 func ValidateSingboxRouterSettings(sr storage.SingboxRouterSettings) error {
@@ -1501,6 +1576,29 @@ func (s *ServiceImpl) ListBindableInterfaces(ctx context.Context) ([]WANInterfac
 		return []WANInterfaceInfo{}, nil
 	}
 	return s.deps.BindableInterfaces.ListBindable(ctx)
+}
+
+// ListIngressEligibleInterfaces возвращает интерфейсы, пригодные для
+// ingress-scope: bindable минус WAN минус LAN-бриджи (по Type). Для UI
+// router-страницы (мультиселект).
+func (s *ServiceImpl) ListIngressEligibleInterfaces(ctx context.Context) ([]WANInterfaceInfo, error) {
+	bindable, err := s.ListBindableInterfaces(ctx)
+	if err != nil {
+		return nil, err
+	}
+	wan, _ := s.ListWANInterfaces(ctx)
+	wanNames := map[string]bool{}
+	for _, w := range wan {
+		wanNames[w.Name] = true
+	}
+	out := make([]WANInterfaceInfo, 0, len(bindable))
+	for _, i := range bindable {
+		if wanNames[i.Name] || strings.EqualFold(i.Type, "Bridge") {
+			continue
+		}
+		out = append(out, i)
+	}
+	return out, nil
 }
 
 // validateBindInterface ensures name refers to a bindable interface. With

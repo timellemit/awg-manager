@@ -41,6 +41,10 @@ const (
 	// discovered from _NDM_HOTSPOT_DNSREDIR (see lanbridges.go).
 	// Issue #132.
 	DNSRescueTag = "AWGM-DNS-RESCUE"
+	// IngressTag identifies our MARK/CONNMARK rules in mangle PREROUTING
+	// that force selected interfaces' connections to carry the policy
+	// mark (ingress-scope feature). Comment-tagged for idempotent cleanup.
+	IngressTag = "AWGM-INGRESS"
 	// DNSNoPolicyTag is the legacy tag for the previous (failed)
 	// attempt: re-mark mark=0 DNS in mangle PREROUTING up to an NDMS
 	// catch-all mark, expecting _NDM_HOTSPOT_DNSREDIR to forward to
@@ -229,6 +233,11 @@ type RestoreInputSpec struct {
 	// Note: port 79 (NDMS admin) is always excluded by a hardcoded rule;
 	// including 79 here produces a harmless duplicate RETURN rule.
 	BypassTCPPorts []int
+
+	// IngressInterfaces — уже резолвленные kernel-имена (напр. "nwg3"),
+	// чей ingress-трафик помечается policy-меткой в mangle PREROUTING до
+	// connmark-jump'а. Пусто / MatchAll / пустой PolicyMark = no-op.
+	IngressInterfaces []string
 }
 
 var bypassCIDRs = []string{
@@ -298,6 +307,19 @@ func buildRestoreInput(spec RestoreInputSpec) string {
 	// add_tproxy_rules: catch-all TPROXY for UDP.
 	fmt.Fprintf(&b, "-A %s -p udp -j TPROXY --on-port %d --on-ip 127.0.0.1 --tproxy-mark 0x%x\n",
 		ChainName, TPROXYPort, Fwmark)
+
+	// Ingress-scope: пометить выбранные интерфейсы policy-меткой ДО jump'а,
+	// чтобы connmark-jump (ниже в mangle и в nat) принял их за членов
+	// политики. Эмитится перед jump'ом → в PREROUTING MARK/save сработают
+	// раньше. Skip в MatchAll / при пустой метке (там и так всё проксируется).
+	if !spec.MatchAll && spec.PolicyMark != "" {
+		for _, iface := range spec.IngressInterfaces {
+			fmt.Fprintf(&b, "-A PREROUTING -i %s -m comment --comment %s -j MARK --set-xmark %s/0xffffffff\n",
+				iface, IngressTag, spec.PolicyMark)
+			fmt.Fprintf(&b, "-A PREROUTING -i %s -m comment --comment %s -j CONNMARK --save-mark --nfmask 0xffffffff --ctmask 0xffffffff\n",
+				iface, IngressTag)
+		}
+	}
 
 	// set_prerouting_rules: policy connmark filter ON THE JUMP, no `-p`
 	// matcher (SKeen jumps unconditionally; per-proto matching happens
@@ -509,14 +531,19 @@ if [ "$mangle_ok" -eq 0 ] || [ "$nat_ok" -eq 0 ]; then
   # not chain jumps). Same drop-and-restore approach as above, just
   # matched via the iptables-save comment serialisation.
   /opt/sbin/iptables -w -t nat -S PREROUTING 2>/dev/null \
-    | grep -F -- '--comment "%[7]s"' \
+    | grep -E -- '--comment "?%[7]s' \
     | sed 's/-A PREROUTING/-D PREROUTING/' \
     | while IFS= read -r line; do /opt/sbin/iptables -w -t nat $line 2>/dev/null; done
   # Legacy DNS-NOPOLICY MARK rules in mangle (dead code from earlier
   # AWGM builds). Always scrub so upgrades don't leave dangling rules
   # accumulating across NDMS reloads.
   /opt/sbin/iptables -w -t mangle -S PREROUTING 2>/dev/null \
-    | grep -F -- '--comment "%[8]s"' \
+    | grep -E -- '--comment "?%[8]s' \
+    | sed 's/-A PREROUTING/-D PREROUTING/' \
+    | while IFS= read -r line; do /opt/sbin/iptables -w -t mangle $line 2>/dev/null; done
+  # Ingress-scope MARK/CONNMARK rules in mangle (comment-tagged).
+  /opt/sbin/iptables -w -t mangle -S PREROUTING 2>/dev/null \
+    | grep -E -- '--comment "?%[9]s' \
     | sed 's/-A PREROUTING/-D PREROUTING/' \
     | while IFS= read -r line; do /opt/sbin/iptables -w -t mangle $line 2>/dev/null; done
   /opt/sbin/iptables-restore --noflush < %[1]q
@@ -524,7 +551,7 @@ if [ "$mangle_ok" -eq 0 ] || [ "$nat_ok" -eq 0 ]; then
   /opt/sbin/ip route add local 0.0.0.0/0 dev lo table %[4]d 2>/dev/null || true
   logger -t awgm-tproxy "netfilter.d: restored AWGM chains after NDMS reload"
 fi
-`, netfilterRulesPath, ChainName, Fwmark, RoutingTable, IPRulePriority, RedirectChain, DNSRescueTag, DNSNoPolicyTag)
+`, netfilterRulesPath, ChainName, Fwmark, RoutingTable, IPRulePriority, RedirectChain, DNSRescueTag, DNSNoPolicyTag, IngressTag)
 	return os.WriteFile(netfilterHookPath, []byte(script), 0755)
 }
 
@@ -581,6 +608,10 @@ func (it *IPTables) removeSourceHooks(ctx context.Context) {
 	// rules are dead code now, but if left in place they'd accumulate
 	// across upgrades.
 	it.removeCommentTaggedRulesFromTable(ctx, "mangle", "PREROUTING", DNSNoPolicyTag)
+	// Ingress-scope: direct MARK/CONNMARK rules in mangle PREROUTING,
+	// tagged AWGM-INGRESS. Scrub before re-install so the list stays
+	// idempotent and removed interfaces don't leave dangling marks.
+	it.removeCommentTaggedRulesFromTable(ctx, "mangle", "PREROUTING", IngressTag)
 }
 
 // removeCommentTaggedRulesFromTable scrubs every rule in `chain` whose
