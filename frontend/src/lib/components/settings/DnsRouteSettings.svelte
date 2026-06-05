@@ -214,27 +214,10 @@
 
 	.inline-form input[type="number"] {
 		width: 4.75rem;
-		padding: 0.5rem 0.75rem;
-		background: var(--color-settings-control-bg);
-		border: 1px solid var(--border);
-		border-radius: var(--radius-sm);
-		color: var(--text-primary);
-		font-size: 0.875rem;
 	}
 
 	.inline-form input[type="time"] {
 		width: 8rem;
-		padding: 0.5rem 0.75rem;
-		background: var(--color-settings-control-bg);
-		border: 1px solid var(--border);
-		border-radius: var(--radius-sm);
-		color: var(--text-primary);
-		font-size: 0.875rem;
-	}
-
-	.inline-form input:focus {
-		outline: none;
-		border-color: var(--accent);
 	}
 
 	@media (max-width: 640px) {

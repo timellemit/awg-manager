@@ -236,28 +236,6 @@
 
 	.num-input input {
 		width: 100%;
-		height: 32px;
-		min-height: 32px;
-		max-height: 32px;
-		box-sizing: border-box;
-		background: var(--color-settings-control-bg);
-		border: 1px solid var(--color-border);
-		border-radius: var(--radius);
-		color: var(--color-text-primary);
-		font: inherit;
-		font-size: 13px;
-		padding: 0.375rem 0.5rem;
-		text-align: right;
-		font-variant-numeric: tabular-nums;
-	}
-
-	.num-input input:focus {
-		outline: none;
-		border-color: var(--color-accent);
-	}
-
-	.num-input input:disabled {
-		opacity: 0.6;
 	}
 
 	.logging-main-row,

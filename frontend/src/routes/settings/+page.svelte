@@ -1149,25 +1149,10 @@ $effect(() => {
 		min-width: 0;
 	}
 
-	.settings-text-input {
+	.settings-text-input,
+	.api-key-input {
 		width: 100%;
 		max-width: none;
-		height: 32px;
-		min-height: 32px;
-		max-height: 32px;
-		box-sizing: border-box;
-		padding: 0.375rem 0.5rem;
-		font-family: var(--font-mono, ui-monospace, monospace);
-		font-size: 0.8rem;
-		background: var(--color-settings-control-bg);
-		border: 1px solid var(--border, var(--color-border));
-		border-radius: 4px;
-		color: var(--text, var(--color-text));
-	}
-
-	.settings-text-input:focus {
-		outline: 2px solid color-mix(in srgb, var(--color-primary) 30%, transparent);
-		border-color: var(--color-primary);
 	}
 
 	.ping-target-action {
@@ -1189,25 +1174,9 @@ $effect(() => {
 	}
 
 	.api-key-input {
-		width: 100%;
-		max-width: none;
-		height: 32px;
-		min-height: 32px;
-		max-height: 32px;
-		box-sizing: border-box;
-		padding: 0.375rem 0.5rem;
-		font-family: var(--font-mono, ui-monospace, monospace);
-		font-size: 0.8rem;
-		background: var(--color-settings-control-bg);
-		border: 1px solid var(--border, var(--color-border));
-		border-radius: 4px;
-		color: var(--text, var(--color-text));
 		cursor: pointer;
 	}
-	.api-key-input:read-only {
-		opacity: 0.85;
-		cursor: text;
-	}
+
 	.api-key-action {
 		display: flex;
 		align-items: stretch;
