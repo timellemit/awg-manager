@@ -873,12 +873,6 @@
 		color: var(--color-success);
 	}
 
-	.card.view-dense .actions,
-	.card.view-compact .actions {
-		gap: 2px;
-		justify-content: center;
-	}
-
 	/* Header */
 	.header {
 		display: flex;
@@ -1134,59 +1128,6 @@
 		white-space: nowrap;
 	}
 
-	/* Actions */
-	.actions {
-		display: flex;
-		gap: 4px;
-		justify-content: flex-end;
-		align-items: center;
-	}
-
-	.action-btn {
-		display: inline-flex;
-		align-items: center;
-		gap: 4px;
-		padding: 5px 9px;
-		font-size: 11px;
-		font-weight: 500;
-		border: none;
-		background: transparent;
-		color: var(--color-text-secondary);
-		cursor: pointer;
-		border-radius: var(--radius-sm);
-		text-decoration: none;
-		font-family: inherit;
-		transition: background var(--t-fast) ease, color var(--t-fast) ease;
-	}
-
-	.action-btn:hover:not(:disabled) {
-		background: var(--color-bg-hover);
-		color: var(--color-text-primary);
-	}
-
-	.action-btn:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-
-	.action-danger:hover:not(:disabled) {
-		color: var(--color-error);
-		background: var(--color-error-tint);
-	}
-	.action-btn.action-test:hover:not(:disabled) {
-		color: var(--color-success);
-		background: var(--color-success-tint);
-	}
-
-	.action-spinner {
-		width: 12px;
-		height: 12px;
-		border: 2px solid currentColor;
-		border-top-color: transparent;
-		border-radius: 50%;
-		animation: spin 0.8s linear infinite;
-	}
-
 	/* Chart */
 	.chart-section {
 		margin: 0 -16px -14px;
@@ -1197,24 +1138,6 @@
 
 	.chart-body {
 		padding: 0 12px 4px;
-	}
-
-	@media (max-width: 720px) {
-		.actions {
-			display: grid;
-			grid-template-columns: repeat(3, minmax(0, 1fr));
-			gap: 4px;
-		}
-
-		.action-btn {
-			width: 100%;
-			justify-content: center;
-			padding-inline: 6px;
-		}
-
-		.action-btn svg {
-			flex-shrink: 0;
-		}
 	}
 
 </style>

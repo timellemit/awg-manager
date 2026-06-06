@@ -455,7 +455,7 @@
 		</div>
 	{/if}
 
-	<div class="actions">
+	<div class="actions actions--bar">
 		<TunnelListActions
 			variant="labeled"
 			onEdit={edit}
@@ -871,7 +871,6 @@
 		display: flex;
 		gap: 5px;
 		flex-wrap: wrap;
-		margin-bottom: 12px;
 	}
 	.badge {
 		padding: 2px 8px;
@@ -933,7 +932,7 @@
 	.divider {
 		height: 0;
 		border: none;
-		margin: 4px 0;
+		margin: 0;
 		background: none;
 	}
 	.divider-dashed {
@@ -993,60 +992,6 @@
 		outline-offset: 1px;
 	}
 
-	.actions {
-		display: flex;
-		gap: 6px;
-		justify-content: center;
-		align-items: center;
-		margin-top: 12px;
-		padding: 10px 0;
-		border-top: 1px solid var(--color-border);
-		border-bottom: 1px solid var(--color-border);
-	}
-	.card.view-dense .actions {
-		gap: 2px;
-		justify-content: center;
-		margin-top: 0;
-		padding: 0;
-		border: none;
-	}
-	.action-btn {
-		display: inline-flex;
-		align-items: center;
-		gap: 4px;
-		padding: 5px 9px;
-		font-size: var(--sbx-card-action);
-		font-weight: 500;
-		border: none;
-		background: transparent;
-		color: var(--color-text-secondary);
-		cursor: pointer;
-		border-radius: var(--radius-sm);
-		text-decoration: none;
-		font-family: inherit;
-		transition: background var(--t-fast) ease, color var(--t-fast) ease;
-	}
-	.card.view-dense .action-btn {
-		padding: 3px 6px;
-		font-size: var(--sbx-card-action-dense);
-		gap: 3px;
-	}
-	.action-btn:hover:not(:disabled) {
-		background: var(--color-bg-hover);
-		color: var(--color-text-primary);
-	}
-	.action-btn:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-	.action-btn.action-danger:hover:not(:disabled) {
-		color: var(--color-error);
-		background: var(--color-error-tint);
-	}
-	.action-btn.action-test:hover:not(:disabled) {
-		color: var(--color-success);
-		background: var(--color-success-tint);
-	}
 	.chart-section {
 		margin: 0 -14px -12px;
 		border-radius: 0 0 var(--radius) var(--radius);

@@ -18,7 +18,6 @@
 	import { singboxDelayStatusDot } from '$lib/utils/statusDot';
 	import { resolveSubscriptionMemberTag } from '$lib/utils/subscriptionMember';
 	import TunnelDiagnosticsModal from '$lib/components/testing/TunnelDiagnosticsModal.svelte';
-	import TunnelTestIcon from '$lib/components/tunnels/TunnelTestIcon.svelte';
 
 	interface Props {
 		subscription: Subscription;
@@ -114,11 +113,6 @@
 		goto(`/subscriptions/${subscription.id}`);
 	}
 
-	function requestDelete(e: MouseEvent): void {
-		e.stopPropagation();
-		ondelete?.(subscription.id);
-	}
-
 	let diagnosticsOpen = $state(false);
 
 	let selectorTag = $derived(subscription.selectorTag ?? '');
@@ -137,20 +131,6 @@
 			? 'Для подписки не удалось определить интерфейс тестирования.'
 			: undefined,
 	);
-
-	function openDiagnostics(e: MouseEvent): void {
-		e.preventDefault();
-		e.stopPropagation();
-		diagnosticsOpen = true;
-	}
-
-	function stopNestedAction(e: Event): void {
-		e.stopPropagation();
-	}
-
-	function stopNestedActionKeydown(e: KeyboardEvent): void {
-		e.stopPropagation();
-	}
 
 	const status = $derived(
 		subscription.lastError ? 'error' : subscription.lastFetched ? 'ok' : 'pending',
@@ -437,50 +417,17 @@
 		{/if}
 	</div>
 
-	<div class="inactive-actions">
-		<div class="actions">
-			<button
-				type="button"
-				class="action-btn"
-				title="Открыть подписку «{subscription.label || subscription.url}»"
-				onclick={(e) => {
-					e.stopPropagation();
-					open();
-				}}
-			>
-				<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-					<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-					<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-				</svg>
-				Открыть
-			</button>
-			<button
-				type="button"
-				class="action-btn action-test"
-				title="Открыть диагностику подписки «{subscription.label || subscription.url}»"
-				onpointerdown={stopNestedAction}
-				onmousedown={stopNestedAction}
-				onclick={openDiagnostics}
-				onkeydown={stopNestedActionKeydown}
-			>
-				<TunnelTestIcon />
-				Тест
-			</button>
-			{#if ondelete}
-				<button
-					type="button"
-					class="action-btn action-danger"
-					title="Удалить подписку «{subscription.label || subscription.url}»"
-					onclick={requestDelete}
-				>
-					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-						<polyline points="3,6 5,6 21,6"/>
-						<path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-					</svg>
-					Удалить
-				</button>
-			{/if}
-		</div>
+	<div class="actions actions--bar-top">
+		<TunnelListActions
+			variant="labeled"
+			onEdit={() => open()}
+			editLabel="Открыть"
+			editTitle="Открыть подписку «{subscription.label || subscription.url}»"
+			onTest={() => (diagnosticsOpen = true)}
+			testTitle="Открыть диагностику подписки «{subscription.label || subscription.url}»"
+			onDelete={ondelete ? () => ondelete(subscription.id) : undefined}
+			deleteTitle="Удалить подписку «{subscription.label || subscription.url}»"
+		/>
 	</div>
 </div>
 {/if}
@@ -520,6 +467,9 @@
 	}
 	.card.panel.inactive-panel {
 		border: 1px dashed color-mix(in srgb, var(--color-text-muted) 38%, transparent);
+	}
+	.card.inactive-panel:hover {
+		border-color: var(--color-accent);
 	}
 	.card.panel.inactive-panel.off {
 		opacity: 1;
@@ -714,48 +664,6 @@
 		white-space: normal;
 		overflow-wrap: anywhere;
 	}
-	.inactive-actions {
-		margin-top: 12px;
-		padding: 10px 0;
-		border-top: 1px solid var(--color-border);
-		border-bottom: 1px solid var(--color-border);
-	}
-	.inactive-panel .actions {
-		display: flex;
-		flex-wrap: nowrap;
-		gap: 8px;
-		justify-content: center;
-		align-items: center;
-	}
-	.inactive-panel .action-btn {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		gap: 4px;
-		padding: 5px 8px;
-		font-size: var(--sbx-card-action);
-		font-weight: 500;
-		border: none;
-		background: transparent;
-		color: var(--color-text-secondary);
-		cursor: pointer;
-		border-radius: var(--radius-sm);
-		font-family: inherit;
-		white-space: nowrap;
-		transition: background var(--t-fast) ease, color var(--t-fast) ease;
-	}
-	.inactive-panel .action-btn:hover:not(:disabled) {
-		background: var(--color-bg-hover);
-		color: var(--color-text-primary);
-	}
-	.inactive-panel .action-btn.action-test:hover:not(:disabled) {
-		color: var(--color-success);
-		background: var(--color-success-tint);
-	}
-	.inactive-panel .action-btn.action-danger:hover:not(:disabled) {
-		color: var(--color-error);
-		background: var(--color-error-tint);
-	}
 	.sbx-sub-active-row {
 		cursor: pointer;
 	}
@@ -814,38 +722,6 @@
 		justify-content: center;
 		align-items: center;
 		white-space: nowrap;
-	}
-	.action-btn {
-		display: inline-flex;
-		align-items: center;
-		gap: 4px;
-		padding: 5px 9px;
-		font-size: var(--sbx-card-action);
-		font-weight: 500;
-		border: none;
-		background: transparent;
-		color: var(--color-text-secondary);
-		cursor: pointer;
-		border-radius: var(--radius-sm);
-		text-decoration: none;
-		font-family: inherit;
-		transition: background var(--t-fast) ease, color var(--t-fast) ease;
-	}
-	.action-btn:hover:not(:disabled) {
-		background: var(--color-bg-hover);
-		color: var(--color-text-primary);
-	}
-	.action-btn:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-	.action-btn.action-danger:hover:not(:disabled) {
-		color: var(--color-error);
-		background: var(--color-error-tint);
-	}
-	.action-btn.action-test:hover:not(:disabled) {
-		color: var(--color-success);
-		background: var(--color-success-tint);
 	}
 	.delay-inline-err {
 		font-size: var(--sbx-card-badge);

@@ -672,12 +672,6 @@
 		);
 	});
 
-	$effect(() => {
-		if (!isAwgMobile) return;
-		if (singboxTunnelsLayoutMode === 'dense') singboxTunnelsLayoutMode = 'compact';
-		if (singboxSubscriptionsLayoutMode === 'dense') singboxSubscriptionsLayoutMode = 'compact';
-	});
-
 	let awgAutoConnectivityNonce = $state(0);
 	let singboxAutoDelayCheckNonce = $state(0);
 	let lastAutoCheckKey = '';
@@ -2130,7 +2124,7 @@
 							{/if}
 							{#if subscriptionsList.length > 0 && showSingboxLayoutPicker}
 								<LayoutViewToggle
-									value={singboxSubscriptionsEffectiveLayout}
+									value={singboxSubscriptionsLayoutMode}
 									showListOption={showSingboxGridListToggle}
 									ariaLabel="Вид подписок"
 									onchange={(v) => (singboxSubscriptionsLayoutMode = v)}
@@ -2335,7 +2329,7 @@
 						{/if}
 						{#if singboxTunnelsList.length > 0 && showSingboxLayoutPicker}
 							<LayoutViewToggle
-								value={singboxTunnelsEffectiveLayout}
+								value={singboxTunnelsLayoutMode}
 								showListOption={showSingboxGridListToggle}
 								ariaLabel="Вид туннелей"
 								onchange={(v) => (singboxTunnelsLayoutMode = v)}

@@ -170,10 +170,6 @@
 		isSingboxMembersMobile = mobile;
 	}));
 
-	$effect(() => {
-		if (!isSingboxMembersMobile) return;
-		if (singboxLayoutMode === 'dense') singboxLayoutMode = 'compact';
-	});
 	onDestroy(() => {
 		evtSrc?.close();
 		evtSrc = null;
@@ -277,7 +273,7 @@
 				{#if subscription.memberTags.length > 0 && showSingboxLayoutPicker}
 					<div class="members-toolbar">
 						<LayoutViewToggle
-							value={singboxEffectiveLayout}
+							value={singboxLayoutMode}
 							showListOption={showSingboxGridListToggle}
 							showDenseOption={false}
 							onchange={(v) => (singboxLayoutMode = v)}

@@ -680,12 +680,6 @@
 		color: var(--color-success);
 	}
 
-	.card.view-dense .actions,
-	.card.view-compact .actions {
-		gap: 2px;
-		justify-content: center;
-	}
-
 	.card.view-list {
 		display: grid;
 		grid-template-columns: minmax(0, 1.35fr) minmax(280px, 1fr) auto;
@@ -766,14 +760,6 @@
 
 	.stats-row {
 		white-space: nowrap;
-	}
-
-	/* Actions */
-	.actions {
-		display: flex;
-		gap: 4px;
-		justify-content: flex-end;
-		align-items: center;
 	}
 
 	/* Connectivity gear */
