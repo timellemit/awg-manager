@@ -71,7 +71,6 @@
 
     const history = $derived($singboxDelayHistory.get(activeMember.tag) ?? []);
     const delayPresentation = $derived(singboxDelayFromHistory(history));
-    const latest = $derived(delayPresentation.latest ?? -1);
     const traffic = $derived($singboxTraffic.get(activeMember.tag));
 
     const trafficSparkSeries = $derived.by(() => {

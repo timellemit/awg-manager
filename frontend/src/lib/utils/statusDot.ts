@@ -26,7 +26,7 @@ export function awgManagedStatusDot(
 			}
 			return { variant: 'success', pulse: false, label: 'Активен' };
 		case 'broken':
-			return { variant: 'warning', pulse: true, label: 'Сломан' };
+			return { variant: 'broken', pulse: true, label: 'Сломан' };
 		case 'starting':
 			return { variant: 'warning', pulse: true, label: 'Запускается' };
 		case 'needs_stop':

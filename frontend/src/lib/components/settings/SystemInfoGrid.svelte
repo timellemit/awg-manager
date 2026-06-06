@@ -94,20 +94,6 @@
 
 	const isBasic = $derived(usageLevel === 'basic');
 	const isExpert = $derived(usageLevel === 'expert');
-	// Деривы для кнопки обновления параметров роутера временно отключены вместе с самой кнопкой.
-	// const showRefreshRing = $derived(isExpert && autoRefreshMs > 0);
-	// const refreshRingStyle = $derived.by(() => {
-	// 	if (!showRefreshRing) return undefined;
-	// 	let delay = '0ms';
-	// 	if (lastUpdated) {
-	// 		const updatedAt = new Date(lastUpdated).getTime();
-	// 		if (Number.isFinite(updatedAt)) {
-	// 			const elapsed = Math.max(0, Date.now() - updatedAt) % autoRefreshMs;
-	// 			delay = `-${elapsed}ms`;
-	// 		}
-	// 	}
-	// 	return `--refresh-duration: ${autoRefreshMs}ms; --refresh-delay: ${delay};`;
-	// });
 </script>
 
 <div class="settings-block sysinfo-block">
@@ -141,24 +127,6 @@
 							{updatedLabel}
 						</span>
 					{/if}
-					<!-- Кнопка обновления параметров роутера временно скрыта.
-					{#key lastUpdated}
-						<button
-							type="button"
-							class="refresh-btn"
-							class:timer-enabled={showRefreshRing}
-							onclick={() => onrefresh?.()}
-							disabled={refreshing}
-							aria-label="Обновить информацию о роутере"
-							title="Обновить"
-							style={refreshRingStyle}
-						>
-							<svg class="refresh-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-								<path d="M21 12a9 9 0 1 1-2.64-6.36M21 4v6h-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-							</svg>
-						</button>
-					{/key}
-					-->
 				</div>
 			{/if}
 		</div>
@@ -397,70 +365,6 @@
 		background: var(--color-warning, var(--color-accent));
 		animation: pulse 1s ease-in-out infinite;
 	}
-
-	/* Стили кнопки обновления параметров роутера временно отключены вместе с самой кнопкой.
-	.refresh-btn {
-		position: relative;
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		width: 28px;
-		height: 28px;
-		border-radius: 6px;
-		border: 1px solid var(--color-border);
-		background: transparent;
-		color: var(--color-text-muted);
-		cursor: pointer;
-		transition: all var(--t-fast) ease;
-	}
-
-	.refresh-btn.timer-enabled::before {
-		content: '';
-		position: absolute;
-		inset: -1px;
-		border-radius: inherit;
-		padding: 1px;
-		--refresh-progress: 0deg;
-		background: conic-gradient(var(--color-accent) var(--refresh-progress), transparent 0deg);
-		animation: refresh-ring-progress var(--refresh-duration, 30s) linear infinite;
-		animation-delay: var(--refresh-delay, 0ms);
-		-webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-		mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-		-webkit-mask-composite: xor;
-		mask-composite: exclude;
-		pointer-events: none;
-		opacity: 0.95;
-	}
-
-	@property --refresh-progress {
-		syntax: '<angle>';
-		inherits: false;
-		initial-value: 0deg;
-	}
-
-	@keyframes refresh-ring-progress {
-		to {
-			--refresh-progress: 360deg;
-		}
-	}
-
-	.refresh-btn:hover:not(:disabled) {
-		color: var(--color-accent);
-		background: var(--color-bg-hover);
-	}
-
-	.refresh-btn:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-
-	.refresh-icon {
-		position: relative;
-		z-index: 1;
-		width: 15px;
-		height: 15px;
-	}
-	*/
 
 	@keyframes pulse {
 		0%, 100% { opacity: 1; }

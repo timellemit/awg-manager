@@ -49,6 +49,7 @@
 	import {
 		awgConnectivityDown,
 		awgListShowsPingButton,
+		awgPingStatusNote,
 		awgRecoveringVisual,
 		awgShowConnectivityRow,
 		awgToggleTint,
@@ -1692,7 +1693,8 @@
 						: connectivity === undefined ? 'checking'
 						: connectivity.connected ? 'connected' : 'disconnected'}
 					{@const statusDot = awgManagedStatusDot(tunnel, connectivity)}
-					{@const showPing = showManagedPing(tunnel, connectivity)}
+					{@const pingStatusNote = awgPingStatusNote(tunnel, 'short')}
+					{@const showPing = showManagedPing(tunnel, connectivity) || pingStatusNote !== null}
 					{@const showConnectivityRow = awgShowConnectivityRow(tunnel.status)}
 						<div class="awg-list-row">
 						<div class="awg-list-cell awg-list-cell-toggle" data-label="Старт">
@@ -1761,6 +1763,8 @@
 											layout="list"
 											connectivity={connState}
 											latencyMs={connectivity?.latency ?? null}
+											statusNote={pingStatusNote?.text}
+											statusNoteTone={pingStatusNote?.tone}
 											checking={pingChecking[tunnel.id] ?? false}
 											onclick={() => checkPing(tunnel.id)}
 										/>

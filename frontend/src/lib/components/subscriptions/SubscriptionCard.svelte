@@ -3,7 +3,7 @@
 	import type { SingboxLayoutMode } from '$lib/constants/singboxLayout';
 	import { goto } from '$app/navigation';
 	import { untrack } from 'svelte';
-	import { singboxDelayHistory, singboxTraffic, triggerDelayCheck } from '$lib/stores/singbox';
+	import { singboxDelayHistory, triggerDelayCheck } from '$lib/stores/singbox';
 	import { getTrafficRates, subscribeTraffic, loadHistory } from '$lib/stores/traffic';
 	import { Badge, TunnelListActions } from '$lib/components/ui';
 	import {
@@ -16,7 +16,6 @@
 	} from '$lib/components/tunnels';
 	import { singboxDelayFromHistory } from '$lib/utils/singboxDelay';
 	import { singboxDelayStatusDot } from '$lib/utils/statusDot';
-	import { formatBitRate } from '$lib/utils/format';
 	import { resolveSubscriptionMemberTag } from '$lib/utils/subscriptionMember';
 	import TunnelDiagnosticsModal from '$lib/components/testing/TunnelDiagnosticsModal.svelte';
 	import TunnelTestIcon from '$lib/components/tunnels/TunnelTestIcon.svelte';
@@ -52,10 +51,6 @@
 		}
 		return { variant: 'muted' as const, pulse: false, label: 'unknown' };
 	});
-	const latest = $derived(delayPresentation.latest ?? -1);
-
-	const traffic = $derived(resolvedMemberTag ? $singboxTraffic.get(resolvedMemberTag) : undefined);
-
 	const trafficSparkSeries = $derived.by(() => {
 		const n = Math.min(rxRates.length, txRates.length);
 		if (n === 0) return { rx: [] as number[], tx: [] as number[] };

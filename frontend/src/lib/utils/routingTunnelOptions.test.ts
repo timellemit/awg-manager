@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { PolicyGlobalInterface, RoutingTunnel } from '$lib/types';
+import type { PolicyGlobalInterface, RoutingTunnel, TunnelListItem } from '$lib/types';
 import {
 	buildAwgTunnelDropdownOptions,
+	buildManagedTunnelListDropdownOptions,
 	buildRoutingTunnelDropdownOptions,
 	filterPolicyGlobalInterfaces,
 	groupPolicyGlobalInterfaces,
@@ -113,6 +114,49 @@ describe('buildRoutingTunnelDropdownOptions', () => {
 		);
 		expect(opts).toHaveLength(1);
 		expect(opts[0].value).toBe('wan:eth3');
+	});
+});
+
+describe('buildManagedTunnelListDropdownOptions', () => {
+	it('includes all managed AWG tunnels regardless of runtime status', () => {
+		const opts = buildManagedTunnelListDropdownOptions([
+			{
+				id: 'awg1',
+				name: 'DE VPN',
+				type: 'awg',
+				status: 'running',
+				enabled: true,
+				endpoint: '1.2.3.4:51820',
+				interfaceName: 'nwg0',
+				address: '10.0.0.2/32',
+				pingCheck: { status: 'alive', restartCount: 0, failCount: 0, failThreshold: 3 },
+			},
+			{
+				id: 'awg2',
+				name: 'Stopped',
+				type: 'awg',
+				status: 'needs_start',
+				enabled: true,
+				endpoint: '5.6.7.8:51820',
+				interfaceName: 'nwg1',
+				address: '10.0.0.3/32',
+				pingCheck: { status: 'disabled', restartCount: 0, failCount: 0, failThreshold: 3 },
+			},
+			{
+				id: 'sub1',
+				name: 'Singbox',
+				type: 'singbox',
+				status: 'running',
+				enabled: true,
+				endpoint: '',
+				address: '',
+				pingCheck: { status: 'disabled', restartCount: 0, failCount: 0, failThreshold: 3 },
+			},
+		] satisfies TunnelListItem[]);
+		expect(opts).toHaveLength(2);
+		expect(opts.map((o) => o.value)).toEqual(['awg1', 'awg2']);
+		expect(opts[0].label).toBe('DE VPN · 1.2.3.4:51820');
+		expect(opts[1].disabled).toBeUndefined();
 	});
 });
 

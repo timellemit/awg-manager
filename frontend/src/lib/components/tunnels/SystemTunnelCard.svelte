@@ -2,9 +2,10 @@
 	import { untrack } from 'svelte';
 	import type { SystemTunnel, ConnectivityResult } from '$lib/types';
 	import { api } from '$lib/api/client';
-	import { formatRelativeTime, formatDuration, formatBytes, formatBitRate } from '$lib/utils/format';
-	import { TrafficChart, TrafficSparkline, Button, Badge, PingButton } from '$lib/components/ui';
-	import TunnelTestIcon from './TunnelTestIcon.svelte';
+	import { formatRelativeTime, formatDuration, formatBitRate } from '$lib/utils/format';
+	import { TrafficChart, TrafficSparkline, Badge, PingButton, TunnelListActions } from '$lib/components/ui';
+	import type { StatusDotVariant } from '$lib/components/ui/StatusDot.svelte';
+	import TunnelTitleRow from '$lib/components/tunnels/TunnelTitleRow.svelte';
 	import { getTrafficRates, subscribeTraffic, loadHistory } from '$lib/stores/traffic';
 
 	interface Props {
@@ -59,11 +60,15 @@
 		return () => clearInterval(interval);
 	});
 
-	// LED color
-	const ledClass = $derived(
-		tunnel.status !== 'up' ? 'led-gray' :
-		tunnel.peer?.online ? 'led-green' : 'led-yellow'
-	);
+	let statusDot = $derived.by((): { variant: StatusDotVariant; pulse: boolean; label: string } => {
+		if (tunnel.status !== 'up') {
+			return { variant: 'muted', pulse: false, label: 'Выключен' };
+		}
+		if (!tunnel.peer?.online) {
+			return { variant: 'warning', pulse: false, label: 'Без handshake' };
+		}
+		return { variant: 'success', pulse: false, label: 'Активен' };
+	});
 
 	// Traffic chart — live only (no server history for system tunnels)
 	let rxRates = $state<number[]>([]);
@@ -87,16 +92,6 @@
 		update();
 		return subscribeTraffic(update);
 	});
-
-	// Collapsible chart (persisted in localStorage, separate prefix from managed cards)
-	const CHART_KEY_PREFIX = 'chart_expanded_systunnel_';
-	// svelte-ignore state_referenced_locally — intentional: initial value from localStorage
-	let chartExpanded = $state(localStorage.getItem(CHART_KEY_PREFIX + tunnel.id) !== 'false');
-
-	function toggleChart() {
-		chartExpanded = !chartExpanded;
-		localStorage.setItem(CHART_KEY_PREFIX + tunnel.id, String(chartExpanded));
-	}
 
 	let chartHeight = $derived(view === 'compact' ? 76 : 100);
 
@@ -137,25 +132,24 @@
 		{#if isDenseCard}
 			<div class="header header-dense">
 				<div class="header-dense-body">
-					<div class="title-line-dense">
-						<button
-							type="button"
-							class="tunnel-name tunnel-name-dense"
+					<div class="tunnel-name-row">
+						<TunnelTitleRow
 							title={displayName}
-							onclick={() => ondetail?.(tunnel.id)}
-						>
-							{displayName}
-						</button>
+							dotVariant={statusDot.variant}
+							dotPulse={statusDot.pulse}
+							dotLabel={statusDot.label}
+							dense
+							onTitleClick={() => ondetail?.(tunnel.id)}
+						/>
 					</div>
 					<div class="meta-tags-dense">
 						<Badge variant="info" size="sm">Системный</Badge>
 						<span class="iface-chip-dense" title={tunnel.interfaceName}>{tunnel.interfaceName}</span>
 					</div>
 				</div>
-				<div class="dense-toolbar">
-					{#if showConnectivityRow}
+				{#if showConnectivityRow}
+					<div class="dense-toolbar">
 						<div class="dense-toolbar-bottom">
-							<span class="led {ledClass}"></span>
 							{#if showPingButton}
 								<PingButton
 									connectivity={connState}
@@ -176,26 +170,19 @@
 								</svg>
 							</button>
 						</div>
-					{:else}
-						<div class="dense-toolbar-top">
-							<span class="led {ledClass}"></span>
-						</div>
-					{/if}
-				</div>
+					</div>
+				{/if}
 			</div>
 		{:else}
 			<div class="header">
 				<div class="head-left">
-					<div class="title-line">
-						<button
-							type="button"
-							class="tunnel-name"
-							title={displayName}
-							onclick={() => ondetail?.(tunnel.id)}
-						>
-							{displayName}
-						</button>
-					</div>
+					<TunnelTitleRow
+						title={displayName}
+						dotVariant={statusDot.variant}
+						dotPulse={statusDot.pulse}
+						dotLabel={statusDot.label}
+						onTitleClick={() => ondetail?.(tunnel.id)}
+					/>
 					<div class="meta-line">
 						<span class="iface-name">{tunnel.interfaceName}</span>
 						<span class="version-badge badge-system">Системный</span>
@@ -204,10 +191,9 @@
 						<span class="status-hint-left">{compactStatusHint}</span>
 					{/if}
 				</div>
-				<div class="head-right">
-					{#if showConnectivityRow}
+				{#if showConnectivityRow}
+					<div class="head-right">
 						<div class="connectivity-row">
-							<span class="led {ledClass}"></span>
 							{#if showPingButton}
 								<PingButton
 									connectivity={connState}
@@ -227,12 +213,8 @@
 								</svg>
 							</button>
 						</div>
-					{:else}
-						<div class="led-row">
-							<span class="led {ledClass}"></span>
-						</div>
-					{/if}
-				</div>
+					</div>
+				{/if}
 			</div>
 		{/if}
 
@@ -240,7 +222,7 @@
 		<div class="details">
 			{#if view === 'cards'}
 				<div class="details-dense-cols">
-					<div class="details-dense-col">
+					<div class="details-dense-col details-dense-col-lead">
 						{#if tunnel.peer?.endpoint}
 							<div class="kv-stacked-stat">
 								<span class="kv-stacked-label">Сервер</span>
@@ -360,43 +342,34 @@
 		</div>
 
 		<!-- Actions -->
-		<div class="actions-wrapper">
-			<div class="actions-row">
-				<Button variant="ghost" href="/system-tunnels/{tunnel.id}">
-					{#snippet iconBefore()}
-						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-							<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-							<path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-						</svg>
-					{/snippet}
-					Изменить
-				</Button>
-
-				<span class="system-action-test">
-					<Button variant="ghost" onclick={openTest}>
-						{#snippet iconBefore()}
-							<TunnelTestIcon size={16} />
-						{/snippet}
-						Тест
-					</Button>
-				</span>
-
-				{#if onMarkServer}
-					<span class="system-action-primary">
-						<Button variant="ghost" onclick={() => onMarkServer?.(tunnel.id)}>
-							{#snippet iconBefore()}
-								<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-									<rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>
-									<rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>
-									<line x1="6" y1="6" x2="6.01" y2="6"/>
-									<line x1="6" y1="18" x2="6.01" y2="18"/>
-								</svg>
-							{/snippet}
+		<div class="actions">
+			<TunnelListActions
+				variant="labeled"
+				editHref="/system-tunnels/{tunnel.id}"
+				editTitle="Изменить туннель «{displayName}»"
+				onTest={openTest}
+				testTitle="Тест туннеля «{displayName}»"
+			>
+				{#snippet extra()}
+					{#if onMarkServer}
+						<button
+							type="button"
+							class="tunnel-list-actions__btn tunnel-list-actions__btn--primary"
+							title="Перенести туннель «{displayName}» в серверы"
+							aria-label="Перенести туннель «{displayName}» в серверы"
+							onclick={() => onMarkServer(tunnel.id)}
+						>
+							<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+								<rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>
+								<rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>
+								<line x1="6" y1="6" x2="6.01" y2="6"/>
+								<line x1="6" y1="18" x2="6.01" y2="18"/>
+							</svg>
 							В серверы
-						</Button>
-					</span>
-				{/if}
-			</div>
+						</button>
+					{/if}
+				{/snippet}
+			</TunnelListActions>
 		</div>
 
 		<!-- Traffic -->
@@ -420,22 +393,14 @@
 					</div>
 				</button>
 			{:else}
-				<div class="chart-section">
-					<button type="button" class="chart-header" onclick={toggleChart}>
-						<span class="chart-label">Трафик</span>
-						<span class="chart-chevron" class:expanded={chartExpanded}>▾</span>
-					</button>
-					<div class="chart-body" class:expanded={chartExpanded}>
-						<TrafficChart
-							{rxRates}
-							{txRates}
-							rxTotal={tunnel.peer?.rxBytes ?? 0}
-							txTotal={tunnel.peer?.txBytes ?? 0}
-							height={chartHeight}
-							onclick={() => ondetail?.(tunnel.id)}
-						/>
-					</div>
-				</div>
+				<TrafficChart
+					{rxRates}
+					{txRates}
+					rxTotal={tunnel.peer?.rxBytes ?? 0}
+					txTotal={tunnel.peer?.txBytes ?? 0}
+					height={chartHeight}
+					onclick={() => ondetail?.(tunnel.id)}
+				/>
 			{/if}
 		{/if}
 	</div>
@@ -478,23 +443,25 @@
 
 	.card.view-dense .details {
 		gap: 6px;
+		padding: 6px 0;
 	}
 
-	.title-line-dense {
+	.card.view-compact .details {
+		gap: 8px;
+		padding: 6px 0;
+	}
+
+	.tunnel-name-row {
 		display: flex;
-		align-items: baseline;
-		gap: 6px;
+		align-items: center;
+		gap: 5px;
 		min-width: 0;
+		overflow: hidden;
 	}
 
-	.tunnel-name-dense {
-		flex: 1 1 auto;
-		min-width: 0;
-		font-size: 0.9rem;
-		font-weight: 600;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
+	.card.view-dense .tunnel-name-row :global(.tunnel-title-row__name) {
+		font-size: 13px;
+		line-height: var(--sbx-card-title-line-height);
 	}
 
 	.meta-tags-dense {
@@ -560,13 +527,6 @@
 		min-width: 0;
 	}
 
-	.title-line {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		min-width: 0;
-	}
-
 	.head-right {
 		display: flex;
 		flex-direction: column;
@@ -575,23 +535,11 @@
 		flex-shrink: 0;
 	}
 
-	.led-row {
-		display: flex;
-		align-items: center;
-		justify-content: flex-end;
-	}
-
 	.dense-toolbar {
 		display: flex;
 		flex-direction: column;
 		align-items: flex-end;
 		flex-shrink: 0;
-	}
-
-	.dense-toolbar-top {
-		display: flex;
-		align-items: center;
-		gap: 8px;
 	}
 
 	.dense-toolbar-bottom {
@@ -613,26 +561,10 @@
 		gap: 5px;
 	}
 
-	.connectivity-row .led,
-	.dense-toolbar-bottom .led {
-		flex-shrink: 0;
-	}
-
 	.card.view-dense .dense-toolbar-bottom .connectivity-gear {
 		width: 16px;
 		height: 16px;
 		padding: 0;
-	}
-
-	.card.view-dense .dense-toolbar-top .led,
-	.card.view-dense .dense-toolbar .led {
-		width: 6px;
-		height: 6px;
-	}
-
-	.card.view-compact .led {
-		width: 8px;
-		height: 8px;
 	}
 
 	.status-hint-left {
@@ -643,9 +575,9 @@
 
 	.details-dense-cols {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
+		grid-template-columns: minmax(0, 1fr) 6.5rem;
 		gap: 10px 12px;
-		align-items: end;
+		align-items: start;
 	}
 
 	.details-dense-col {
@@ -656,7 +588,8 @@
 	}
 
 	.details-dense-col-right {
-		min-width: 4.75rem;
+		width: 100%;
+		overflow: hidden;
 	}
 
 	.kv-stacked-stat {
@@ -747,21 +680,10 @@
 		color: var(--color-success);
 	}
 
-	.card.view-dense .actions-wrapper {
-		padding-top: 8px;
-	}
-
-	.card.view-dense .actions-row :global(button),
-	.card.view-dense .actions-row :global(a) {
-		padding: 0.25rem 0.5rem !important;
-		font-size: 0.6875rem !important;
-		min-height: 0 !important;
-	}
-
-	.card.view-dense .actions-row :global(button svg),
-	.card.view-dense .actions-row :global(a svg) {
-		width: 12px !important;
-		height: 12px !important;
+	.card.view-dense .actions,
+	.card.view-compact .actions {
+		gap: 2px;
+		justify-content: center;
 	}
 
 	.card.view-list {
@@ -770,31 +692,6 @@
 		gap: 12px 16px;
 		align-items: start;
 		padding: 12px 14px;
-	}
-
-	/* Tunnel name */
-	.tunnel-name {
-		background: none;
-		border: none;
-		padding: 0;
-		font: inherit;
-		font-size: 15px;
-		font-weight: 600;
-		color: var(--color-text-primary, var(--text-primary));
-		text-align: left;
-		cursor: pointer;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-		min-width: 0;
-	}
-
-	.tunnel-name:hover {
-		color: var(--color-accent, var(--accent));
-	}
-
-	.card.view-compact .tunnel-name {
-		font-size: 14px;
 	}
 
 	.iface-name {
@@ -817,30 +714,6 @@
 
 	.badge-system {
 		background: rgba(148, 163, 184, 0.15);
-	}
-
-	/* LED indicator */
-	.led {
-		width: 8px;
-		height: 8px;
-		border-radius: 50%;
-		flex-shrink: 0;
-		transition: background 0.3s ease, box-shadow 0.3s ease;
-	}
-
-	.led-green {
-		background: var(--success, #10b981);
-		box-shadow: 0 0 6px var(--success, #10b981);
-	}
-
-	.led-yellow {
-		background: var(--warning, #f59e0b);
-		box-shadow: 0 0 6px var(--warning, #f59e0b);
-	}
-
-	.led-gray {
-		background: var(--text-muted, #6b7280);
-		box-shadow: none;
 	}
 
 	/* Eye toggle */
@@ -866,11 +739,10 @@
 	.details {
 		display: flex;
 		flex-direction: column;
-		gap: 12px;
-	}
-
-	.card.view-compact .details {
 		gap: 10px;
+		padding: 8px 0;
+		border-top: 1px solid var(--color-border);
+		border-bottom: 1px solid var(--color-border);
 	}
 
 	.detail-label {
@@ -897,9 +769,11 @@
 	}
 
 	/* Actions */
-	.actions-wrapper {
-		padding-top: 12px;
-		border-top: 1px solid var(--border);
+	.actions {
+		display: flex;
+		gap: 4px;
+		justify-content: flex-end;
+		align-items: center;
 	}
 
 	/* Connectivity gear */
@@ -923,99 +797,5 @@
 	.connectivity-gear.gear-disabled {
 		opacity: 0.4;
 	}
-
-	/* Traffic chart (collapsible) */
-	.chart-section {
-		margin: 0 -1rem -1rem;
-		border-radius: 0 0 var(--radius) var(--radius);
-		background: var(--bg-secondary, rgba(0,0,0,0.15));
-		overflow: hidden;
-	}
-
-	.card.view-compact .chart-section {
-		margin: 0 -14px -12px;
-	}
-
-	.chart-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		width: 100%;
-		padding: 7px 12px;
-		border: none;
-		border-bottom: 1px solid color-mix(in srgb, var(--color-border, var(--border)) 70%, transparent);
-		background: color-mix(in srgb, var(--color-bg-tertiary, var(--bg-tertiary)) 72%, transparent);
-		color: var(--color-text-secondary, var(--text-secondary));
-		cursor: pointer;
-		user-select: none;
-		transition: background 0.15s, border-color 0.15s;
-	}
-
-	.chart-header:hover {
-		background: color-mix(in srgb, var(--color-bg-hover, var(--bg-hover)) 78%, transparent);
-		border-bottom-color: var(--color-border-hover, var(--border-hover));
-	}
-
-	.chart-label {
-		font-size: 0.6875rem;
-		font-weight: 600;
-		color: var(--color-text-secondary, var(--text-secondary));
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-	}
-
-	.chart-chevron {
-		font-size: 0.875rem;
-		color: var(--color-text-secondary, var(--text-secondary));
-		opacity: 0.85;
-		transition: transform 0.2s ease;
-		transform: rotate(-90deg);
-	}
-
-	.chart-chevron.expanded {
-		transform: rotate(0deg);
-	}
-
-	.chart-body {
-		max-height: 0;
-		overflow: hidden;
-		transition: max-height 0.2s ease;
-		padding: 0 12px;
-	}
-
-	.chart-body.expanded {
-		max-height: 300px;
-		padding: 0 12px 4px;
-	}
-
-	.actions-row {
-		display: flex;
-		gap: 4px;
-		align-items: center;
-		flex-wrap: nowrap;
-		justify-content: center;
-	}
-
-	.card.view-compact .actions-row {
-		justify-content: flex-end;
-	}
-
-	.system-action-test,
-	.system-action-primary {
-		display: inline-flex;
-	}
-
-	.system-action-test :global(.btn:hover:not(:disabled):not(.is-disabled)) {
-		color: var(--color-success);
-		background: var(--color-success-tint);
-	}
-
-	.system-action-primary :global(.btn:hover:not(:disabled):not(.is-disabled)) {
-		color: var(--color-accent);
-		background: var(--color-accent-tint);
-	}
-
-
-
 
 </style>

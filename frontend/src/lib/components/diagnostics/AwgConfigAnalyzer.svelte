@@ -3,8 +3,8 @@
 	import { api } from '$lib/api/client';
 	import { notifications } from '$lib/stores/notifications';
 	import { tunnels as tunnelsStore } from '$lib/stores/tunnels';
-	import type { AWGTunnel, RoutingTunnel } from '$lib/types';
-	import { buildAwgTunnelDropdownOptions } from '$lib/utils/routingTunnelOptions';
+	import type { AWGTunnel, TunnelListItem } from '$lib/types';
+	import { buildManagedTunnelListDropdownOptions } from '$lib/utils/routingTunnelOptions';
 	import {
 		parseAWG,
 		detectVersion,
@@ -53,7 +53,7 @@
 	let camouflage = $state<'LOW' | 'MEDIUM' | 'HIGH'>('LOW');
 	let fileInput: HTMLInputElement | undefined = $state();
 
-	let tunnels = $state<RoutingTunnel[]>([]);
+	let tunnels = $state<TunnelListItem[]>([]);
 	let selectedTunnelId = $state('');
 	let tunnelsLoading = $state(false);
 	let tunnelLoading = $state(false);
@@ -408,10 +408,8 @@
 		tunnelsLoading = true;
 		tunnelLoadError = '';
 		try {
-			const res = await fetch('/api/routing/tunnels');
-			if (!res.ok) throw new Error(`routing/tunnels ${res.status}`);
-			const body = (await res.json()) as { data?: RoutingTunnel[] };
-			tunnels = body.data ?? [];
+			const snap = await api.getTunnelsAll();
+			tunnels = (snap.tunnels ?? []).filter((t) => t.id && t.type !== 'singbox');
 			if (initialTunnelId) {
 				selectedTunnelId = initialTunnelId;
 			}
@@ -426,7 +424,7 @@
 		}
 	});
 
-	const tunnelOptions = $derived(buildAwgTunnelDropdownOptions(tunnels));
+	const tunnelOptions = $derived(buildManagedTunnelListDropdownOptions(tunnels));
 	const tunnelPlaceholder = $derived(
 		tunnelsLoading
 			? 'Загрузка туннелей…'

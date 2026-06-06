@@ -708,18 +708,7 @@ label {
 	min-width: 0;
 }
 
-.settings-block > .section-label,
-.settings-block > .head-row .section-label {
-	font-size: 0.8125rem;
-	line-height: 1.25;
-}
-
-.settings-block > .head-row .section-label {
-	margin-bottom: 0;
-}
-
-.settings-block > .card,
-.card.settings-surface {
+.settings-block > .card {
 	background: var(--color-settings-surface-bg);
 }
 
@@ -729,12 +718,6 @@ label {
 
 .settings-layout {
 	--settings-gap: 0.765rem;
-	display: flex;
-	flex-direction: column;
-	gap: var(--settings-gap);
-}
-
-.settings-layout .settings-stack {
 	display: flex;
 	flex-direction: column;
 	gap: var(--settings-gap);

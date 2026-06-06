@@ -768,7 +768,7 @@
 
 	.details-dense-cols {
 		display: grid;
-		grid-template-columns: minmax(0, 1fr) 5.5rem;
+		grid-template-columns: minmax(0, 1fr) 6.5rem;
 		gap: 10px 12px;
 		align-items: start;
 	}

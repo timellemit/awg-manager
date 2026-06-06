@@ -662,7 +662,7 @@ function applyThemeChromeMetadata(tokens: ThemeTokenMap, mode: ThemeMode): void 
 	const themeColor =
 		tokens['--color-bg-primary'] ??
 		tokens['--color-bg-secondary'] ??
-		(mode === 'light' ? '#f0f0f3' : '#16161e');
+		(mode === 'light' ? '#e9e9ed' : '#1a1b26');
 
 	const themeColorMetas = Array.from(
 		document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]'),
