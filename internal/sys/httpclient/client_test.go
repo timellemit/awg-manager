@@ -291,6 +291,26 @@ func TestDo_URL_Missing(t *testing.T) {
 // transport must advertise only "http/1.1" and never enable h2. Without this,
 // servers negotiate HTTP/2 while the client speaks HTTP/1.1, producing EOF /
 // "malformed HTTP response" on real downloads (geo files, Amnezia Premium).
+func TestBuildTransport_DirectUsesEnvProxy(t *testing.T) {
+	tr, err := NewTransport(TransportConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr.Proxy == nil {
+		t.Fatal("direct transport must use ProxyFromEnvironment")
+	}
+}
+
+func TestBuildTransport_BindSkipsEnvProxy(t *testing.T) {
+	tr, err := NewTransport(TransportConfig{Interface: "wg0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr.Proxy != nil {
+		t.Fatal("bind transport must not set Proxy")
+	}
+}
+
 func TestBuildTransport_PinsHTTP1(t *testing.T) {
 	tr, err := NewTransport(TransportConfig{})
 	if err != nil {

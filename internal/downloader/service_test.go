@@ -289,10 +289,14 @@ func assertBoundTransport(t *testing.T, client *http.Client, wantIface string) {
 	if err != nil {
 		t.Fatalf("parse request url: %v", err)
 	}
-	if proxyURL, err := tr.Proxy(&http.Request{URL: reqURL}); err != nil {
-		t.Fatalf("proxy func: %v", err)
-	} else if proxyURL != nil {
-		t.Fatalf("bind transport must not use proxy, got %v", proxyURL)
+	if tr.Proxy != nil {
+		proxyURL, err := tr.Proxy(&http.Request{URL: reqURL})
+		if err != nil {
+			t.Fatalf("proxy func: %v", err)
+		}
+		if proxyURL != nil {
+			t.Fatalf("bind transport must not use proxy, got %v", proxyURL)
+		}
 	}
 	if tr.DialContext == nil {
 		t.Fatal("bind transport must set DialContext")

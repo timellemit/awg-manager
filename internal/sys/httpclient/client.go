@@ -234,9 +234,13 @@ func (c *Client) buildTransport(cfg CallConfig, parsedProxy *url.URL) *http.Tran
 	}
 	t.DialContext = buildDialContext(cfg.Interface, cfg.DNSServers, connectTimeout)
 
-	// Set up proxy if specified.
+	// Set up proxy. Explicit URL wins; otherwise honour HTTP_PROXY/HTTPS_PROXY
+	// for direct (unbound) egress. Bind mode must not use env proxy — traffic
+	// must stay on the tunnel interface.
 	if parsedProxy != nil {
 		t.Proxy = http.ProxyURL(parsedProxy)
+	} else if cfg.Interface == "" {
+		t.Proxy = http.ProxyFromEnvironment
 	}
 
 	// Enforce ForceAttemptHTTP2 = false — some VPN endpoints behind

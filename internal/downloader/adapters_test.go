@@ -2,7 +2,6 @@ package downloader
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -29,7 +28,8 @@ func TestAWGTunnelIDFromTag(t *testing.T) {
 
 func TestAWGStoreEgressAdapter_DNSForTag(t *testing.T) {
 	dir := t.TempDir()
-	store := storage.NewAWGTunnelStore(dir)
+	lockDir := filepath.Join(dir, ".locks")
+	store := storage.NewAWGTunnelStoreWithLockDir(dir, lockDir)
 	if err := store.Save(&storage.AWGTunnel{
 		ID:   "awg11",
 		Name: "Work",
@@ -39,8 +39,6 @@ func TestAWGStoreEgressAdapter_DNSForTag(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	// lock dir sidecar
-	_ = os.Mkdir(filepath.Join(dir, ".locks"), 0o755)
 
 	adp := NewAWGStoreEgressAdapter(store)
 	got := adp.DNSForTag(context.Background(), "awg-awg11")
