@@ -80,13 +80,18 @@
 	}
 
 	.peer-search {
+		box-sizing: border-box;
 		width: 120px;
-		padding: 0.25rem 0.5rem;
+		height: 28px;
+		min-height: 28px;
+		max-height: 28px;
+		padding: 0 0.5rem;
 		border: 1px solid var(--border);
 		border-radius: var(--radius-sm);
 		background: var(--bg-primary);
 		color: var(--text-primary);
-		font-size: 0.6875rem;
+		font-size: 12px;
+		line-height: 1;
 	}
 
 	.peer-search::placeholder {

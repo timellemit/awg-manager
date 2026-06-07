@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import type { ManagedServer, ManagedPeer, ManagedPeerStats, ManagedServerStats } from '$lib/types';
+	import type { ManagedServer, ManagedPeer, ManagedPeerStats, ManagedServerStats, ASCParams } from '$lib/types';
 	import { api } from '$lib/api/client';
 	import { notifications } from '$lib/stores/notifications';
 	import { servers } from '$lib/stores/servers';
 	import { formatBytes } from '$lib/utils/format';
-	import { Plus } from 'lucide-svelte';
-	import { Toggle, Button, IconButton, Dropdown, ChipMultiSelect, type DropdownOption } from '$lib/components/ui';
+	import { EarthLock, Plus, RefreshCw, Settings, Trash2 } from 'lucide-svelte';
+	import { Toggle, Button, Dropdown, ChipMultiSelect, VersionBadge, type DropdownOption } from '$lib/components/ui';
 	import {
 		EditManagedServerModal,
 		AddManagedPeerModal,
@@ -18,6 +18,7 @@
 	import { comparePeerFieldsDirected } from '$lib/utils/peerSort';
 	import { peerSort } from '$lib/stores/peerSort';
 	import { isStandardAccessPolicyName } from '$lib/utils/accessPolicy';
+	import { classifyAwgVersionFromAsc } from '$lib/utils/classifyAwgVersion';
 
 	interface Props {
 		server: ManagedServer;
@@ -100,6 +101,7 @@
 	});
 
 	let onlineCount = $derived(stats?.peers?.filter(p => p.online).length ?? 0);
+	let totalPeers = $derived((server.peers ?? []).length);
 	let isUp = $derived(stats?.status === 'up');
 	let totalRx = $derived(stats?.peers?.reduce((sum, p) => sum + p.rxBytes, 0) ?? 0);
 	let totalTx = $derived(stats?.peers?.reduce((sum, p) => sum + p.txBytes, 0) ?? 0);
@@ -270,10 +272,32 @@
 	// Empty initial value is overwritten by the $effect on mount before
 	// the select is interactive.
 	let selectedPolicy = $state('');
+	let ascParams = $state<ASCParams | null>(null);
 
 	$effect(() => {
 		selectedPolicy = server.policy;
 	});
+
+	$effect(() => {
+		const id = server.interfaceName;
+		let cancelled = false;
+		ascParams = null;
+
+		void (async () => {
+			try {
+				const params = await api.getManagedServerASC(id);
+				if (!cancelled) ascParams = params;
+			} catch {
+				if (!cancelled) ascParams = null;
+			}
+		})();
+
+		return () => {
+			cancelled = true;
+		};
+	});
+
+	let awgVersion = $derived(classifyAwgVersionFromAsc(ascParams));
 
 	onMount(async () => {
 		try {
@@ -321,10 +345,23 @@
 	<!-- Header -->
 	<div class="card-header">
 		<div class="header-info">
-			<div class="flex items-center gap-2">
-				<span class="led" class:led-up={isUp} class:led-down={!isUp}></span>
-				<h3 class="card-title">{serverDisplayName}</h3>
-				<span class="badge-managed">Управляемый</span>
+			<div class="title-row">
+				<div class="title-main">
+					<Toggle
+						checked={isUp}
+						onchange={handleToggleEnabled}
+						disabled={togglingEnabled || restartingServer}
+						size="sm"
+						spinner="none"
+					/>
+					<h3 class="card-title">{serverDisplayName}</h3>
+				</div>
+				<div class="title-badges">
+					<span class="badge-managed">Управляемый</span>
+					{#if ascParams !== null}
+						<VersionBadge kind="awg" value={awgVersion} />
+					{/if}
+				</div>
 			</div>
 			<div class="server-meta">
 				<span class="meta mono">{server.interfaceName}</span>
@@ -338,47 +375,45 @@
 				{/if}
 			</div>
 		</div>
-		<div class="header-actions">
-			<Toggle
-				checked={isUp}
-				onchange={handleToggleEnabled}
-				disabled={togglingEnabled || restartingServer}
+		<div class="header-right">
+			<!-- TODO: вернуть индикатор онлайн-пиров
+			<div class="server-status" title={isUp ? 'Сервер включён' : 'Сервер выключен'}>
+				<span class="led" class:led-up={isUp} class:led-down={!isUp} aria-hidden="true"></span>
+				<span class="peer-count">{onlineCount}/{totalPeers}</span>
+			</div>
+			-->
+			<div class="header-actions">
+			<Button
+				variant="ghost"
 				size="sm"
-			/>
-			<IconButton
-				ariaLabel={isUp
-					? `Перезапустить сервер ${serverDisplayName}`
-					: `Запустить сервер ${serverDisplayName}`}
+				onclick={handleRestartOrStart}
+				disabled={restartingServer || togglingEnabled || deleting}
+				loading={restartingServer}
+				iconBefore={restartIcon}
 				title={isUp
 					? `Перезапустить сервер «${serverDisplayName}»`
 					: `Запустить сервер «${serverDisplayName}»`}
-				onclick={handleRestartOrStart}
-				disabled={restartingServer || togglingEnabled || deleting}
 			>
-				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-					<path d="M21 12a9 9 0 1 1-2.64-6.36" />
-					<path d="M21 3v6h-6" />
-				</svg>
-			</IconButton>
-			<IconButton
-				ariaLabel={`Открыть параметры обфускации сервера ${serverDisplayName}`}
-				title={`Параметры обфускации сервера «${serverDisplayName}»`}
+				{isUp ? 'Рестарт' : 'Запуск'}
+			</Button>
+			<Button
+				variant="ghost"
+				size="sm"
 				onclick={onOpenASC}
+				iconBefore={ascIcon}
+				title={`Параметры обфускации сервера «${serverDisplayName}»`}
 			>
-				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-					<path d="M12 20V10M18 20V4M6 20v-4"/>
-				</svg>
-			</IconButton>
-			<IconButton
-				ariaLabel={`Открыть настройки сервера ${serverDisplayName}`}
-				title={`Настройки сервера «${serverDisplayName}»`}
+				Обфускация
+			</Button>
+			<Button
+				variant="ghost"
+				size="sm"
 				onclick={() => editServerOpen = true}
+				iconBefore={settingsIcon}
+				title={`Настройки сервера «${serverDisplayName}»`}
 			>
-				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-					<path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/>
-					<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/>
-				</svg>
-			</IconButton>
+				Настройки
+			</Button>
 			{#if confirmDelete}
 				<Button
 					variant="danger"
@@ -390,77 +425,80 @@
 					Подтвердить?
 				</Button>
 			{:else}
-				<IconButton
-					variant="danger"
-					ariaLabel={`Удалить сервер ${serverDisplayName}`}
-					title={`Удалить сервер «${serverDisplayName}»`}
+				<Button
+					variant="outline-danger"
+					size="sm"
 					onclick={handleDeleteServer}
 					disabled={deleting}
+					iconBefore={deleteIcon}
+					title={`Удалить сервер «${serverDisplayName}»`}
 				>
-					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-						<polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-					</svg>
-				</IconButton>
+					Удалить
+				</Button>
 			{/if}
+			</div>
 		</div>
 	</div>
 
-	<!-- NAT -->
-	<div class="nat-row nat-row--select">
-		<div class="nat-info">
-			<span class="nat-label">NAT</span>
-			{#if natMode === 'internet-only'}
-				<span class="nat-hint">реальный IP клиента в LAN, NAT только в интернет</span>
-			{:else}
-				<span class="nat-hint">Трансляция адресов для выхода клиентов в интернет</span>
-			{/if}
-			{#if ingressEnabled && natMode === 'full'}
-				<span class="nat-hint nat-warning">NAT для интернета не действует — интернет-трафик идёт через sing-box (туннель); режим NAT влияет только на видимость в LAN</span>
-			{/if}
+	<!-- Settings -->
+	<div class="server-settings">
+		<div class="setting-row">
+			<div class="setting-copy">
+				<span class="setting-title">NAT</span>
+				{#if natMode === 'internet-only'}
+					<span class="setting-description">реальный IP клиента в LAN, NAT только в интернет</span>
+				{:else}
+					<span class="setting-description">Трансляция адресов для выхода клиентов в интернет</span>
+				{/if}
+				{#if ingressEnabled && natMode === 'full'}
+					<span class="setting-description setting-description-warning">NAT для интернета не действует — интернет-трафик идёт через sing-box (туннель); режим NAT влияет только на видимость в LAN</span>
+				{/if}
+			</div>
+			<div class="setting-control">
+				<Dropdown
+					value={natMode}
+					options={natModeOptions}
+					disabled={togglingNAT}
+					onchange={handleSetNATMode}
+					fullWidth
+				/>
+			</div>
 		</div>
-		<div class="nat-select">
-			<Dropdown
-				value={natMode}
-				options={natModeOptions}
-				disabled={togglingNAT}
-				onchange={handleSetNATMode}
-				fullWidth
-			/>
-		</div>
-	</div>
 
-	<!-- LAN segments -->
-	<div class="nat-row nat-row--select">
-		<div class="nat-info">
-			<span class="nat-label">Доступ в LAN</span>
-			<span class="nat-hint">Сегменты LAN, доступные клиентам этого сервера</span>
+		<div class="setting-row">
+			<div class="setting-copy">
+				<span class="setting-title">Доступ в LAN</span>
+				<span class="setting-description">Сегменты LAN, доступные клиентам этого сервера</span>
+			</div>
+			<div class="setting-control">
+				<ChipMultiSelect values={server.lanSegments ?? []} options={lanSegmentOptions} onchange={handleSetLANSegments} disabled={settingLAN} />
+			</div>
 		</div>
-		<ChipMultiSelect values={server.lanSegments ?? []} options={lanSegmentOptions} onchange={handleSetLANSegments} disabled={settingLAN} />
-	</div>
 
-	<!-- Egress в sing-box -->
-	<div class="nat-row">
-		<div class="nat-info">
-			<span class="nat-label">Маршрутизация через sing-box</span>
-			<span class="nat-hint">Заворачивать интернет-трафик клиентов данного сервера в sing-box</span>
+		<div class="setting-row setting-row-toggle">
+			<div class="setting-copy">
+				<span class="setting-title">Маршрутизация через sing-box</span>
+				<span class="setting-description">Заворачивать интернет-трафик клиентов данного сервера в sing-box</span>
+			</div>
+			<div class="setting-control setting-control-toggle">
+				<Toggle checked={ingressEnabled} onchange={handleToggleIngress} disabled={togglingIngress} spinner="after" />
+			</div>
 		</div>
-		<Toggle checked={ingressEnabled} onchange={handleToggleIngress} disabled={togglingIngress} size="sm" />
-	</div>
 
-	<!-- Policy -->
-	<div class="policy-row">
-		<div class="policy-info">
-			<span class="policy-label">Политика доступа</span>
-			<span class="policy-hint">Регулирует выход в интернет для клиентов сервера. Применяется ко всем клиентам этого сервера.</span>
-		</div>
-		<div class="policy-select">
-			<Dropdown
-				value={selectedPolicy}
-				options={policyOptions}
-				disabled={policyChanging}
-				onchange={handlePolicyChange}
-				fullWidth
-			/>
+		<div class="setting-row">
+			<div class="setting-copy">
+				<span class="setting-title">Политика доступа</span>
+				<span class="setting-description">Регулирует выход в интернет для клиентов сервера. Применяется ко всем клиентам этого сервера.</span>
+			</div>
+			<div class="setting-control">
+				<Dropdown
+					value={selectedPolicy}
+					options={policyOptions}
+					disabled={policyChanging}
+					onchange={handlePolicyChange}
+					fullWidth
+				/>
+			</div>
 		</div>
 	</div>
 
@@ -537,32 +575,90 @@
 	<Plus size={14} strokeWidth={2} aria-hidden="true" />
 {/snippet}
 
+{#snippet restartIcon()}
+	<RefreshCw size={14} strokeWidth={2} aria-hidden="true" />
+{/snippet}
+
+{#snippet ascIcon()}
+	<EarthLock size={14} strokeWidth={2} aria-hidden="true" />
+{/snippet}
+
+{#snippet settingsIcon()}
+	<Settings size={14} strokeWidth={2} aria-hidden="true" />
+{/snippet}
+
+{#snippet deleteIcon()}
+	<Trash2 size={14} strokeWidth={2} aria-hidden="true" />
+{/snippet}
+
 
 <style>
 	.managed-card {
 		display: flex;
 		flex-direction: column;
-		gap: 1rem;
+		--managed-section-gap: 0.625rem;
+		gap: var(--managed-section-gap);
 		border-color: var(--accent);
 	}
 
 	.card-header {
 		display: flex;
+		flex-wrap: wrap;
 		justify-content: space-between;
 		align-items: flex-start;
 		gap: 1rem;
+		margin-bottom: 0;
+		padding-bottom: 0;
+		border-bottom: none;
 	}
 
 	.header-info {
 		display: flex;
 		flex-direction: column;
 		gap: 0.375rem;
+		flex: 1 1 265px;
+		min-width: 265px;
+		max-width: 100%;
+	}
+
+	.title-row {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		column-gap: 0.5rem;
+		row-gap: 0.375rem;
 		min-width: 0;
+	}
+
+	.title-main {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		min-width: 0;
+		flex: 0 1 auto;
+		max-width: 100%;
+	}
+
+	.title-main :global(.toggle-container) {
+		flex-shrink: 0;
+		display: inline-flex;
+		align-items: center;
+		align-self: center;
+	}
+
+	.title-badges {
+		display: inline-flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.375rem;
+		flex: 1 1 auto;
+		min-width: fit-content;
 	}
 
 	.card-title {
 		font-size: 1.125rem;
 		font-weight: 600;
+		min-width: 0;
 	}
 
 	.badge-managed {
@@ -592,103 +688,153 @@
 		font-family: var(--font-mono, monospace);
 	}
 
-	.header-actions {
+	.header-right {
 		display: flex;
-		gap: 0.25rem;
+		flex-wrap: nowrap;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 0.5rem;
+		flex: 0 0 auto;
+		margin-left: auto;
+	}
+
+	/*
+	.server-status {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
 		flex-shrink: 0;
 	}
 
-	.nat-row {
+	.peer-count {
+		font-size: 0.875rem;
+		font-weight: 500;
+		font-variant-numeric: tabular-nums;
+		color: var(--text-secondary);
+	}
+	*/
+
+	.header-actions {
 		display: flex;
-		justify-content: space-between;
+		flex-wrap: nowrap;
 		align-items: center;
-		padding: 0.625rem 0.75rem;
-		background: var(--bg-primary);
-		border: 1px solid var(--border);
-		border-radius: 6px;
+		justify-content: flex-end;
+		gap: 0.25rem;
+		flex: 0 0 auto;
 	}
 
-	.nat-info {
+	.server-settings {
+		background: var(--color-bg-tertiary);
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		padding: 0 0.875rem;
+		margin-top: 0.5rem;
+		min-width: 0;
+	}
+
+	.server-settings .setting-row:first-child {
+		padding-top: 0.875rem;
+	}
+
+	.server-settings .setting-row:last-child {
+		padding-bottom: 0.875rem;
+	}
+
+	.setting-copy {
 		display: flex;
 		flex-direction: column;
 		gap: 0.125rem;
+		min-width: 0;
 	}
 
-	.nat-label {
-		font-size: 0.8125rem;
+	.setting-title {
+		font-size: 0.875rem;
 		font-weight: 500;
+		color: var(--text-primary);
 	}
 
-	.nat-hint {
-		font-size: 0.6875rem;
-		color: var(--text-muted);
-	}
-
-	.nat-warning {
+	.setting-description-warning {
 		color: var(--warning, #f59e0b);
 	}
 
-	.nat-row--select {
-		align-items: flex-start;
-		flex-wrap: wrap;
-		gap: 0.5rem;
+	.setting-control {
+		width: 100%;
+		min-width: 0;
+		max-width: 280px;
+		justify-self: end;
 	}
 
-	.nat-row--select .nat-info {
-		flex: 1 1 200px;
+	.setting-control :global(.dropdown),
+	.setting-control :global(.field),
+	.setting-control :global(.picker) {
+		width: 100%;
 		min-width: 0;
 	}
 
-	.nat-select {
-		flex: 0 0 auto;
-		min-width: 200px;
-		max-width: 280px;
+	.setting-control-toggle {
+		width: auto;
+		max-width: none;
+		justify-self: end;
+		align-self: center;
 	}
 
-	.policy-row {
-		display: flex;
-		justify-content: space-between;
+	.setting-row-toggle {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
 		align-items: center;
 		gap: 0.75rem;
-		padding: 0.625rem 0.75rem;
-		background: var(--bg-primary);
-		border: 1px solid var(--border);
-		border-radius: 6px;
-		flex-wrap: wrap;
 	}
 
-	.policy-info {
-		flex: 1 1 200px;
-		display: flex;
-		flex-direction: column;
-		gap: 0.125rem;
+	.setting-row-toggle .setting-copy {
 		min-width: 0;
 	}
 
-	.policy-label {
-		font-size: 0.8125rem;
-		font-weight: 500;
+	.server-settings :global(.field .trigger) {
+		background: var(--color-settings-surface-bg);
+		border-color: var(--color-border);
 	}
 
-	.policy-hint {
-		font-size: 0.6875rem;
-		color: var(--text-muted);
+	.server-settings :global(.field .trigger:hover:not(:disabled)) {
+		background: var(--color-bg-hover);
 	}
 
-	.policy-select {
-		flex: 0 0 auto;
-		min-width: 240px;
-		max-width: 320px;
+	.server-settings :global(.picker .chips) {
+		background: var(--color-settings-surface-bg);
+		border-color: var(--color-border);
+		border-radius: var(--radius-sm);
 	}
 
-	.policy-select:disabled {
-		opacity: 0.5;
-		cursor: wait;
+	.server-settings :global(.toggle-container .toggle-slider) {
+		background: var(--color-settings-surface-bg);
+	}
+
+	.server-settings :global(.toggle-container:hover input:not(:checked) ~ .toggle-slider) {
+		background: var(--color-bg-hover);
+	}
+
+	@media (min-width: 641px) {
+		.server-settings .setting-row {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) minmax(12rem, 280px);
+			align-items: start;
+			gap: 0.75rem;
+		}
+
+		.server-settings .setting-row-toggle {
+			grid-template-columns: minmax(0, 1fr) auto;
+			align-items: center;
+		}
+
+		.setting-control {
+			max-width: none;
+		}
 	}
 
 	.peers-section {
+		--peers-divider-gap: 1rem;
 		border-top: 1px solid var(--border);
-		padding-top: 1rem;
+		padding-top: var(--peers-divider-gap);
+		margin-top: calc(var(--peers-divider-gap) - var(--managed-section-gap));
 	}
 
 	.peers-header {
@@ -718,12 +864,13 @@
 	}
 
 
-	/* LED indicators */
+	/* LED indicators — reserved for server-status block
 	.led {
 		width: 8px;
 		height: 8px;
 		border-radius: 50%;
 		flex-shrink: 0;
+		transition: background 0.3s ease, box-shadow 0.3s ease;
 	}
 
 	.led-up {
@@ -734,28 +881,10 @@
 	.led-down {
 		background: var(--text-muted);
 	}
+	*/
 
 
 	@media (max-width: 640px) {
-		.policy-row {
-			flex-direction: column;
-			align-items: stretch;
-		}
-
-		.policy-info {
-			flex: 0 0 auto;
-		}
-
-		.policy-select {
-			width: 100%;
-			min-width: 0;
-			max-width: none;
-		}
-
-		.policy-select :global(.dropdown) {
-			width: 100%;
-		}
-
 		.peers-header {
 			flex-direction: column;
 			align-items: stretch;
@@ -774,8 +903,35 @@
 			flex-direction: column;
 		}
 
+		.header-info {
+			flex: 1 1 auto;
+			min-width: 0;
+		}
+
+		.header-right {
+			width: 100%;
+			margin-left: 0;
+			flex-direction: column;
+			align-items: stretch;
+			gap: 0.5rem;
+		}
+
+		.setting-control {
+			max-width: none;
+		}
+
 		.header-actions {
-			align-self: flex-end;
+			align-self: stretch;
+			display: grid;
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+			gap: 0.5rem;
+			width: 100%;
+		}
+
+		.header-actions :global(.btn) {
+			width: 100%;
+			min-width: 0;
+			justify-content: center;
 		}
 
 	}

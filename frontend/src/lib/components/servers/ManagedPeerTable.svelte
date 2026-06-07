@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { ManagedPeer, ManagedPeerStats } from '$lib/types';
+	import { Trash2 } from 'lucide-svelte';
 	import { Toggle } from '$lib/components/ui';
 	import { formatBytes, formatRelativeTime } from '$lib/utils/format';
 	import { notifications } from '$lib/stores/notifications';
@@ -129,16 +130,18 @@
 								<span class="peer-inline-toggle">
 									<Toggle checked={peer.enabled} onchange={() => onTogglePeer(peer)} size="sm" />
 								</span>
-								<span
-									class="status-dot"
-									class:dot-online={status === 'online'}
-									class:dot-offline={status === 'offline'}
-									class:dot-disabled={status === 'disabled'}
-								></span>
-								<span class="peer-name">{peerName(peer)}</span>
-							</div>
-							<div class="peer-status-sub">
-								<span>{status}</span>
+								<div class="peer-name-block">
+									<span class="peer-name">{peerName(peer)}</span>
+									<div class="peer-status-sub">
+										<span
+											class="status-dot"
+											class:dot-online={status === 'online'}
+											class:dot-offline={status === 'offline'}
+											class:dot-disabled={status === 'disabled'}
+										></span>
+										<span>{status}</span>
+									</div>
+								</div>
 							</div>
 						</td>
 						<td class="col-ip">
@@ -203,10 +206,7 @@
 										? `Нажмите ещё раз, чтобы удалить «${peerName(peer)}»`
 										: `Удалить «${peerName(peer)}»`}
 								>
-									<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-										<line x1="18" y1="6" x2="6" y2="18" />
-										<line x1="6" y1="6" x2="18" y2="18" />
-									</svg>
+									<Trash2 size={18} strokeWidth={2} aria-hidden="true" />
 								</button>
 							</div>
 						</td>
@@ -229,13 +229,18 @@
 					<span class="peer-inline-toggle">
 						<Toggle checked={peer.enabled} onchange={() => onTogglePeer(peer)} size="sm" />
 					</span>
-					<span
-						class="status-dot"
-						class:dot-online={status === 'online'}
-						class:dot-offline={status === 'offline'}
-						class:dot-disabled={status === 'disabled'}
-					></span>
-					<span class="mobile-peer-name">{peerName(peer)}</span>
+					<div class="peer-name-block">
+						<span class="mobile-peer-name">{peerName(peer)}</span>
+						<div class="peer-status-sub">
+							<span
+								class="status-dot"
+								class:dot-online={status === 'online'}
+								class:dot-offline={status === 'offline'}
+								class:dot-disabled={status === 'disabled'}
+							></span>
+							<span>{status}</span>
+						</div>
+					</div>
 				</div>
 
 				<div class="mobile-peer-actions">
@@ -260,20 +265,13 @@
 							? `Нажмите ещё раз, чтобы удалить «${peerName(peer)}»`
 							: `Удалить «${peerName(peer)}»`}
 					>
-						<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-							<line x1="18" y1="6" x2="6" y2="18" />
-							<line x1="6" y1="6" x2="18" y2="18" />
-						</svg>
+						<Trash2 size={18} strokeWidth={2} aria-hidden="true" />
 					</button>
 				</div>
 			</div>
 
 			<div class="mobile-peer-card-middle">
 				<div class="mobile-peer-status-row">
-					<span class="mobile-peer-status-left">
-						<span>{status}</span>
-					</span>
-
 					<span class="mobile-peer-handshake">
 						{#if hs}
 							{hs.main}{#if hs.suffix}{" "}{hs.suffix}{/if}
@@ -388,8 +386,12 @@
 		min-width: 0;
 	}
 
-	.peer-name-row .status-dot {
-		flex-shrink: 0;
+	.peer-name-block {
+		display: flex;
+		flex-direction: column;
+		gap: 0.1rem;
+		min-width: 0;
+		flex: 1 1 auto;
 	}
 
 	.peer-name-row .peer-name {
@@ -397,21 +399,19 @@
 	}
 
 	.peer-status-sub {
-		display: flex;
+		display: inline-flex;
 		align-items: center;
-		justify-content: flex-start;
-		width: 100%;
-		gap: 0.35rem;
+		gap: 0.25rem;
 		font-size: 10px;
 		color: var(--text-muted);
 		line-height: 1;
-		margin-top: 0.1rem;
 	}
 
 	.peer-inline-toggle {
 		display: inline-flex;
 		align-items: center;
 		line-height: 1;
+		margin-right: 0.35rem;
 	}
 
 	.peer-inline-toggle :global(.toggle-container) {
@@ -455,7 +455,7 @@
 		width: 6px;
 		height: 6px;
 		border-radius: 999px;
-		margin-right: 0.35rem;
+		flex-shrink: 0;
 		vertical-align: middle;
 	}
 
@@ -499,17 +499,17 @@
 	}
 
 	.managed-peer-table td.col-endpoint {
-		text-align: left;
+		text-align: center;
 		vertical-align: middle;
 	}
 
 	.managed-peer-table td.col-endpoint .endpoint-copy {
 		display: inline-flex;
 		flex-direction: column;
-		align-items: flex-start;
+		align-items: center;
 		justify-content: center;
 		max-width: 100%;
-		text-align: left;
+		text-align: center;
 	}
 
 	.endpoint-text {
@@ -603,7 +603,7 @@
 		background: none;
 		color: inherit;
 		cursor: pointer;
-		text-align: left;
+		text-align: inherit;
 	}
 
 	.cell-copy:hover {
@@ -666,18 +666,9 @@
 			display: flex;
 			justify-content: flex-start;
 			align-items: center;
-			gap: 0.35rem;
-			margin-top: 0.2rem;
 			font-size: 10px;
 			line-height: 1;
 			color: var(--text-muted);
-		}
-
-		.mobile-peer-status-left {
-			display: inline-flex;
-			align-items: center;
-			gap: 0.25rem;
-			min-width: 0;
 		}
 
 		.mobile-peer-handshake {

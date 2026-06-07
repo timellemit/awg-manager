@@ -235,7 +235,7 @@
 	.server-card {
 		display: flex;
 		flex-direction: column;
-		gap: 1rem;
+		gap: 0.625rem;
 		transition: border-color 0.2s;
 	}
 
@@ -346,8 +346,8 @@
 		display: grid;
 		grid-template-columns: repeat(3, minmax(0, 1fr));
 		gap: 0.5rem;
-		padding: 0.5rem 0;
-		border-top: 1px solid var(--border);
+		padding: 0.625rem 0;
+		border-top: 1px dashed var(--border);
 		border-bottom: 1px solid var(--border);
 	}
 

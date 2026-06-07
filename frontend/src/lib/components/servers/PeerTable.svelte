@@ -380,7 +380,7 @@
 	}
 
 	.peer-table td.col-endpoint {
-		text-align: left;
+		text-align: center;
 		vertical-align: middle;
 	}
 
@@ -401,11 +401,11 @@
 	.endpoint-copy {
 		display: inline-flex;
 		flex-direction: column;
-		align-items: flex-start;
+		align-items: center;
 		justify-content: center;
 		gap: 0;
 		max-width: 100%;
-		text-align: left;
+		text-align: center;
 	}
 
 	.endpoint-text {
