@@ -434,7 +434,11 @@ func (c *RouterConfig) AddCompositeOutbound(o Outbound) error {
 			return fmt.Errorf("%w: %q", ErrOutboundTagConflict, o.Tag)
 		}
 	}
-	c.Outbounds = append(c.Outbounds, o)
+	next := append(append([]Outbound(nil), c.Outbounds...), o)
+	if err := validateNoCompositeCycles(next); err != nil {
+		return err
+	}
+	c.Outbounds = next
 	return nil
 }
 
@@ -453,9 +457,14 @@ func (c *RouterConfig) UpdateCompositeOutbound(tag string, o Outbound) error {
 		}
 	}
 	if idx < 0 {
-		return fmt.Errorf("%w: %q not found", ErrOutboundTagConflict, tag)
+		return fmt.Errorf("%w: %q", ErrOutboundNotFound, tag)
 	}
-	c.Outbounds[idx] = o
+	next := append([]Outbound(nil), c.Outbounds...)
+	next[idx] = o
+	if err := validateNoCompositeCycles(next); err != nil {
+		return err
+	}
+	c.Outbounds = next
 	if tag != o.Tag {
 		c.renameOutboundReferences(tag, o.Tag)
 	}
@@ -477,6 +486,11 @@ func validateCompositeOutbound(o Outbound) error {
 	for _, m := range o.Outbounds {
 		if strings.EqualFold(strings.TrimSpace(m), "direct") {
 			return fmt.Errorf("outbound %q: member %q is not allowed in composite groups (would bypass proxy silently)", o.Tag, m)
+		}
+		// Exact match (not EqualFold): sing-box outbound tags are
+		// case-sensitive keys, so "DE" and "de" are distinct outbounds.
+		if strings.TrimSpace(m) == strings.TrimSpace(o.Tag) {
+			return fmt.Errorf("outbound %q: member %q references itself (would create a circular dependency and crash sing-box)", o.Tag, m)
 		}
 	}
 	if strings.EqualFold(strings.TrimSpace(o.Default), "direct") {
@@ -507,6 +521,68 @@ func validateInterfaceOutbound(o Outbound) error {
 	}
 	if len(o.Outbounds) > 0 || o.URL != "" || o.Interval != "" || o.Tolerance != 0 || o.Default != "" || o.Strategy != "" {
 		return fmt.Errorf("outbound %q: direct outbound must not set composite fields (members/url/interval/tolerance/default/strategy)", o.Tag)
+	}
+	return nil
+}
+
+// validateNoCompositeCycles rejects a set of outbounds that contains a
+// circular dependency between composite groups (e.g. DE -> DE, or A -> B
+// -> A). sing-box only detects this at "start service" time — `sing-box
+// check` passes — so without this guard a cyclic config persists and the
+// process FATAL-loops on every start. Only composite->composite edges can
+// form a cycle; leaf outbounds (awg/sub/sb tunnels, direct) are ignored.
+//
+// Scope is the passed slice (router composites from 20-router.json).
+// Subscription-slot composites are not passed here, so they count as leaf
+// members — which is sound: their members are subscription servers, never
+// router composites, so no subscription->router edge (and thus no
+// cross-slot cycle) can be formed through the UI.
+func validateNoCompositeCycles(outbounds []Outbound) error {
+	isComposite := make(map[string]bool, len(outbounds))
+	for _, o := range outbounds {
+		isComposite[o.Tag] = true
+	}
+	edges := make(map[string][]string, len(outbounds))
+	for _, o := range outbounds {
+		for _, m := range o.Outbounds {
+			if isComposite[m] {
+				edges[o.Tag] = append(edges[o.Tag], m)
+			}
+		}
+	}
+
+	const (
+		white = 0
+		gray  = 1
+		black = 2
+	)
+	color := make(map[string]int, len(outbounds))
+	var path []string
+	var visit func(tag string) error
+	visit = func(tag string) error {
+		color[tag] = gray
+		path = append(path, tag)
+		for _, next := range edges[tag] {
+			switch color[next] {
+			case gray:
+				return fmt.Errorf("circular outbound dependency: %s -> %s",
+					strings.Join(path, " -> "), next)
+			case white:
+				if err := visit(next); err != nil {
+					return err
+				}
+			}
+		}
+		path = path[:len(path)-1]
+		color[tag] = black
+		return nil
+	}
+	for _, o := range outbounds {
+		if color[o.Tag] == white {
+			if err := visit(o.Tag); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

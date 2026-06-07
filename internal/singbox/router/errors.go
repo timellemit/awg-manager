@@ -13,6 +13,7 @@ var (
 	ErrRuleSetNotFound           = errors.New("rule set not found")
 	ErrDatRuleSetForbidden       = errors.New("dat rule set token is invalid")
 	ErrOutboundTagConflict       = errors.New("outbound with this tag already exists")
+	ErrOutboundNotFound          = errors.New("outbound not found")
 	ErrDNSServerTagConflict      = errors.New("dns server with this tag already exists")
 	ErrDNSServerReferenced       = errors.New("dns server is referenced by one or more dns rules or used as final/default")
 	ErrDNSServerNotFound         = errors.New("dns server not found")
