@@ -13,6 +13,7 @@ export { default as TunnelPingButton } from './TunnelPingButton.svelte';
 export { default as TunnelSingboxPingButton } from './TunnelSingboxPingButton.svelte';
 export { default as TunnelTitleRow } from './TunnelTitleRow.svelte';
 export { default as TunnelTestIcon } from './TunnelTestIcon.svelte';
+export { default as TunnelToolbarViewRow } from './TunnelToolbarViewRow.svelte';
 export { default as TunnelEditHeader } from './TunnelEditHeader.svelte';
 export { default as ExternalTunnelCard } from './ExternalTunnelCard.svelte';
 export { default as AdoptTunnelDialog } from './AdoptTunnelDialog.svelte';

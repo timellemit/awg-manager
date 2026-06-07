@@ -33,6 +33,7 @@
         autoDelayCheckNonce?: number;
         autoDelayCheckDelayMs?: number;
         layout?: SingboxLayoutMode;
+        renderMode?: import('$lib/constants/singboxLayout').TunnelRenderMode;
         ondetail?: (tag: string) => void;
     }
     let {
@@ -41,6 +42,7 @@
         autoDelayCheckNonce = 0,
         autoDelayCheckDelayMs = 0,
         layout = 'compact',
+        renderMode = 'compact',
         ondetail,
     }: Props = $props();
 
@@ -194,7 +196,7 @@
 
 </script>
 
-{#if layout === 'list'}
+{#if renderMode === 'table'}
     <tr
         class="sbx-sub-active-row"
         class:ok={cardState === 'ok'}
@@ -315,9 +317,10 @@
                 />
             </td>
     </tr>
-{:else if layout === 'dense'}
+{:else if layout === 'dense' || renderMode === 'list-card'}
 <div
     class="card view-dense"
+    class:view-list={renderMode === 'list-card'}
     class:ok={cardState === 'ok'}
     class:slow={cardState === 'slow'}
     class:fail={cardState === 'fail'}
@@ -373,6 +376,7 @@
         </div>
     </div>
 
+    {#if renderMode !== 'list-card'}
     <div class="details">
     {#if subscription.lastError}
         <div class="sub-error mono">{subscription.lastError}</div>
@@ -421,6 +425,7 @@
         <span>обновлено: {lastFetchedHuman}</span>
     </div>
     </div>
+    {/if}
 
     <div class="actions">
         <TunnelListActions
@@ -435,7 +440,7 @@
         />
     </div>
 
-    {#if !subscription.lastError}
+    {#if renderMode !== 'list-card' && !subscription.lastError}
         <div class="charts-dense">
             <button
                 type="button"
@@ -539,8 +544,7 @@
         <div class="sub-error mono">{subscription.lastError}</div>
     {/if}
 
-    <div class="divider divider-dashed"></div>
-
+    <div class="server-section">
     <div class="server-row">
         <span class="label">{isURLTest ? 'Авто' : 'Активный сервер'}</span>
         <div class="picker-anchor">
@@ -607,8 +611,9 @@
             {/if}
         </div>
     </div>
+    </div>
 
-    <div class="actions">
+    <div class="actions actions--bar">
         <TunnelListActions
             variant="labeled"
             onEdit={openDetail}
@@ -868,7 +873,7 @@
         display: flex;
         flex-direction: column;
         gap: 6px;
-        padding: 4px 0;
+        padding: 4px 0 8px;
         border-top: 1px solid var(--color-border);
         border-bottom: 1px solid var(--color-border);
     }
@@ -1019,6 +1024,10 @@
     .badge.transport{ background: var(--color-bg-tertiary); color: var(--color-text-muted); }
     .badge.tls      { background: rgba(63,185,80,0.15); color: #3fb950; }
     .badge.reality  { background: rgba(210,153,34,0.15); color: #d29922; }
+    .server-section {
+        padding-top: 8px;
+        border-top: 1px dashed var(--color-border);
+    }
     .server-row {
         display: grid;
         grid-template-columns: max-content minmax(0, 1fr);
@@ -1087,15 +1096,7 @@
         transition: color var(--t-fast) ease;
     }
     .eye-btn:hover { color: var(--color-text-secondary); }
-    .divider {
-        height: 0;
-        border: none;
-        margin: 4px 0;
-        background: none;
-    }
-    .divider-dashed {
-        border-top: 1px dashed var(--color-border);
-    }
+
     .chart-head {
         display: flex;
         justify-content: space-between;
@@ -1111,26 +1112,6 @@
         font-size: 0.6875rem;
     }
     .stats { font-family: var(--font-mono, ui-monospace, monospace); }
-    .actions {
-        display: flex;
-        gap: 6px;
-        justify-content: flex-end;
-        align-items: center;
-        margin-top: 12px;
-        padding: 10px 0;
-        border-top: 1px solid var(--color-border);
-        border-bottom: 1px solid var(--color-border);
-    }
-    .card.view-compact .actions {
-        justify-content: center;
-    }
-    .card.view-dense .actions {
-        gap: 2px;
-        justify-content: center;
-        margin-top: 0;
-        padding: 0;
-        border: none;
-    }
     .chart-section {
         margin: 0 -14px -12px;
         border-radius: 0 0 var(--radius) var(--radius);
@@ -1181,7 +1162,7 @@
     }
 
     .chart-body :global(.tunnel-delay-spark--compact) {
-        height: 28px;
+        height: 36px;
     }
 
     .sbx-sub-active-row {

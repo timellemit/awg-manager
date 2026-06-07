@@ -10,7 +10,7 @@
 
 	interface Props {
 		tunnel: SystemTunnel;
-		view?: 'cards' | 'compact';
+		view?: 'cards' | 'compact' | 'list';
 		onMarkServer?: (id: string) => void;
 		ondetail?: (id: string) => void;
 		ontest: (id: string, name: string) => void;
@@ -98,8 +98,9 @@
 	let inlineRxRate = $derived(rxRates.length > 0 ? rxRates[rxRates.length - 1] : 0);
 	let inlineTxRate = $derived(txRates.length > 0 ? txRates[txRates.length - 1] : 0);
 
-	let isDenseCard = $derived(view === 'cards');
+	let isDenseCard = $derived(view === 'cards' || view === 'list');
 	let isCompactCard = $derived(view === 'compact');
+	let isListCard = $derived(view === 'list');
 
 	type ConnectivityState = 'idle' | 'connected' | 'disconnected' | 'checking';
 	let connState = $derived.by<ConnectivityState>(() => {
@@ -126,7 +127,8 @@
 		class:status-up={tunnel.status === 'up'}
 		class:status-down={tunnel.status !== 'up'}
 		class:view-compact={view === 'compact'}
-		class:view-dense={view === 'cards'}
+		class:view-dense={view === 'cards' || view === 'list'}
+		class:view-list={view === 'list'}
 	>
 		<!-- Header: name + status + connectivity -->
 		{#if isDenseCard}
@@ -218,6 +220,7 @@
 			</div>
 		{/if}
 
+		{#if !isListCard}
 		<!-- Details: endpoint + via + IPv4 + uptime + handshake -->
 		<div class="details">
 			{#if view === 'cards'}
@@ -340,6 +343,7 @@
 			{/if}
 			{/if}
 		</div>
+		{/if}
 
 		<!-- Actions -->
 		<div class="actions">
@@ -373,7 +377,7 @@
 		</div>
 
 		<!-- Traffic -->
-		{#if tunnel.status === 'up'}
+		{#if !isListCard && tunnel.status === 'up'}
 			{#if view === 'cards'}
 				<button
 					type="button"
@@ -680,20 +684,6 @@
 		color: var(--color-success);
 	}
 
-	.card.view-dense .actions,
-	.card.view-compact .actions {
-		gap: 2px;
-		justify-content: center;
-	}
-
-	.card.view-list {
-		display: grid;
-		grid-template-columns: minmax(0, 1.35fr) minmax(280px, 1fr) auto;
-		gap: 12px 16px;
-		align-items: start;
-		padding: 12px 14px;
-	}
-
 	.iface-name {
 		font-size: 12px;
 		font-family: var(--font-mono, monospace);
@@ -766,14 +756,6 @@
 
 	.stats-row {
 		white-space: nowrap;
-	}
-
-	/* Actions */
-	.actions {
-		display: flex;
-		gap: 4px;
-		justify-content: flex-end;
-		align-items: center;
 	}
 
 	/* Connectivity gear */

@@ -1,5 +1,5 @@
 <script lang="ts" module>
-    export type ToggleSpinnerPosition = 'before' | 'after';
+    export type ToggleSpinnerPosition = 'before' | 'after' | 'none';
     /** Status tint for flip toggles (AWG tunnel cards / list). */
     export type ToggleTint = 'recovering' | 'starting' | 'unreachable';
 </script>
@@ -16,7 +16,7 @@
         variant?: 'slider' | 'flip';
         /** Flip ON-state colour override (AWG recovering / starting / unreachable). */
         tint?: ToggleTint;
-        /** Spinner slot relative to the slider track (flip variant ignores this). */
+        /** Spinner slot relative to the slider track; `none` — без слота (flip variant ignores this). */
         spinner?: ToggleSpinnerPosition;
         // controlled: parent owns the state. The toggle does NOT self-commit
         // the click — it reverts the DOM to `checked` and lets the parent
@@ -85,6 +85,8 @@
                 <span class="toggle-spinner-slot" aria-hidden="true">
                     {#if loading}<span class="toggle-spinner"></span>{/if}
                 </span>
+            {:else if spinner === 'none'}
+                <span class="toggle-slider"></span>
             {:else}
                 <span class="toggle-spinner-slot" aria-hidden="true">
                     {#if loading}<span class="toggle-spinner"></span>{/if}
@@ -123,6 +125,8 @@
             <span class="toggle-spinner-slot" aria-hidden="true">
                 {#if loading}<span class="toggle-spinner"></span>{/if}
             </span>
+        {:else if spinner === 'none'}
+            <span class="toggle-slider"></span>
         {:else}
             <span class="toggle-spinner-slot" aria-hidden="true">
                 {#if loading}<span class="toggle-spinner"></span>{/if}
@@ -140,6 +144,7 @@
         gap: 8px;
         cursor: pointer;
         vertical-align: middle;
+        margin-bottom: 0;
     }
 
     /* Reserved slot next to the slider — prevents layout jump between

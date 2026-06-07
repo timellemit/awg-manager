@@ -4,7 +4,7 @@
 	import { tunnels } from '$lib/stores/tunnels';
 	import { notifications } from '$lib/stores/notifications';
 	import { PageContainer } from '$lib/components/layout';
-	import { Button } from '$lib/components/ui';
+	import { BackLink, Button } from '$lib/components/ui';
 	import AmneziaConfEditor from '$lib/components/tunnels/AmneziaConfEditor.svelte';
 	import VpnLinkPasteImport from '$lib/components/tunnels/VpnLinkPasteImport.svelte';
 	import { decodeVpnLink, isVpnLink, vpnLinkUnsupportedPortalReason } from '$lib/utils/vpnlink';
@@ -181,13 +181,7 @@
 
 <PageContainer>
 <div class="page-header">
-	<a href="/" class="back-link">
-		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
-			<line x1="19" y1="12" x2="5" y2="12"/>
-			<polyline points="12 19 5 12 12 5"/>
-		</svg>
-		Назад
-	</a>
+	<BackLink href="/" />
 	<h2 class="page-title">Новый туннель</h2>
 </div>
 
@@ -355,22 +349,6 @@ AllowedIPs = 0.0.0.0/0"
 </PageContainer>
 
 <style>
-	.back-link {
-		display: flex;
-		align-items: center;
-		gap: 4px;
-		color: var(--color-text-secondary);
-		font-size: 13px;
-		padding: 6px 10px;
-		border-radius: 6px;
-		transition: all 0.15s;
-	}
-
-	.back-link:hover {
-		background: var(--color-bg-tertiary);
-		color: var(--color-text-primary);
-	}
-
 	.import-container {
 		max-width: 700px;
 		margin: 0 auto;

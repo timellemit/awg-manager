@@ -1,7 +1,6 @@
 <script lang="ts">
 	import { Dropdown, type DropdownOption } from '$lib/components/ui';
-
-	const DEFAULT_SORT_VALUE = '__default__';
+	import { DEFAULT_SORT_VALUE } from '$lib/utils/tableSort';
 
 	interface SortOption {
 		value: string | null;
@@ -14,7 +13,8 @@
 		sortAsc: boolean;
 		options: SortOption[];
 		showSearch?: boolean;
-		hideSortOnDesktop?: boolean;
+		/** When false, toolbar is search-only (sort via table headers on desktop list). */
+		showSort?: boolean;
 		onSearchChange: (value: string) => void;
 		onSortChange: (key: string | null) => void;
 		onToggleDir: () => void;
@@ -26,7 +26,7 @@
 		sortAsc,
 		options,
 		showSearch = false,
-		hideSortOnDesktop = false,
+		showSort = true,
 		onSearchChange,
 		onSortChange,
 		onToggleDir,
@@ -40,7 +40,7 @@
 	);
 </script>
 
-<div class="tunnel-sort-controls" class:hide-sort-on-desktop={hideSortOnDesktop}>
+<div class="tunnel-sort-controls">
 	{#if showSearch}
 		<input
 			class="tunnel-search"
@@ -50,19 +50,27 @@
 			oninput={(e) => onSearchChange((e.currentTarget as HTMLInputElement).value)}
 		/>
 	{/if}
-	<div class="tunnel-sort-ui">
-		<div class="tunnel-sort-select">
-			<Dropdown
-				value={sortKey ?? DEFAULT_SORT_VALUE}
-				options={dropdownOptions}
-				onchange={(k) => onSortChange(k === DEFAULT_SORT_VALUE ? null : k)}
-				fullWidth
-			/>
+	{#if showSort}
+		<div class="tunnel-sort-ui">
+			<div class="tunnel-sort-select">
+				<Dropdown
+					value={sortKey ?? DEFAULT_SORT_VALUE}
+					options={dropdownOptions}
+					onchange={(k) => onSortChange(k === DEFAULT_SORT_VALUE ? null : k)}
+					fullWidth
+				/>
+			</div>
+			<button
+				class="tunnel-sort-dir"
+				type="button"
+				disabled={sortKey === null}
+				onclick={onToggleDir}
+				title="Направление сортировки"
+			>
+				{sortAsc ? '↑' : '↓'}
+			</button>
 		</div>
-		<button class="tunnel-sort-dir" type="button" onclick={onToggleDir} title="Направление сортировки">
-			{sortAsc ? '↑' : '↓'}
-		</button>
-	</div>
+	{/if}
 </div>
 
 <style>
@@ -76,10 +84,6 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 0.375rem;
-	}
-
-	.tunnel-sort-controls.hide-sort-on-desktop .tunnel-sort-ui {
-		display: none;
 	}
 
 	.tunnel-search {
@@ -114,23 +118,34 @@
 		transition: color 0.15s ease, background 0.15s ease;
 	}
 
-	.tunnel-sort-dir:hover {
+	.tunnel-sort-dir:hover:not(:disabled) {
 		background: var(--bg-hover);
 		color: var(--text-primary);
 	}
 
-	@media (max-width: 640px) {
+	.tunnel-sort-dir:disabled {
+		opacity: 0.45;
+		cursor: not-allowed;
+	}
+
+	@media (max-width: 760px) {
 		.tunnel-sort-controls {
-			display: grid;
-			grid-template-columns: minmax(0, 1fr) auto;
-			gap: 0.375rem;
 			width: 100%;
 		}
 
 		.tunnel-search {
-			grid-column: 1 / -1;
 			width: 100%;
 			min-width: 0;
+		}
+
+		.tunnel-sort-controls:has(.tunnel-sort-ui) {
+			display: grid;
+			grid-template-columns: minmax(0, 1fr) auto;
+			gap: 0.375rem;
+		}
+
+		.tunnel-sort-controls:has(.tunnel-sort-ui) .tunnel-search {
+			grid-column: 1 / -1;
 		}
 
 		.tunnel-sort-select {
@@ -142,12 +157,6 @@
 			width: 34px;
 			min-width: 34px;
 			height: 34px;
-		}
-
-		.tunnel-sort-controls.hide-sort-on-desktop .tunnel-sort-ui {
-			display: inline-flex;
-			grid-column: 1 / -1;
-			width: 100%;
 		}
 	}
 </style>

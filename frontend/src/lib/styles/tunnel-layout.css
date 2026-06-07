@@ -554,6 +554,81 @@ button.tunnel-list-traffic-cell:focus-visible {
 	font-size: var(--sbx-card-action, 11px);
 }
 
+.tunnel-list-actions--labeled .tunnel-list-actions__btn svg {
+	flex-shrink: 0;
+}
+
+/* Equal action columns — mobile list cards and narrow viewports only. */
+@media (max-width: 760px) {
+	.tunnel-list-actions--labeled {
+		display: grid;
+		grid-auto-flow: column;
+		grid-auto-columns: minmax(0, 1fr);
+		justify-content: stretch;
+		width: 100%;
+		flex-wrap: nowrap;
+		gap: 4px;
+	}
+
+	.tunnel-list-actions--labeled .tunnel-list-actions__btn {
+		width: 100%;
+		min-width: 0;
+		height: auto;
+		flex: unset;
+		justify-content: center;
+		gap: 0.25rem;
+		padding: 0.375rem 0.35rem;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+}
+
+/* ─── Tunnel card actions row ─── */
+.card .actions {
+	display: flex;
+	align-items: center;
+	gap: var(--tunnel-actions-gap);
+}
+
+.card.view-dense .actions,
+.card.view-compact .actions,
+.card.view-list .actions {
+	gap: 2px;
+	justify-content: center;
+	width: 100%;
+	flex-wrap: nowrap;
+}
+
+.card.view-dense .actions,
+.card.view-list .actions {
+	margin-top: 0;
+	padding: 0;
+	border: none;
+}
+
+.card.view-list .actions {
+	align-items: stretch;
+}
+
+.card.view-compact .actions--bar,
+.card.view-compact .actions--bar-top {
+	margin-top: 0;
+	padding-top: 10px;
+	border-top: 1px solid var(--color-border);
+}
+
+.card.view-compact .actions--bar {
+	padding-bottom: 10px;
+	border-bottom: 1px solid var(--color-border);
+}
+
+.card.view-dense .actions .tunnel-list-actions,
+.card.view-compact .actions .tunnel-list-actions,
+.card.view-list .actions .tunnel-list-actions {
+	width: 100%;
+	min-width: 0;
+}
+
 .tunnel-list-actions__btn:hover:not(:disabled) {
 	background: var(--color-bg-hover);
 	color: var(--color-text-primary);
@@ -829,6 +904,29 @@ button.tunnel-list-traffic-cell:focus-visible {
 .tunnel-grid.tunnel-grid--compact {
 	grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
 	gap: 12px;
+}
+
+/* Mobile list — single column, dense header + actions */
+.tunnel-grid.tunnel-grid--list {
+	grid-template-columns: 1fr;
+	gap: 8px;
+}
+
+.card.view-list {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 10px 12px;
+	background: var(--color-bg-secondary);
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius);
+}
+
+.tunnel-list-empty {
+	margin: 0.75rem 0 0;
+	text-align: center;
+	color: var(--color-text-muted);
+	font-size: 0.875rem;
 }
 
 /* ─── SB list tables ─── */

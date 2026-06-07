@@ -2,7 +2,7 @@
 	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import type { Subscription, SubscriptionMember } from '$lib/types';
-	import { PanelBottomClose } from 'lucide-svelte';
+	import { CheckLine, PanelBottomClose, RefreshCcw } from 'lucide-svelte';
 	import { api } from '$lib/api/client';
 	import { MAX_SUBSCRIPTION_INFO_ITEMS } from '$lib/constants/subscription';
 	import { Button, Modal, Stat, StatStrip } from '$lib/components/ui';
@@ -271,40 +271,11 @@
 {/snippet}
 
 {#snippet refreshIcon()}
-	<svg
-		width="14"
-		height="14"
-		viewBox="0 0 24 24"
-		fill="none"
-		stroke="currentColor"
-		stroke-width="2"
-		stroke-linecap="round"
-		stroke-linejoin="round"
-		aria-hidden="true"
-	>
-		<path d="M21 12a9 9 0 0 1-15.4 6.4L3 16" />
-		<path d="M3 16v5h5" />
-		<path d="M3 12A9 9 0 0 1 18.4 5.6L21 8" />
-		<path d="M21 8V3h-5" />
-	</svg>
+	<RefreshCcw size={14} strokeWidth={2} aria-hidden="true" />
 {/snippet}
 
 {#snippet testAllIcon()}
-	<svg
-		width="14"
-		height="14"
-		viewBox="0 0 24 24"
-		fill="none"
-		stroke="currentColor"
-		stroke-width="2"
-		stroke-linecap="round"
-		stroke-linejoin="round"
-		aria-hidden="true"
-	>
-		<path d="M4 13l4 4L19 6" />
-		<path d="M4 6h8" />
-		<path d="M4 18h8" />
-	</svg>
+	<CheckLine size={14} strokeWidth={2} aria-hidden="true" />
 {/snippet}
 
 <header class="head">

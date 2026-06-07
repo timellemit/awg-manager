@@ -18,13 +18,13 @@
 	let { policies, onedit, ondelete, selectable, selectedNames, onselect }: Props = $props();
 </script>
 
-<div class="policy-grid">
+<div class="route-grid">
 	{#each policies as policy}
 		{@const isHrPolicy = isHydraRouteAccessPolicy(policy)}
 		{@const policyLabel = policy.description || policy.name}
 		<div class="policy-card" class:policy-card-hr={isHrPolicy}>
-			{#if selectable}
-				<div class="select-cell">
+			<div class="card-main">
+				{#if selectable}
 					<input
 						type="checkbox"
 						class="select-check"
@@ -32,9 +32,7 @@
 						disabled={isHrPolicy}
 						onchange={() => onselect?.(policy.name)}
 					/>
-				</div>
-			{/if}
-			<div class="card-main">
+				{/if}
 				<PolicyIcon
 					label={policy.description}
 					policyName={policy.name}
@@ -100,15 +98,10 @@
 </div>
 
 <style>
-	.policy-grid {
-		display: grid;
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-		gap: 12px;
-	}
-
 	.policy-card {
 		display: flex;
 		justify-content: space-between;
+		min-width: 0;
 		background: var(--bg-secondary);
 		border: 1px solid var(--border);
 		border-radius: 8px;
@@ -123,14 +116,15 @@
 
 	.policy-card .card-main {
 		display: flex;
+		flex: 1;
 		gap: 10px;
 		min-width: 0;
-		align-items: flex-start;
 	}
 
 	.policy-card .card-info {
 		display: flex;
 		flex-direction: column;
+		flex: 1;
 		gap: 1px;
 		min-width: 0;
 	}
@@ -144,6 +138,7 @@
 	}
 
 	.policy-card .card-title h3 {
+		flex: 0 1 auto;
 		font-size: 0.875rem;
 		font-weight: 600;
 		color: var(--text-primary);
@@ -169,19 +164,14 @@
 		align-items: flex-end;
 		flex-shrink: 0;
 		margin-left: 8px;
+		align-self: stretch;
 	}
 
 	.policy-card .action-row {
 		display: flex;
 		gap: 4px;
 		align-items: center;
-	}
-
-	.select-cell {
-		display: flex;
-		align-items: center;
-		align-self: stretch;
-		flex-shrink: 0;
+		margin-top: auto;
 	}
 
 	.select-check {
@@ -189,17 +179,7 @@
 		width: 1rem;
 		height: 1rem;
 		cursor: pointer;
-	}
-
-	@media (max-width: 1024px) {
-		.policy-grid {
-			grid-template-columns: repeat(2, minmax(0, 1fr));
-		}
-	}
-
-	@media (max-width: 768px) {
-		.policy-grid {
-			grid-template-columns: 1fr;
-		}
+		flex-shrink: 0;
+		margin-top: 10px;
 	}
 </style>

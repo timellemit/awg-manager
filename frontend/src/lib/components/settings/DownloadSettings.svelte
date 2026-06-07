@@ -136,42 +136,43 @@
 <div id="downloads" class="setting-row download-setting">
 	<div class="flex flex-col gap-1">
 		<span class="font-medium">Служебные загрузки AWGM</span>
-		<span class="setting-description">
-			Маршрут для служебных задач: обновления AWGM и Sing-Box, загрузок geo.dat и DNSRoute-списков, а также конфигураций Amnezia Premium.<span
-				class="info-hint"
-				bind:this={infoHintEl}
-			>
-				<button
-					type="button"
-					class="info-trigger"
-					aria-label="Через что идут загрузки"
-					aria-expanded={infoOpen}
-					onclick={() => (infoOpen = !infoOpen)}
+		<div class="download-description" bind:this={infoHintEl}>
+			<span class="setting-description">
+				Маршрут для служебных задач: обновления AWGM и Sing-Box, загрузок geo.dat и DNSRoute-списков, а также конфигураций Amnezia Premium.<span
+					class="info-hint"
 				>
-					<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-						<circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" stroke-width="1.4" />
-						<circle cx="8" cy="4.8" r="0.95" fill="currentColor" />
-						<rect x="7.25" y="6.9" width="1.5" height="4.8" rx="0.75" fill="currentColor" />
-					</svg>
-				</button>
-				{#if infoOpen}
-					<span class="info-popup" role="tooltip">
-						<span class="info-popup-title">Через какой маршрут идёт загрузка</span>
-						<span class="info-popup-row">
-							<strong>AWG-туннели</strong> — качают напрямую, отдельный sing-box не нужен.
-						</span>
-						<span class="info-popup-row">
-							<strong>sing-box-туннели и подписки (SUB)</strong> — работают только при запущенном
-							sing-box; если он выключен, маршрут будет недоступен.
-						</span>
-						<span class="info-popup-row">
-							<strong>Загрузка самих подписок</strong> (скачивание их содержимого по URL) — всегда
-							идёт напрямую через WAN, мимо туннеля.
-						</span>
-					</span>
-				{/if}
+					<button
+						type="button"
+						class="info-trigger"
+						aria-label="Через что идут загрузки"
+						aria-expanded={infoOpen}
+						onclick={() => (infoOpen = !infoOpen)}
+					>
+						<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+							<circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" stroke-width="1.4" />
+							<circle cx="8" cy="4.8" r="0.95" fill="currentColor" />
+							<rect x="7.25" y="6.9" width="1.5" height="4.8" rx="0.75" fill="currentColor" />
+						</svg>
+					</button>
+				</span>
 			</span>
-		</span>
+			{#if infoOpen}
+				<div class="info-popup" role="tooltip">
+					<span class="info-popup-title">Через какой маршрут идёт загрузка</span>
+					<span class="info-popup-row">
+						<strong>AWG-туннели</strong> — качают напрямую, отдельный sing-box не нужен.
+					</span>
+					<span class="info-popup-row">
+						<strong>sing-box-туннели и подписки (SUB)</strong> — работают только при запущенном
+						sing-box; если он выключен, маршрут будет недоступен.
+					</span>
+					<span class="info-popup-row">
+						<strong>Загрузка самих подписок</strong> (скачивание их содержимого по URL) — всегда
+						идёт напрямую через WAN, мимо туннеля.
+					</span>
+				</div>
+			{/if}
+		</div>
 		{#if error}
 			<span class="download-error">{error}</span>
 		{/if}
@@ -249,6 +250,11 @@
 		font-size: 0.75rem;
 	}
 
+	.download-description {
+		position: relative;
+		min-width: 0;
+	}
+
 	.info-hint {
 		position: relative;
 		display: inline-flex;
@@ -285,13 +291,14 @@
 	.info-popup {
 		position: absolute;
 		top: calc(100% + 0.4rem);
-		left: 0;
+		right: 0;
+		left: auto;
 		z-index: 30;
 		display: flex;
 		flex-direction: column;
 		gap: 0.35rem;
 		width: max-content;
-		max-width: min(22rem, 80vw);
+		max-width: min(22rem, calc(100vw - 1.5rem));
 		padding: 0.6rem 0.75rem;
 		border: 1px solid var(--border, var(--color-border));
 		border-radius: var(--radius-sm);
@@ -352,6 +359,13 @@
 
 		.download-controls {
 			grid-template-columns: minmax(0, 1fr) auto;
+		}
+
+		.info-popup {
+			position: static;
+			width: 100%;
+			max-width: 100%;
+			margin-top: 0.5rem;
 		}
 	}
 </style>

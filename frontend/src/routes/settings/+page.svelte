@@ -1140,6 +1140,9 @@ $effect(() => {
 		display: grid;
 		gap: 0.25rem;
 		min-width: 0;
+	}
+
+	.ping-target-field > span {
 		color: var(--color-text-secondary);
 		font-size: 0.75rem;
 		font-weight: 600;

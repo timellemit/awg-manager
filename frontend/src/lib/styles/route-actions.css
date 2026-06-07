@@ -102,7 +102,7 @@
 }
 
 .policy-card .card-route {
-	padding-bottom: 0;
+	padding-bottom: calc((31px - 18px) / 2);
 }
 
 .dns-card .card-route :global(.badge),
@@ -117,7 +117,7 @@
 }
 
 .policy-card .card-actions {
-	align-self: center;
+	align-self: stretch;
 }
 
 .policy-card .card-actions .action-row {

@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { PageContainer } from '$lib/components/layout';
 	import { SingboxGhostTerminal } from '$lib/components/singbox';
+	import { ArrowLeft } from 'lucide-svelte';
 	import { Button } from '$lib/components/ui';
 	import { notifications } from '$lib/stores/notifications';
 	import { pluralize, TUNNEL_WORDS } from '$lib/utils/pluralize';
@@ -36,9 +37,7 @@
 </PageContainer>
 
 {#snippet backIcon()}
-	<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-		<path d="M19 12H5M12 19l-7-7 7-7" />
-	</svg>
+	<ArrowLeft size={14} strokeWidth={2} aria-hidden="true" />
 {/snippet}
 
 <style>

@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { api } from '$lib/api/client';
 	import type { DnsProxyInfo } from '$lib/types';
+	import { RefreshCcw } from 'lucide-svelte';
 	import { Button, Card } from '$lib/components/ui';
 	import { EmptyState } from '$lib/components/layout';
 	import {
@@ -74,9 +75,7 @@
 </script>
 
 {#snippet refreshIcon()}
-	<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-		<path d="M21 12a9 9 0 1 1-2.64-6.36M21 4v6h-6" stroke-linecap="round" stroke-linejoin="round" />
-	</svg>
+	<RefreshCcw size={14} strokeWidth={2} aria-hidden="true" />
 {/snippet}
 
 <div class="toolbar">

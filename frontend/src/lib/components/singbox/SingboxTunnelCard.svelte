@@ -29,6 +29,7 @@
 	interface Props {
 		tunnel: SingboxTunnel;
 		layout?: SingboxLayoutMode;
+		renderMode?: import('$lib/constants/singboxLayout').TunnelRenderMode;
 		autoDelayCheckNonce?: number;
 		autoDelayCheckDelayMs?: number;
 		ondetail?: (tag: string) => void;
@@ -37,6 +38,7 @@
 	let {
 		tunnel,
 		layout = 'compact',
+		renderMode = 'compact',
 		autoDelayCheckNonce = 0,
 		autoDelayCheckDelayMs = 0,
 		ondetail,
@@ -169,7 +171,7 @@
 
 </script>
 
-{#if layout === 'list'}
+{#if renderMode === 'table'}
 	<tr
 		class="sbx-tunnel-list-row"
 		class:ok={cardState === 'ok'}
@@ -246,9 +248,10 @@
 			/>
 		</td>
 	</tr>
-{:else if layout === 'dense'}
+{:else if layout === 'dense' || renderMode === 'list-card'}
 <div
 	class="card view-dense"
+	class:view-list={renderMode === 'list-card'}
 	class:ok={cardState === 'ok'}
 	class:slow={cardState === 'slow'}
 	class:fail={cardState === 'fail'}
@@ -287,6 +290,7 @@
 		</div>
 	</div>
 
+	{#if renderMode !== 'list-card'}
 	<div class="details">
 	<div class="details-dense-cols">
 		<div class="details-dense-col details-dense-col-lead">
@@ -333,6 +337,7 @@
 		</div>
 	</div>
 	</div>
+	{/if}
 
 	<div class="actions">
 		<TunnelListActions
@@ -349,6 +354,7 @@
 		/>
 	</div>
 
+	{#if renderMode !== 'list-card'}
 	<div class="charts-dense">
 		<button
 			type="button"
@@ -379,6 +385,7 @@
 			/>
 		</div>
 	</div>
+	{/if}
 </div>
 {:else}
 <div
@@ -455,7 +462,7 @@
 		</div>
 	{/if}
 
-	<div class="actions">
+	<div class="actions actions--bar">
 		<TunnelListActions
 			variant="labeled"
 			onEdit={edit}
@@ -871,7 +878,6 @@
 		display: flex;
 		gap: 5px;
 		flex-wrap: wrap;
-		margin-bottom: 12px;
 	}
 	.badge {
 		padding: 2px 8px;
@@ -933,7 +939,7 @@
 	.divider {
 		height: 0;
 		border: none;
-		margin: 4px 0;
+		margin: 0;
 		background: none;
 	}
 	.divider-dashed {
@@ -993,60 +999,6 @@
 		outline-offset: 1px;
 	}
 
-	.actions {
-		display: flex;
-		gap: 6px;
-		justify-content: center;
-		align-items: center;
-		margin-top: 12px;
-		padding: 10px 0;
-		border-top: 1px solid var(--color-border);
-		border-bottom: 1px solid var(--color-border);
-	}
-	.card.view-dense .actions {
-		gap: 2px;
-		justify-content: center;
-		margin-top: 0;
-		padding: 0;
-		border: none;
-	}
-	.action-btn {
-		display: inline-flex;
-		align-items: center;
-		gap: 4px;
-		padding: 5px 9px;
-		font-size: var(--sbx-card-action);
-		font-weight: 500;
-		border: none;
-		background: transparent;
-		color: var(--color-text-secondary);
-		cursor: pointer;
-		border-radius: var(--radius-sm);
-		text-decoration: none;
-		font-family: inherit;
-		transition: background var(--t-fast) ease, color var(--t-fast) ease;
-	}
-	.card.view-dense .action-btn {
-		padding: 3px 6px;
-		font-size: var(--sbx-card-action-dense);
-		gap: 3px;
-	}
-	.action-btn:hover:not(:disabled) {
-		background: var(--color-bg-hover);
-		color: var(--color-text-primary);
-	}
-	.action-btn:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-	.action-btn.action-danger:hover:not(:disabled) {
-		color: var(--color-error);
-		background: var(--color-error-tint);
-	}
-	.action-btn.action-test:hover:not(:disabled) {
-		color: var(--color-success);
-		background: var(--color-success-tint);
-	}
 	.chart-section {
 		margin: 0 -14px -12px;
 		border-radius: 0 0 var(--radius) var(--radius);
@@ -1058,7 +1010,7 @@
 	}
 
 	.chart-body :global(.tunnel-delay-spark--compact) {
-		height: 26px;
+		height: 36px;
 	}
 
 	/* List row (grid columns set on parent .singbox-tunnel-list-table) */

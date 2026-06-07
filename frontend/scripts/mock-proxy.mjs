@@ -179,6 +179,7 @@ function resetRuntimeControls() {
 	downloadFaultProbability = parseProbability(process.env.MOCK_DOWNLOAD_FAULT_PROB, 0.4);
 	bucketCleared.app = false;
 	bucketCleared.singbox = false;
+	mockManagedAscByServer = createInitialMockManagedAscByServer();
 }
 const MOCK_DOWNLOAD_OUTBOUNDS = [
 	{
@@ -2475,10 +2476,57 @@ function mockPubkey(i) {
 	return `MOCK${String(i).padStart(2, '0')}${'A'.repeat(37)}=`;
 }
 
+function mockZeroASC() {
+	return {
+		jc: 0,
+		jmin: 0,
+		jmax: 0,
+		s1: 0,
+		s2: 0,
+		h1: '',
+		h2: '',
+		h3: '',
+		h4: '',
+	};
+}
+
+function mockFilledASC() {
+	return {
+		jc: 3,
+		jmin: 77,
+		jmax: 266,
+		s1: 18,
+		s2: 29,
+		h1: '103994526',
+		h2: '1201929360',
+		h3: '2403636727',
+		h4: '3602647725',
+		s3: 12,
+		s4: 9,
+		i1: 'sig1',
+		i2: 'sig2',
+		i3: 'sig3',
+		i4: 'sig4',
+		i5: 'sig5',
+	};
+}
+
+/** Wireguard0 — второй managed-сервер в rail («AWGM ASC»). */
+const MOCK_ASC_SERVER_ID = 'Wireguard0';
+
+function createInitialMockManagedAscByServer() {
+	return {
+		[MOCK_ASC_SERVER_ID]: mockFilledASC(),
+		Wireguard1: mockZeroASC(),
+	};
+}
+
+let mockManagedAscByServer = createInitialMockManagedAscByServer();
+
 function mockManagedServer() {
 	return {
 		interfaceName: 'Wireguard1',
-		description: 'Mock home server',
+		description: 'Default WG',
 		address: '10.0.0.1',
 		mask: '255.255.255.0',
 		listenPort: 51821,
@@ -2502,7 +2550,7 @@ function mockManagedServer() {
 function mockManagedSystemServer() {
 	return {
 		interfaceName: 'Wireguard0',
-		description: 'Wireguard VPN Server',
+		description: 'AWGM ASC',
 		address: '10.0.1.1',
 		mask: '255.255.255.0',
 		listenPort: 51820,
@@ -2549,6 +2597,17 @@ function mockManagedSystemStats() {
 	};
 }
 
+function buildMockServersAllData() {
+	return {
+		servers: mockSystemServers(),
+		managed: [mockManagedServer(), mockManagedSystemServer()],
+		managedStats: {
+			Wireguard1: mockManagedStats(),
+			Wireguard0: mockManagedSystemStats(),
+		},
+	};
+}
+
 function mockSystemServerPeers() {
 	const now = Date.now();
 	return SYSTEM_SERVER_PEERS_FIXTURE.map((p, i) => {
@@ -2576,10 +2635,10 @@ function mockSystemServers() {
 			status: 'up',
 			connected: true,
 			mtu: 1420,
-			address: '10.0.1.1',
+			address: '10.0.14.88',
 			mask: '255.255.255.0',
 			publicKey: mockPubkey(41),
-			listenPort: 51820,
+			listenPort: 8443,
 			peers: mockSystemServerPeers(),
 		},
 		{
@@ -3257,6 +3316,8 @@ const server = http.createServer(async (req, res) => {
 					modelDisplay: details.modelDisplay || 'CMCC RAX3000M (KN-3812)',
 					region: details.region || 'EA',
 				};
+				data.supportsExtendedASC = true;
+				data.supportsHRanges = true;
 			}
 			send(res, status, body);
 		});
@@ -4156,6 +4217,30 @@ const server = http.createServer(async (req, res) => {
 		return;
 	}
 
+	const managedAscMatch = path.match(/^\/managed-servers\/([^/]+)\/asc$/);
+	if (managedAscMatch) {
+		const serverId = decodeURIComponent(managedAscMatch[1]);
+		if (req.method === 'GET') {
+			const params = mockManagedAscByServer[serverId] ?? mockZeroASC();
+			send(res, 200, { success: true, data: { ...params } });
+			return;
+		}
+		if (req.method === 'PUT') {
+			let raw = '';
+			req.on('data', (c) => (raw += c));
+			req.on('end', () => {
+				try {
+					const body = JSON.parse(raw || '{}');
+					mockManagedAscByServer[serverId] = { ...mockZeroASC(), ...body };
+					send(res, 200, { success: true, data: buildMockServersAllData() });
+				} catch (e) {
+					send(res, 400, { success: false, error: { code: 'INVALID_REQUEST', message: String(e) } });
+				}
+			});
+			return;
+		}
+	}
+
 	if (req.method === 'GET' && path === '/routing/policy-interfaces') {
 		send(res, 200, { success: true, data: buildMockPolicyInterfaces() });
 		return;
@@ -4843,12 +4928,7 @@ const server = http.createServer(async (req, res) => {
 	if (req.method === 'GET' && path === '/servers/all') {
 		fetchJSON('/servers/all').then(({ status, body }) => {
 			if (body && typeof body === 'object' && body.data && typeof body.data === 'object') {
-				body.data.servers = mockSystemServers();
-				body.data.managed = [mockManagedServer(), mockManagedSystemServer()];
-				body.data.managedStats = {
-					Wireguard1: mockManagedStats(),
-					Wireguard0: mockManagedSystemStats(),
-				};
+				Object.assign(body.data, buildMockServersAllData());
 			}
 			send(res, status, body);
 		});

@@ -17,6 +17,7 @@
     import { api } from '$lib/api/client';
     import { notifications } from '$lib/stores/notifications';
     import { PageContainer, PageHeader } from '$lib/components/layout';
+    import { Search } from 'lucide-svelte';
     import { Tabs, Button, Modal } from '$lib/components/ui';
     import { RoutingSearch } from '$lib/components/routing';
     import DnsRoutesTab from './DnsRoutesTab.svelte';
@@ -371,10 +372,7 @@
 </Modal>
 
 {#snippet searchIcon()}
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-        <circle cx="11" cy="11" r="8"/>
-        <line x1="21" y1="21" x2="16.65" y2="16.65"/>
-    </svg>
+    <Search size={16} strokeWidth={2} aria-hidden="true" />
 {/snippet}
 
 <style>
