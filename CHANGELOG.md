@@ -1,5 +1,30 @@
 # Changelog
 
+## [2.12.0] - 2026-06-07
+
+Главное: для управляемых серверов появились NAT-режимы и межсегментная маршрутизация LAN; крупная переработка UI туннелей и страницы маршрутизации sing-box; обновление sing-box до 1.14.0-alpha.28. Новый мастер первоначальной настройки singbox router'a, два режима визуализации (простой/эксперт) для singbox router'a. Объединение всех видов "пресетов" для всех видов маршрутизации.
+
+### Новые возможности
+
+- **NAT-режимы управляемых серверов** (PR [#302](https://github.com/hoaxisr/awg-manager/pull/302)) — full / только-интернет / выключен вместо вкл-выкл; static NAT через RCI `ip static`,
+- **Унификация пинга туннелей** (PR [#281](https://github.com/hoaxisr/awg-manager/pull/281)).
+
+### Правки
+
+- **sing-box** — обновление до 1.14.0-alpha.28.
+- **Управляемые серверы** — назначение ip hotspot policy (была неверная форма RCI) (PR [#312](https://github.com/hoaxisr/awg-manager/pull/312)); peer allow-ips только /32 + чистка старых пиров; пересборка ACL при смене подсети.
+- **DNS-перезапись sing-box** — single-stack перезапись не гасит вторую семью (NODATA) (PR [#275](https://github.com/hoaxisr/awg-manager/pull/275)).
+- **Подписки** — создание не ломает `40-subscriptions.json` (PR [#288](https://github.com/hoaxisr/awg-manager/pull/288)).
+- **Мастер sb-router** — выбор туннеля показывает все outbounds (PR [#311](https://github.com/hoaxisr/awg-manager/pull/311)); имя подписки вместо `sub-<hash>` (PR [#274](https://github.com/hoaxisr/awg-manager/pull/274)).
+
+### UI
+
+- Модалка «удаление невозможно» — починена + человеческие причины (PR [#310](https://github.com/hoaxisr/awg-manager/pull/310)).
+- Человеко-читаемые имена outbound в чипах соединений (PR [#292](https://github.com/hoaxisr/awg-manager/pull/292)); понятная подпись маршрутизации через sing-box (PR [#293](https://github.com/hoaxisr/awg-manager/pull/293)).
+- Полировка мобильных layout'ов диагностики/настроек (PR [#291](https://github.com/hoaxisr/awg-manager/pull/291)); SBR expert layouts (PR [#279](https://github.com/hoaxisr/awg-manager/pull/279)).
+- Инцидент-ссылки ведут на bug_report-форму (PR [#276](https://github.com/hoaxisr/awg-manager/pull/276)).
+- Огромное количество рефакторинга и правок UI/UX
+
 ## [2.11.4] - 2026-05-28
 
 Главное: установщик не пытается качать новый бинарник sing-box при нехватке места, UI показывает состояние «недостаточно места». Параллельно: больше нет раздачи singbox со сжатием `.upx`, плюс пачка фронт-полировок на мобильном.
