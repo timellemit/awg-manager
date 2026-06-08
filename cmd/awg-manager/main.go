@@ -647,6 +647,11 @@ func main() {
 	sysfsTrafficPoller.Start()
 
 	orch.SetEventBus(eventBus)
+	// Refresh the NDMS interface cache when a kernel tunnel is confirmed up:
+	// OpkgTun iflayerchanged hooks are unreliable, so the cache otherwise keeps
+	// a frozen "down" snapshot and policy/WAN/all-interface lists misreport the
+	// tunnel as down (#328). Async — Invalidate does a blocking HTTP.
+	orch.SetInterfaceInvalidator(func(name string) { go ndmsQueries.Interfaces.Invalidate(name) })
 	loggingService.SetEventBus(eventBus)
 	tunnelService.SetEventBus(eventBus)
 	pingCheckFacade.SetEventBus(eventBus)
