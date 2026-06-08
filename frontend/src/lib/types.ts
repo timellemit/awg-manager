@@ -315,6 +315,11 @@ export interface WireguardServer {
 	publicKey: string;
 	listenPort: number;
 	peers: WireguardServerPeer[];
+	natEnabled?: boolean;
+	natMode?: 'full' | 'internet-only' | 'none';
+	policy?: string;
+	keenDnsDomain?: string;
+	builtIn?: boolean;
 }
 
 export interface WireguardServerPeer {
@@ -327,6 +332,7 @@ export interface WireguardServerPeer {
 	lastHandshake: string;
 	online: boolean;
 	enabled: boolean;
+	confAvailable?: boolean;
 }
 
 export interface WireguardServerConfig {
