@@ -90,43 +90,65 @@ func (s *Service) proxyEnabled() bool {
 // and get a freshly allocated proxy here; subscriptions that already had one
 // (index retained across a toggle-off) are re-registered idempotently.
 //
-// Allocation is serialized (createMu) against Create, and each proxy is
-// registered via EnsureProxy — which makes the router slot occupied —
-// before the next index is allocated. AllocProxyIndex scans the live router
-// without a reserved set, so allocating a batch without committing each
-// first would hand out the same index twice.
+// Allocation is serialized (createMu) against Create. AllocProxyIndex scans
+// the live router without a reserved set, so two passes are required: first
+// re-register every subscription that already holds an index (occupying its
+// router slot), then allocate fresh indices for the proxy-less ones. Without
+// pass 1 a fresh allocation could land on a slot a retained subscription still
+// owns in the store but hasn't re-registered yet — store.List() order is
+// non-deterministic, so the proxy-less subscription is not reliably processed
+// last. Within pass 2 each proxy is committed via EnsureProxy before the next
+// index is allocated, for the same reason.
 func (s *Service) SyncProxies(ctx context.Context) error {
 	if !s.proxyEnabled() {
 		return nil
 	}
 	s.createMu.Lock()
 	defer s.createMu.Unlock()
-	for _, sub := range s.store.List() {
-		if sub.ListenPort == 0 {
-			continue // no data path yet; nothing to wrap
+
+	subs := s.store.List()
+	// Pass 1: re-register retained indices so their router slots are occupied
+	// before pass 2 allocates.
+	for _, sub := range subs {
+		if sub.ListenPort == 0 || sub.ProxyIndex < 0 {
+			continue
 		}
 		mu := s.lockSub(sub.ID)
-		mu.Lock()
-		idx := sub.ProxyIndex
-		if idx < 0 {
-			alloc, err := s.mutator.AllocProxyIndex(ctx)
-			if err != nil {
-				mu.Unlock()
-				return fmt.Errorf("subscription %s: alloc proxy index: %w", sub.ID, err)
-			}
-			idx = alloc
-		}
-		if err := s.mutator.EnsureProxy(ctx, idx, int(sub.ListenPort), sub.Label); err != nil {
-			mu.Unlock()
+		err := func() error {
+			mu.Lock()
+			defer mu.Unlock()
+			return s.mutator.EnsureProxy(ctx, sub.ProxyIndex, int(sub.ListenPort), sub.Label)
+		}()
+		if err != nil {
 			return fmt.Errorf("subscription %s: ensure proxy: %w", sub.ID, err)
 		}
-		if sub.ProxyIndex < 0 {
-			if err := s.store.SetProxyIndex(sub.ID, idx); err != nil {
-				mu.Unlock()
-				return fmt.Errorf("subscription %s: persist proxy index: %w", sub.ID, err)
-			}
+	}
+	// Pass 2: allocate a fresh ProxyN for subscriptions created while the
+	// toggle was off (ProxyIndex=-1). The live-router scan now sees the pass-1
+	// slots as taken, so no collision with a retained index.
+	for _, sub := range subs {
+		if sub.ListenPort == 0 || sub.ProxyIndex >= 0 {
+			continue
 		}
-		mu.Unlock()
+		mu := s.lockSub(sub.ID)
+		err := func() error {
+			mu.Lock()
+			defer mu.Unlock()
+			idx, err := s.mutator.AllocProxyIndex(ctx)
+			if err != nil {
+				return fmt.Errorf("alloc proxy index: %w", err)
+			}
+			if err := s.mutator.EnsureProxy(ctx, idx, int(sub.ListenPort), sub.Label); err != nil {
+				return fmt.Errorf("ensure proxy: %w", err)
+			}
+			if err := s.store.SetProxyIndex(sub.ID, idx); err != nil {
+				return fmt.Errorf("persist proxy index: %w", err)
+			}
+			return nil
+		}()
+		if err != nil {
+			return fmt.Errorf("subscription %s: %w", sub.ID, err)
+		}
 	}
 	return nil
 }

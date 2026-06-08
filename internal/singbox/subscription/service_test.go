@@ -228,6 +228,41 @@ func TestService_SyncProxies_AllocatesForProxylessSequentially(t *testing.T) {
 	}
 }
 
+// SyncProxies must not hand a freshly-allocated index to a proxy-less
+// subscription that another subscription still retains in the store. A
+// subscription created while the toggle was on keeps its ProxyIndex across a
+// toggle-off (MigrateOff removes the router interface but not the stored
+// index); a subscription created while off carries ProxyIndex=-1. On toggle-on
+// SyncProxies must re-register the retained one and allocate a *distinct* index
+// for the proxy-less one. store.List() order is non-deterministic, so the loop
+// exercises both orderings.
+func TestService_SyncProxies_RetainedIndexNotReused(t *testing.T) {
+	for run := 0; run < 300; run++ {
+		store, _ := NewStore(filepath.Join(t.TempDir(), "sub.json"))
+		mutator := &scanMutator{}
+		svc := NewService(store, mutator)
+		svc.SetNDMSProxyEnabled(func() bool { return true })
+
+		// A: created while on — retains ProxyIndex=0, but its router Proxy0 was
+		// torn down by MigrateOff (scanMutator.live starts empty).
+		a, _ := store.Create(CreateInput{Label: "a", URL: "http://x", Enabled: true})
+		_ = store.SetListenPort(a.ID, 11001)
+		_ = store.SetProxyIndex(a.ID, 0)
+		// B: created while off — ProxyIndex stays -1.
+		b, _ := store.Create(CreateInput{Label: "b", URL: "http://y", Enabled: true})
+		_ = store.SetListenPort(b.ID, 11002)
+
+		if err := svc.SyncProxies(context.Background()); err != nil {
+			t.Fatalf("run %d: SyncProxies: %v", run, err)
+		}
+		ga, _ := store.Get(a.ID)
+		gb, _ := store.Get(b.ID)
+		if ga.ProxyIndex == gb.ProxyIndex {
+			t.Fatalf("run %d: A and B share ProxyIndex %d (retained index reused by fresh alloc)", run, ga.ProxyIndex)
+		}
+	}
+}
+
 func TestService_Update_LabelOff_SkipsEnsureProxy(t *testing.T) {
 	store, _ := NewStore(filepath.Join(t.TempDir(), "sub.json"))
 	mutator := &fakeMutator{}
