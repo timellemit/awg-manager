@@ -4,7 +4,9 @@
 	import type { ASCParams, ASCParamsExtended } from '$lib/types';
 	import { isExtendedASCParams } from '$lib/utils/asc-validation';
 	import { AWG_PARAM_HINTS } from '$lib/utils/awgParamHints';
+	import { SettingsSectionLabel } from '$lib/components/settings';
 	import { Button, Dropdown, FieldHint, type DropdownOption } from '$lib/components/ui';
+	import { Fingerprint, Hash, MoveHorizontal, Shredder } from 'lucide-svelte';
 
 	const MAX_SIGNATURE_BYTES = 4096;
 
@@ -113,8 +115,8 @@
 {/snippet}
 
 <div class="asc-editor" class:compact>
-	<section class="param-section">
-		<h3 class="section-title">Junk пакеты</h3>
+	<section class="card param-section">
+		<SettingsSectionLabel label="Junk пакеты" icon={Shredder} tone="orange" header />
 		<p class="group-desc">Фейковые пакеты перед handshake — ломают анализ трафика DPI</p>
 		<div class="inline-row inline-row-3">
 			{@render paramLabel('jc', 'Jc')}
@@ -126,8 +128,13 @@
 		</div>
 	</section>
 
-	<section class="param-section">
-		<h3 class="section-title">{showExtended ? 'Padding (S1-S4)' : 'Padding (S1-S2)'}</h3>
+	<section class="card param-section">
+		<SettingsSectionLabel
+			label={showExtended ? 'Padding (S1-S4)' : 'Padding (S1-S2)'}
+			icon={MoveHorizontal}
+			tone="teal"
+			header
+		/>
 		<p class="group-desc">Дополнительные байты в handshake — меняют размер пакетов WireGuard</p>
 		<div class="inline-row inline-row-2">
 			{@render paramLabel('s1', 'S1')}
@@ -144,8 +151,8 @@
 		</div>
 	</section>
 
-	<section class="param-section">
-		<h3 class="section-title">Заголовки (H1-H4)</h3>
+	<section class="card param-section">
+		<SettingsSectionLabel label="Заголовки (H1-H4)" icon={Hash} tone="indigo" header />
 		<p class="group-desc">Подмена типов пакетов WireGuard на произвольные значения</p>
 		<div class="inline-row inline-row-2">
 			{@render paramLabel('h1', 'H1')}
@@ -161,8 +168,8 @@
 
 	{#if showExtended}
 		{@const ext = params as ASCParamsExtended}
-		<section class="param-section">
-			<h3 class="section-title">Signature пакеты (I1-I5)</h3>
+		<section class="card param-section">
+			<SettingsSectionLabel label="Signature пакеты (I1-I5)" icon={Fingerprint} tone="green" header />
 			<p class="group-desc">Имитация протоколов — DPI видит знакомый трафик вместо WireGuard</p>
 
 			{#if signatureModes === 'both'}
@@ -257,23 +264,16 @@
 	.asc-editor {
 		display: flex;
 		flex-direction: column;
-		gap: 20px;
+		gap: var(--settings-gap);
 	}
 
 	.param-section {
-		background: var(--color-bg-secondary);
-		border: 1px solid var(--color-border);
-		border-radius: var(--radius);
-		padding: 16px;
+		background: var(--color-settings-surface-bg);
 		overflow: visible;
 	}
 
-	.section-title {
-		font-size: 14px;
-		font-weight: 600;
-		padding-bottom: 10px;
-		border-bottom: 1px solid var(--color-border);
-		margin-bottom: 12px;
+	.param-section :global(.settings-section-label.header) {
+		margin-bottom: 0.5rem;
 	}
 
 	.form-group {
@@ -316,7 +316,7 @@
 	.group-desc {
 		font-size: 11px;
 		color: var(--color-text-muted);
-		margin: 0 0 10px 0;
+		margin: 0 0 12px 0;
 		line-height: 1.4;
 	}
 

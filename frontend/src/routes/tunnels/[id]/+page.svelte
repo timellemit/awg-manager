@@ -15,7 +15,9 @@
 	import { AWGAdvancedParams, ReplaceTunnelConfigModal } from '$lib/components/tunnels';
 	import TunnelEditHeader from '$lib/components/tunnels/TunnelEditHeader.svelte';
 	import AwgConfigAnalyzer from '$lib/components/diagnostics/AwgConfigAnalyzer.svelte';
+	import { SettingsSectionLabel } from '$lib/components/settings';
 	import { AWG_PARAM_HINTS } from '$lib/utils/awgParamHints';
+	import { Network, Route, Router, Server, Tag } from 'lucide-svelte';
 
 	let { data } = $props();
 
@@ -332,8 +334,8 @@
 		<div class="tab-content">
 			{#if activeTab === 'basic'}
 				<form class="tab-form" onsubmit={(e) => { e.preventDefault(); handleSaveAndStart(); }}>
-					<section class="form-section">
-						<h2 class="section-title">Название</h2>
+					<section class="card tunnel-section">
+						<SettingsSectionLabel label="Название" icon={Tag} tone="slate" header />
 						<div class="flex flex-col gap-1.5">
 							<label class="field-label" for="name">Название туннеля</label>
 							<input type="text" id="name" class="field-input" bind:value={$form.name} />
@@ -341,8 +343,8 @@
 						</div>
 					</section>
 
-					<section class="form-section">
-						<h2 class="section-title">Интерфейс [Interface]</h2>
+					<section class="card tunnel-section">
+						<SettingsSectionLabel label="Интерфейс [Interface]" icon={Network} tone="teal" header />
 						<div class="inline-fields">
 							<div class="flex flex-col gap-1.5" style="flex:1">
 								<label class="field-label" for="address-v4">IPv4 адрес</label>
@@ -369,8 +371,8 @@
 						</div>
 					</section>
 
-					<section class="form-section">
-						<h2 class="section-title">Сервер [Peer]</h2>
+					<section class="card tunnel-section">
+						<SettingsSectionLabel label="Сервер [Peer]" icon={Server} tone="indigo" header />
 						<div class="flex flex-col gap-1.5 pubkey-row">
 							<span class="field-label">Публичный ключ</span>
 							<code class="pubkey-value">{publicKey}</code>
@@ -416,8 +418,8 @@
 					...otherTunnels.map((t) => ({ value: `tunnel:${t.id}`, label: t.name, group: 'Через туннель' })),
 				]}
 				<div class="tab-form">
-					<section class="form-section">
-						<h2 class="section-title">Подключение (ISP)</h2>
+					<section class="card tunnel-section">
+						<SettingsSectionLabel label="Подключение (ISP)" icon={Router} tone="orange" header />
 						<p class="section-hint">Через какой WAN-интерфейс роутер будет подключаться к серверу VPN. По умолчанию используется основной интернет-канал.</p>
 						<Dropdown
 							value={ispValue}
@@ -426,22 +428,23 @@
 							disabled={savingIsp}
 							fullWidth
 						/>
-						<div class="advanced-toggle">
+						<div class="setting-row toggle-inline-row advanced-toggle">
+							<div class="flex flex-col gap-1">
+								<span class="font-medium">Показать все интерфейсы</span>
+								<span class="setting-description">Включая внутренние интерфейсы роутера</span>
+							</div>
 							<Toggle
 								checked={showAllInterfaces}
 								onchange={toggleAllInterfaces}
 								loading={loadingAllInterfaces}
-								label="Показать все интерфейсы"
-								hint="Включая внутренние интерфейсы роутера"
-								size="sm"
 							/>
 						</div>
 					</section>
 
 					{#if $usageLevel === 'expert'}
-						<section class="form-section">
-							<h2 class="section-title">Маршрут по умолчанию</h2>
-							<div class="setting-row">
+						<section class="card tunnel-section">
+							<SettingsSectionLabel label="Маршрут по умолчанию" icon={Route} tone="green" header />
+							<div class="setting-row toggle-inline-row">
 								<div class="flex flex-col gap-1">
 									<span class="font-medium">NDMS Default Route</span>
 									<span class="setting-description">
@@ -496,12 +499,12 @@
 	.section-hint {
 		color: var(--color-text-muted);
 		font-size: 0.8125rem;
-		margin: 4px 0 12px 0;
+		margin: 0 0 12px 0;
 	}
 
 	.advanced-toggle {
-		margin-top: 12px;
-		padding-top: 12px;
+		margin-top: var(--settings-gap);
+		padding-top: var(--settings-gap);
 		border-top: 1px solid var(--color-border);
 	}
 
@@ -512,24 +515,12 @@
 		align-items: flex-start;
 	}
 
-	.form-section {
-		background: var(--color-bg-secondary);
-		border: 1px solid var(--color-border);
-		border-radius: var(--radius);
-		padding: 16px;
-	}
-
-	.section-title {
-		font-size: 14px;
-		font-weight: 600;
-		padding-bottom: 10px;
-		border-bottom: 1px solid var(--color-border);
+	.tunnel-section {
+		background: var(--color-settings-surface-bg);
 	}
 
 	.pubkey-row {
 		margin-bottom: 16px;
-		padding-bottom: 16px;
-		border-bottom: 1px solid var(--color-border);
 	}
 
 	.pubkey-value {
