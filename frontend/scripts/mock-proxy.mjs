@@ -2791,10 +2791,10 @@ function buildMockServersAllData() {
 	};
 }
 
-/** @type {Record<string, { natMode: 'full' | 'internet-only' | 'none', policy: string }>} */
+/** @type {Record<string, { natMode: 'full' | 'internet-only' | 'none', policy: string, endpoint?: string }>} */
 const mockSystemServerSettings = {
-	Wireguard0: { natMode: 'full', policy: 'none' },
-	Wireguard9: { natMode: 'none', policy: 'Policy0' },
+	Wireguard0: { natMode: 'full', policy: 'none', endpoint: '' },
+	Wireguard9: { natMode: 'none', policy: 'Policy0', endpoint: '' },
 };
 
 /** @type {Map<string, { privateKey: string, presharedKey: string, description: string, tunnelIP: string }>} */
@@ -2847,6 +2847,7 @@ function mockSystemServers() {
 			natEnabled: wg0.natMode === 'full',
 			natMode: wg0.natMode,
 			policy: wg0.policy,
+			endpoint: wg0.endpoint ?? '',
 			keenDnsDomain: 'demo.keenetic.pro',
 			peers: builtinPeers,
 		},
@@ -5220,6 +5221,27 @@ const server = http.createServer(async (req, res) => {
 					mockSystemServerSettings[serverId] = { natMode: 'none', policy: 'none' };
 				}
 				mockSystemServerSettings[serverId].natMode = mode;
+				sendData(res, buildMockServersAllData());
+			} catch (e) {
+				sendInvalidRequest(res, String(e));
+			}
+		});
+		return;
+	}
+
+	const serverEndpointMatch = path.match(/^\/servers\/([^/]+)\/endpoint$/);
+	if (serverEndpointMatch && req.method === 'POST') {
+		const serverId = decodeURIComponent(serverEndpointMatch[1]);
+		let raw = '';
+		req.on('data', (c) => (raw += c));
+		req.on('end', () => {
+			try {
+				const body = JSON.parse(raw || '{}');
+				const endpoint = typeof body.endpoint === 'string' ? body.endpoint.trim() : '';
+				if (!mockSystemServerSettings[serverId]) {
+					mockSystemServerSettings[serverId] = { natMode: 'none', policy: 'none', endpoint: '' };
+				}
+				mockSystemServerSettings[serverId].endpoint = endpoint;
 				sendData(res, buildMockServersAllData());
 			} catch (e) {
 				sendInvalidRequest(res, String(e));

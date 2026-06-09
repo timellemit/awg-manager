@@ -891,6 +891,16 @@ class ApiClient {
 		});
 	}
 
+	async setWireguardServerEndpoint(
+		name: string,
+		endpoint: string
+	): Promise<import('$lib/stores/servers').ServersSnapshot> {
+		return this.request(`/servers/${encodeURIComponent(name)}/endpoint`, {
+			method: 'POST',
+			body: JSON.stringify({ endpoint })
+		});
+	}
+
 	async addSystemServerPeer(
 		serverId: string,
 		data: { description: string; tunnelIP: string }

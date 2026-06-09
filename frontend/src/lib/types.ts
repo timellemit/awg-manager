@@ -319,6 +319,8 @@ export interface WireguardServer {
 	natMode?: 'full' | 'internet-only' | 'none';
 	policy?: string;
 	keenDnsDomain?: string;
+	/** User-configured connect host for client .conf; empty = WAN IP at generation. */
+	endpoint?: string;
 	builtIn?: boolean;
 	/**
 	 * False when the backend failed to read NAT mode / policy from NDMS
