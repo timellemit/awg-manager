@@ -6,6 +6,8 @@
  *   domain → 'домен', ip → 'IP', port → 'порт', set → 'набор', src → 'источник', geoip → 'geoip'
  */
 
+import type { RuleSetDisplayType } from '$lib/utils/ruleSetType';
+
 export type RuleAction = 'route' | 'block' | 'direct' | 'sniff' | 'hijack-dns';
 
 /** Категория matcher chip — соответствует labelMap из дизайна. */
@@ -20,6 +22,8 @@ export interface MatcherChip {
   mono?: boolean;
   /** Тег rule_set в конфиге (только kind === 'ruleset') — для открытия редактора набора */
   rulesetTag?: string;
+  /** Тип rule_set для иконки в простом режиме (только kind === 'ruleset') */
+  rulesetType?: RuleSetDisplayType;
 }
 
 export type OutboundKind = 'tunnel' | 'awg' | 'direct' | 'block' | 'composite' | 'unknown' | 'sniff' | 'hijack-dns';

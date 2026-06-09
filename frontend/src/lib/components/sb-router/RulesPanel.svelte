@@ -47,7 +47,7 @@
 
   let cards: RuleCardData[] = $derived.by(() =>
     $rules.map((r, i) =>
-      singboxRuleToCard(r, i, $outbounds, rulesetLabels, $presets, $options, $presetCatalog),
+      singboxRuleToCard(r, i, $outbounds, rulesetLabels, $presets, $options, $presetCatalog, $ruleSets),
     ),
   );
 

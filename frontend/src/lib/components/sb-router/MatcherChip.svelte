@@ -19,29 +19,42 @@
 </script>
 
 <script lang="ts">
+  import RuleSetTypeIcon from './RuleSetTypeIcon.svelte';
+  import type { RuleSetDisplayType } from '$lib/utils/ruleSetType';
+
   interface Props {
     kind: MatcherKind;
     label: string;
     /** Если true — значение mono шрифтом (для IP/port/cidr). Подпись слева всегда sans. */
     mono?: boolean;
+    /** Иконка типа rule_set вместо подписи «набор:» */
+    rulesetType?: RuleSetDisplayType;
     /** Клик по чипу — открыть связанный редактор */
     onclick?: () => void;
     /** Подсказка для кликабельного чипа */
     title?: string;
   }
-  let { kind, label, mono = false, onclick, title }: Props = $props();
+  let { kind, label, mono = false, rulesetType, onclick, title }: Props = $props();
 
   const isClickable = $derived(typeof onclick === 'function');
 </script>
 
 {#if isClickable}
   <button type="button" class="chip is-clickable" {title} aria-label={title} {onclick}>
-    <span class="chip-key">{LABELS[kind]}:</span>
+    {#if kind === 'ruleset' && rulesetType}
+      <RuleSetTypeIcon type={rulesetType} size={10} />
+    {:else}
+      <span class="chip-key">{LABELS[kind]}:</span>
+    {/if}
     <span class="chip-val" class:is-mono={mono}>{label}</span>
   </button>
 {:else}
   <span class="chip">
-    <span class="chip-key">{LABELS[kind]}:</span>
+    {#if kind === 'ruleset' && rulesetType}
+      <RuleSetTypeIcon type={rulesetType} size={10} />
+    {:else}
+      <span class="chip-key">{LABELS[kind]}:</span>
+    {/if}
     <span class="chip-val" class:is-mono={mono}>{label}</span>
   </span>
 {/if}

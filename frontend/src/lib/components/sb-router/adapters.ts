@@ -10,7 +10,7 @@
  * (всё остальное где outbound найден в списке).
  */
 
-import type { CatalogPreset, SingboxRouterPreset, SingboxRouterRule, SingboxRouterOutbound } from '$lib/types';
+import type { CatalogPreset, SingboxRouterPreset, SingboxRouterRule, SingboxRouterRuleSet, SingboxRouterOutbound } from '$lib/types';
 import type { OutboundGroup } from '$lib/components/routing/singboxRouter/outboundOptions';
 import type {
   MatcherChip,
@@ -19,6 +19,7 @@ import type {
   RuleCardData,
 } from './types';
 import { detectService } from './serviceDetection';
+import { resolveRuleSetDisplayType } from '$lib/utils/ruleSetType';
 
 /* ─── System rule detection ─────────────────────────────────────────── */
 
@@ -113,8 +114,12 @@ export function resolveOutboundDisplay(
 export function extractMatcherChips(
   rule: SingboxRouterRule,
   rulesetLabels: Record<string, string>,
+  ruleSets: SingboxRouterRuleSet[] = [],
 ): MatcherChip[] {
   const chips: MatcherChip[] = [];
+  const rulesetTypes = new Map(
+    ruleSets.filter((rs) => rs.tag).map((rs) => [rs.tag, resolveRuleSetDisplayType(rs)] as const),
+  );
 
   for (const d of rule.domain_suffix ?? []) {
     chips.push({ kind: 'domain', label: d });
@@ -129,7 +134,12 @@ export function extractMatcherChips(
     chips.push({ kind: 'port', label: String(p), mono: true });
   }
   for (const rs of rule.rule_set ?? []) {
-    chips.push({ kind: 'ruleset', label: rulesetLabels[rs] ?? rs, rulesetTag: rs });
+    chips.push({
+      kind: 'ruleset',
+      label: rulesetLabels[rs] ?? rs,
+      rulesetTag: rs,
+      rulesetType: rulesetTypes.get(rs),
+    });
   }
   if (rule.protocol) {
     chips.push({ kind: 'protocol', label: rule.protocol });
@@ -194,12 +204,13 @@ export function singboxRuleToCard(
   routerPresets: SingboxRouterPreset[] = [],
   outboundOptions: OutboundGroup[] = [],
   catalog: CatalogPreset[] = [],
+  ruleSets: SingboxRouterRuleSet[] = [],
 ): RuleCardData {
   const detected = detectService(rule, routerPresets, catalog);
   const serviceKey = detected.iconSlug;
   const action = mapAction(rule);
   const outbound = resolveOutboundDisplay(rule.outbound, action, outbounds, outboundOptions);
-  const matchers = extractMatcherChips(rule, rulesetLabels);
+  const matchers = extractMatcherChips(rule, rulesetLabels, ruleSets);
   const isSystem = isSystemRule(rule);
   const title = fallbackTitle(rule, serviceKey, index, detected.displayName);
   const subtitle = isSystem

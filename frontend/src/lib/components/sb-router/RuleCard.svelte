@@ -127,6 +127,7 @@
             kind={chip.kind}
             label={chip.label}
             mono={chip.mono}
+            rulesetType={chip.rulesetType}
             onclick={chipOnclick(chip)}
             title={chipTitle(chip)}
           />

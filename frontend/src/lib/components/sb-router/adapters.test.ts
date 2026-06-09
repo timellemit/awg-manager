@@ -159,6 +159,23 @@ describe('extractMatcherChips', () => {
     ]);
   });
 
+  it('rule_set chips include rulesetType from config ruleSets', () => {
+    const chips = extractMatcherChips(
+      { rule_set: ['inline-neo-demo', 'geosite-youtube', 'geosite-google'] },
+      {},
+      [
+        { tag: 'inline-neo-demo', type: 'inline' },
+        { tag: 'geosite-youtube', type: 'remote', url: 'https://cdn.example.com/youtube.srs' },
+        {
+          tag: 'geosite-google',
+          type: 'remote',
+          url: 'http://127.0.0.1:8081/api/singbox/router/rulesets/dat-srs?kind=geosite&tag=GOOGLE',
+        },
+      ],
+    );
+    expect(chips.map((c) => c.rulesetType)).toEqual(['inline', 'remote', 'dat']);
+  });
+
   it('protocol → protocol chip', () => {
     const chips = extractMatcherChips({ protocol: 'quic' }, noRulesets);
     expect(chips).toEqual([{ kind: 'protocol', label: 'quic' }]);

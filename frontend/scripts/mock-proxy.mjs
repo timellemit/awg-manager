@@ -2439,6 +2439,9 @@ const mockSingboxRules = [
 	{ ip_is_private: true, outbound: 'direct' },
 	{ action: 'route', domain_suffix: ['youtube.com', 'ytimg.com'], outbound: 'sub-demo0001' },
 	{ action: 'route', rule_set: ['geosite-openai'], outbound: 'sub-demo0001' },
+	{ action: 'route', rule_set: ['inline-neo-demo'], outbound: 'sub-demo0001' },
+	{ action: 'route', rule_set: ['geosite-google'], outbound: 'sub-demo0001' },
+	{ action: 'route', rule_set: ['local-ads-block'], outbound: 'direct' },
 	{ action: 'route', domain_suffix: ['github.com'], outbound: 'direct' },
 	{ action: 'reject', domain: ['vkvideo.ru', 'long-host.example.com'], rule_set: ['geosite-category-ads-all', 'geosite-youtube'] },
 ];
@@ -2450,6 +2453,26 @@ const mockSingboxRuleSets = [
 	{ tag: 'geosite-discord', type: 'remote', format: 'binary', url: 'https://cdn.example.com/geosite-discord.srs', update_interval: '24h', download_detour: 'direct' },
 	{ tag: 'geosite-github', type: 'remote', format: 'binary', url: 'https://cdn.example.com/geosite-github.srs', update_interval: '24h', download_detour: 'direct' },
 	{ tag: 'geoip-ru', type: 'remote', format: 'binary', url: 'https://cdn.example.com/geoip-ru.srs', update_interval: '24h', download_detour: 'direct' },
+	{
+		tag: 'geosite-google',
+		type: 'remote',
+		format: 'binary',
+		url: 'http://127.0.0.1:8081/api/singbox/router/rulesets/dat-srs?kind=geosite&tag=GOOGLE&tag=GEMINI',
+		update_interval: '24h',
+	},
+	{
+		tag: 'geoip-ru-dat',
+		type: 'remote',
+		format: 'binary',
+		url: 'http://127.0.0.1:8081/api/singbox/router/rulesets/dat-srs?kind=geoip&tag=RU',
+		update_interval: '24h',
+	},
+	{
+		tag: 'local-ads-block',
+		type: 'local',
+		format: 'binary',
+		path: '/opt/etc/sing-box/rule-sets/ads.srs',
+	},
 	{
 		tag: 'inline-neo-demo',
 		type: 'inline',
