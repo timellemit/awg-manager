@@ -539,6 +539,13 @@ func (s *ServiceImpl) persistConfig(ctx context.Context, cfg *RouterConfig) erro
 	if err != nil {
 		return err
 	}
+	// sing-box only reports circular outbound dependencies at "start
+	// service" (not via `sing-box check`), so a cyclic config would persist
+	// and FATAL-loop. Catch it here before writing, regardless of source
+	// (UI, subscription refresh, import, migration).
+	if err := validateNoCompositeCycles(materialized.Outbounds); err != nil {
+		return err
+	}
 	if s.deps.Orch != nil {
 		// Orchestrator path — write to pending/ (staging). The draft will
 		// be applied explicitly via ApplyStaging. No SIGHUP is triggered

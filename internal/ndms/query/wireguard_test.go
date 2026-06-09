@@ -226,6 +226,51 @@ func TestWGServerStore_GetAll_ParsesRuntime(t *testing.T) {
 	}
 }
 
+func TestWGServerStore_PeerDescription_FromRCCommentWhenRuntimeEmpty(t *testing.T) {
+	fg := newFakeGetter()
+	const ifaceList = `{
+		"Wireguard1": {
+			"id": "Wireguard1",
+			"interface-name": "nwg1",
+			"type": "Wireguard",
+			"description": "ourserver",
+			"state": "up",
+			"connected": "yes",
+			"address": "10.0.1.1",
+			"mask": "255.255.255.0",
+			"mtu": 1420,
+			"wireguard": {
+				"public-key": "SRVKEY1=",
+				"listen-port": 51821,
+				"peer": [
+					{
+						"public-key": "PEERB=",
+						"remote-endpoint-address": "5.6.7.8",
+						"remote-port": 51820,
+						"enabled": false
+					}
+				]
+			}
+		}
+	}`
+	fg.SetJSON("/show/interface/", ifaceList)
+	fg.SetPostInterface("Wireguard1", wrapShowInterface(sampleWGSingleInterfaceJSON))
+	fg.SetJSON("/show/rc/interface/Wireguard1", sampleWGRCInterfaceJSON)
+	fg.SetJSON("/show/interface/system-name?name=Wireguard1", `"nwg1"`)
+
+	s := NewWGServerStore(fg, NopLogger(), NewInterfaceStore(fg, NopLogger()))
+	servers, err := s.List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(servers) != 1 || len(servers[0].Peers) != 1 {
+		t.Fatalf("unexpected servers: %+v", servers)
+	}
+	if got := servers[0].Peers[0].Description; got != "bob" {
+		t.Fatalf("Description = %q, want bob from RC comment", got)
+	}
+}
+
 func TestWGServerStore_GetAll_CacheHitSkipsFetch(t *testing.T) {
 	fg := newFakeGetter()
 	primeWGFakeGetter(fg)
@@ -400,6 +445,37 @@ func TestWGServerStore_FindFreeIndex(t *testing.T) {
 	}
 	if idx != 2 {
 		t.Errorf("want 2, got %d", idx)
+	}
+}
+
+// FindFreeIndex must start the scan at 0 — on a fresh device (no Wireguard
+// interfaces) the first server has to be Wireguard0, not Wireguard1 (#308).
+// The case above pre-occupies both 0 and 1, so it cannot catch a start-at-1
+// off-by-one; these cases do.
+func TestWGServerStore_FindFreeIndex_StartsAtZero(t *testing.T) {
+	cases := map[string]struct {
+		list string
+		want int
+	}{
+		"fresh device (no wireguard)": {`{"GigabitEthernet1":{"id":"GigabitEthernet1","type":"GigabitEthernet"}}`, 0},
+		"only Wireguard1 used":        {`{"Wireguard1":{"id":"Wireguard1","type":"Wireguard"}}`, 0},
+		"Wireguard0 used":             {`{"Wireguard0":{"id":"Wireguard0","type":"Wireguard"}}`, 1},
+		// Reuse a freed/gap index: 0 and 2 taken → the freed 1 is reused.
+		"gap at 1 reused": {`{"Wireguard0":{"id":"Wireguard0","type":"Wireguard"},"Wireguard2":{"id":"Wireguard2","type":"Wireguard"}}`, 1},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			fg := newFakeGetter()
+			fg.SetJSON("/show/interface/", tc.list)
+			s := NewWGServerStore(fg, NopLogger(), NewInterfaceStore(fg, NopLogger()))
+			idx, err := s.FindFreeIndex(context.Background())
+			if err != nil {
+				t.Fatalf("FindFreeIndex: %v", err)
+			}
+			if idx != tc.want {
+				t.Errorf("FindFreeIndex = %d, want %d", idx, tc.want)
+			}
+		})
 	}
 }
 

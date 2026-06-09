@@ -88,6 +88,7 @@ func (f *fakeMutator) RemoveProxy(_ context.Context, idx int) error {
 	return nil
 }
 func (f *fakeMutator) Reload(ctx context.Context) error { return nil }
+func (f *fakeMutator) Rollback()                        {}
 func (f *fakeMutator) DeclaredOutboundTags() []string   { return f.declaredTags }
 func (f *fakeMutator) SelectClashProxy(selectorTag, memberTag string) error {
 	f.selectedSelector = append(f.selectedSelector, selectorTag+"→"+memberTag)
@@ -124,6 +125,161 @@ func TestService_Create_FetchAndMaterialize(t *testing.T) {
 	}
 	if len(mutator.addedInbounds) != 1 {
 		t.Errorf("expected 1 mixed inbound, got %d", len(mutator.addedInbounds))
+	}
+}
+
+// scanMutator simulates NextFreeIndex's real behaviour: AllocProxyIndex
+// returns the lowest index not yet registered via EnsureProxy. It exposes
+// whether a batch allocated collision-free (each EnsureProxy committed
+// before the next Alloc).
+type scanMutator struct {
+	fakeMutator
+	live map[int]bool
+}
+
+func (m *scanMutator) AllocProxyIndex(_ context.Context) (int, error) {
+	for i := 0; ; i++ {
+		if !m.live[i] {
+			return i, nil
+		}
+	}
+}
+func (m *scanMutator) EnsureProxy(_ context.Context, idx, port int, description string) error {
+	if m.live == nil {
+		m.live = map[int]bool{}
+	}
+	m.live[idx] = true
+	m.ensuredProxies = append(m.ensuredProxies, ensuredProxyCall{idx: idx, port: port, description: description})
+	return nil
+}
+
+func TestService_Create_NDMSProxyOff_SkipsProxy(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("vless://3a3b1c2e-9999-4321-aaaa-1234567890ab@example.com:443?security=tls&sni=h\n"))
+	}))
+	defer srv.Close()
+
+	store, _ := NewStore(filepath.Join(t.TempDir(), "sub.json"))
+	mutator := &fakeMutator{}
+	svc := NewService(store, mutator)
+	svc.SetNDMSProxyEnabled(func() bool { return false })
+
+	sub, err := svc.Create(context.Background(), CreateInput{Label: "off", URL: srv.URL, Enabled: true})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if len(mutator.ensuredProxies) != 0 {
+		t.Errorf("EnsureProxy must not be called when toggle is off, got %d calls", len(mutator.ensuredProxies))
+	}
+	if mutator.proxyIndex != 0 {
+		t.Errorf("AllocProxyIndex must not be called when toggle is off")
+	}
+	if sub.ProxyIndex != -1 {
+		t.Errorf("ProxyIndex = %d, want -1 (no proxy in off mode)", sub.ProxyIndex)
+	}
+	if sub.ListenPort == 0 {
+		t.Error("listen port must still be allocated in off mode (data path)")
+	}
+}
+
+func TestService_SyncProxies_OffIsNoop(t *testing.T) {
+	store, _ := NewStore(filepath.Join(t.TempDir(), "sub.json"))
+	mutator := &fakeMutator{}
+	svc := NewService(store, mutator)
+	svc.SetNDMSProxyEnabled(func() bool { return false })
+
+	sub, _ := store.Create(CreateInput{Label: "a", URL: "http://x", Enabled: true})
+	_ = store.SetListenPort(sub.ID, 11001)
+
+	if err := svc.SyncProxies(context.Background()); err != nil {
+		t.Fatalf("SyncProxies: %v", err)
+	}
+	if len(mutator.ensuredProxies) != 0 {
+		t.Errorf("SyncProxies must be a no-op when toggle is off, got %d EnsureProxy", len(mutator.ensuredProxies))
+	}
+}
+
+func TestService_SyncProxies_AllocatesForProxylessSequentially(t *testing.T) {
+	store, _ := NewStore(filepath.Join(t.TempDir(), "sub.json"))
+	mutator := &scanMutator{}
+	svc := NewService(store, mutator)
+	svc.SetNDMSProxyEnabled(func() bool { return true })
+
+	// Two subscriptions created while the toggle was off → ProxyIndex=-1.
+	a, _ := store.Create(CreateInput{Label: "a", URL: "http://x", Enabled: true})
+	_ = store.SetListenPort(a.ID, 11001)
+	b, _ := store.Create(CreateInput{Label: "b", URL: "http://y", Enabled: true})
+	_ = store.SetListenPort(b.ID, 11002)
+
+	if err := svc.SyncProxies(context.Background()); err != nil {
+		t.Fatalf("SyncProxies: %v", err)
+	}
+	if len(mutator.ensuredProxies) != 2 {
+		t.Fatalf("expected 2 EnsureProxy, got %d", len(mutator.ensuredProxies))
+	}
+	// Collision-safety: sequential allocation must yield distinct indexes.
+	if mutator.ensuredProxies[0].idx == mutator.ensuredProxies[1].idx {
+		t.Errorf("two proxy-less subs got the same index %d (allocation not committed before next)", mutator.ensuredProxies[0].idx)
+	}
+	for _, id := range []string{a.ID, b.ID} {
+		got, _ := store.Get(id)
+		if got.ProxyIndex < 0 {
+			t.Errorf("sub %s ProxyIndex not persisted: %d", id, got.ProxyIndex)
+		}
+	}
+}
+
+// SyncProxies must not hand a freshly-allocated index to a proxy-less
+// subscription that another subscription still retains in the store. A
+// subscription created while the toggle was on keeps its ProxyIndex across a
+// toggle-off (MigrateOff removes the router interface but not the stored
+// index); a subscription created while off carries ProxyIndex=-1. On toggle-on
+// SyncProxies must re-register the retained one and allocate a *distinct* index
+// for the proxy-less one. store.List() order is non-deterministic, so the loop
+// exercises both orderings.
+func TestService_SyncProxies_RetainedIndexNotReused(t *testing.T) {
+	for run := 0; run < 300; run++ {
+		store, _ := NewStore(filepath.Join(t.TempDir(), "sub.json"))
+		mutator := &scanMutator{}
+		svc := NewService(store, mutator)
+		svc.SetNDMSProxyEnabled(func() bool { return true })
+
+		// A: created while on — retains ProxyIndex=0, but its router Proxy0 was
+		// torn down by MigrateOff (scanMutator.live starts empty).
+		a, _ := store.Create(CreateInput{Label: "a", URL: "http://x", Enabled: true})
+		_ = store.SetListenPort(a.ID, 11001)
+		_ = store.SetProxyIndex(a.ID, 0)
+		// B: created while off — ProxyIndex stays -1.
+		b, _ := store.Create(CreateInput{Label: "b", URL: "http://y", Enabled: true})
+		_ = store.SetListenPort(b.ID, 11002)
+
+		if err := svc.SyncProxies(context.Background()); err != nil {
+			t.Fatalf("run %d: SyncProxies: %v", run, err)
+		}
+		ga, _ := store.Get(a.ID)
+		gb, _ := store.Get(b.ID)
+		if ga.ProxyIndex == gb.ProxyIndex {
+			t.Fatalf("run %d: A and B share ProxyIndex %d (retained index reused by fresh alloc)", run, ga.ProxyIndex)
+		}
+	}
+}
+
+func TestService_Update_LabelOff_SkipsEnsureProxy(t *testing.T) {
+	store, _ := NewStore(filepath.Join(t.TempDir(), "sub.json"))
+	mutator := &fakeMutator{}
+	svc := NewService(store, mutator)
+	svc.SetNDMSProxyEnabled(func() bool { return false })
+
+	// Subscription created while off: ProxyIndex stays -1.
+	sub, _ := store.Create(CreateInput{Label: "a", URL: "http://x", Enabled: true})
+	_ = store.SetListenPort(sub.ID, 11001)
+
+	newLabel := "renamed"
+	if _, err := svc.Update(sub.ID, UpdatePatch{Label: &newLabel}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if len(mutator.ensuredProxies) != 0 {
+		t.Errorf("relabel must not call EnsureProxy when off / ProxyIndex<0, got %d", len(mutator.ensuredProxies))
 	}
 }
 
@@ -427,6 +583,11 @@ func TestService_SetActiveMember_UsesClashAPI(t *testing.T) {
 	}
 
 	secondMember := sub.MemberTags[1]
+	// Snapshot slot-mutation counts after Create; switching the active member
+	// must not touch the config slot at all (Clash + store only).
+	addedAfterCreate := len(mutator.addedOutbounds)
+	removedAfterCreate := len(mutator.removedOutbounds)
+
 	if err := svc.SetActiveMember(context.Background(), sub.ID, secondMember); err != nil {
 		t.Fatalf("SetActiveMember: %v", err)
 	}
@@ -440,9 +601,16 @@ func TestService_SetActiveMember_UsesClashAPI(t *testing.T) {
 		t.Errorf("clash select args wrong: got %q want %q", mutator.selectedSelector[0], expected)
 	}
 
-	// Verify Reload was NOT called for SetActiveMember (no connection-dropping SIGHUP).
-	// We verify this indirectly: the mutator's Reload is a no-op and SelectClashProxy
-	// is recorded; the key invariant is the config update + clash call both happen.
+	// Switching the active member is runtime-only: no selector Remove/Add, so
+	// no open batch and no SIGHUP. The slot's selector.default is rebuilt as
+	// first-member on every refresh anyway, so persisting it here is pointless;
+	// the choice lives in store.ActiveMember + the live Clash selector.
+	if len(mutator.addedOutbounds) != addedAfterCreate {
+		t.Errorf("SetActiveMember must not add outbounds, got %d new", len(mutator.addedOutbounds)-addedAfterCreate)
+	}
+	if len(mutator.removedOutbounds) != removedAfterCreate {
+		t.Errorf("SetActiveMember must not remove outbounds, got %d new", len(mutator.removedOutbounds)-removedAfterCreate)
+	}
 	stored, _ := store.Get(sub.ID)
 	if stored.ActiveMember != secondMember {
 		t.Errorf("store.ActiveMember=%q want %q", stored.ActiveMember, secondMember)

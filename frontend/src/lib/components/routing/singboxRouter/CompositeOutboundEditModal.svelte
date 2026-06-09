@@ -102,14 +102,28 @@
 	});
 
 	// Flat options with group labels for the Dropdown native grouping.
-	// Filter out tags already added so the user can't pick duplicates.
+	// Filter out tags already added so the user can't pick duplicates, and
+	// the group's own tag so it can't reference itself (self-reference
+	// FATALs sing-box with a circular-dependency error).
 	const memberDropdownOptions = $derived<DropdownOption[]>(
 		outboundOptions.flatMap((g) =>
 			g.items
-				.filter((i) => !members.includes(i.value))
+				.filter((i) => !members.includes(i.value) && i.value !== tag.trim())
 				.map((i) => ({ value: i.value, label: i.label, group: g.group }))
 		)
 	);
+
+	// Advisory: warn when the group's tag matches an existing outbound's
+	// display name (e.g. a composite named "DE" like the AWG tunnel "DE").
+	// Tags are the real identifier, so this is not an error — but the name
+	// clash is exactly what leads users to add the wrong "DE" as a member.
+	const tagCollision = $derived.by(() => {
+		const t = tag.trim();
+		if (!t) return false;
+		return outboundOptions.some((g) =>
+			g.items.some((i) => i.value !== t && i.label.replace(/\s*\(.*\)\s*$/, '') === t)
+		);
+	});
 
 	// Default-picker options: only members already chosen. Подписочные
 	// тэги (sub-XXX-YYY) и awg-XXX тэги резолвим в человеческие labels —
@@ -209,6 +223,9 @@
 		<label class="field">
 			<div class="lbl">Tag (имя)</div>
 			<input bind:value={tag} placeholder="fast-de" />
+			{#if tagCollision}
+				<div class="tag-warn">⚠ Имя совпадает с именем существующего туннеля — их легко перепутать в списке участников. Лучше дать группе отличающееся имя.</div>
+			{/if}
 		</label>
 
 		{#if type !== 'direct'}
@@ -318,6 +335,13 @@
 		padding: 0.5rem 0.75rem;
 		border-radius: 4px;
 		line-height: 1.5;
+	}
+
+	.tag-warn {
+		margin-top: 0.35rem;
+		font-size: 0.75rem;
+		line-height: 1.4;
+		color: var(--warning, #d97706);
 	}
 	.field {
 		display: grid;

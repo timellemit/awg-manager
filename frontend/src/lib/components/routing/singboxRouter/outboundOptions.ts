@@ -11,6 +11,7 @@ export function buildOutboundOptions(
 	composite: SingboxRouterOutbound[] | undefined | null,
 	includeSpecial = true,
 	subscriptions: Subscription[] | undefined | null = null,
+	excludeTag: string | null = null,
 ): OutboundGroup[] {
 	// Stores may yield undefined before initial load completes; treat as empty
 	// to avoid breaking the dropdown render. Same pattern as defensive `?? []`
@@ -75,6 +76,16 @@ export function buildOutboundOptions(
 				return { value: o.tag, label: `${o.tag} (${o.type})` };
 			}),
 		});
+	}
+
+	// Exclude one tag (the outbound being edited) so a composite can never
+	// be offered as a member of itself — a self-reference FATALs sing-box
+	// with a circular-dependency error. Empty groups are dropped.
+	const exclude = excludeTag?.trim();
+	if (exclude) {
+		return groups
+			.map((g) => ({ ...g, items: g.items.filter((i) => i.value !== exclude) }))
+			.filter((g) => g.items.length > 0);
 	}
 
 	return groups;

@@ -315,6 +315,22 @@ export interface WireguardServer {
 	publicKey: string;
 	listenPort: number;
 	peers: WireguardServerPeer[];
+	natEnabled?: boolean;
+	natMode?: 'full' | 'internet-only' | 'none';
+	policy?: string;
+	keenDnsDomain?: string;
+	builtIn?: boolean;
+	/**
+	 * False when the backend failed to read NAT mode / policy from NDMS
+	 * (e.g. transient router error). When false, natMode/policy are NOT
+	 * trustworthy and the UI must show an "unknown" state rather than the
+	 * zero-valued 'none'. Absent (legacy/managed) is treated as known.
+	 */
+	natModeKnown?: boolean;
+	policyKnown?: boolean;
+	/** NDMS admin intent (conf layer running). Prefer over status/connected for toggles. */
+	enabled?: boolean;
+	enabledKnown?: boolean;
 }
 
 export interface WireguardServerPeer {
@@ -327,6 +343,7 @@ export interface WireguardServerPeer {
 	lastHandshake: string;
 	online: boolean;
 	enabled: boolean;
+	confAvailable?: boolean;
 }
 
 export interface WireguardServerConfig {

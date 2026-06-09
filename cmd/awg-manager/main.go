@@ -647,6 +647,11 @@ func main() {
 	sysfsTrafficPoller.Start()
 
 	orch.SetEventBus(eventBus)
+	// Refresh the NDMS interface cache when a kernel tunnel is confirmed up:
+	// OpkgTun iflayerchanged hooks are unreliable, so the cache otherwise keeps
+	// a frozen "down" snapshot and policy/WAN/all-interface lists misreport the
+	// tunnel as down (#328). Async — Invalidate does a blocking HTTP.
+	orch.SetInterfaceInvalidator(func(name string) { go ndmsQueries.Interfaces.Invalidate(name) })
 	loggingService.SetEventBus(eventBus)
 	tunnelService.SetEventBus(eventBus)
 	pingCheckFacade.SetEventBus(eventBus)
@@ -778,10 +783,18 @@ func main() {
 	}
 	subSvc := subscription.NewService(subStore, subAdapter)
 	subSvc.SetAppLogger(loggingService)
+	// Gate subscription ProxyN creation on the global toggle (same flag the
+	// Operator uses for tunnels) so disabling it stops subscriptions from
+	// creating NDMS Proxy interfaces too.
+	subSvc.SetNDMSProxyEnabled(settingsStore.IsSingboxNDMSProxyEnabled)
 
 	// Let NDMS-proxy enable/disable + orphan cleanup manage subscription
 	// composite proxies (a set separate from Tunnels()).
 	singboxOp.SetSubscriptionProxySet(subProxySet{store: subStore})
+	// On MigrateOn, reconcile subscription proxies through the service so
+	// subscriptions created while the toggle was off get a freshly allocated
+	// ProxyN (not just the already-indexed ones).
+	singboxOp.SetSubscriptionProxySync(subSvc.SyncProxies)
 
 	// Wire orchestrator into Operator so ApplyConfig writes 10-tunnels.json
 	// through SlotTunnels rather than an in-place write that bypasses

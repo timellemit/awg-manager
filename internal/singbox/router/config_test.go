@@ -2,6 +2,7 @@ package router
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -334,5 +335,94 @@ func TestValidateOutbound_CompositeStillWorks(t *testing.T) {
 	}
 	if err := validateOutbound(Outbound{Type: "urltest", Tag: "g"}); err == nil {
 		t.Error("composite without members should fail")
+	}
+}
+
+func TestValidateOutbound_RejectsSelfReference(t *testing.T) {
+	o := Outbound{Type: "urltest", Tag: "DE", Outbounds: []string{"awg-awg10", "DE"}}
+	if err := validateOutbound(o); err == nil {
+		t.Error("composite listing its own tag as a member must be rejected")
+	}
+}
+
+func TestValidateNoCompositeCycles(t *testing.T) {
+	cases := []struct {
+		name      string
+		outbounds []Outbound
+		wantErr   bool
+	}{
+		{
+			name:      "self reference",
+			outbounds: []Outbound{{Type: "urltest", Tag: "DE", Outbounds: []string{"awg-awg10", "DE"}}},
+			wantErr:   true,
+		},
+		{
+			name: "two node cycle",
+			outbounds: []Outbound{
+				{Type: "selector", Tag: "A", Outbounds: []string{"B"}},
+				{Type: "selector", Tag: "B", Outbounds: []string{"A"}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "valid dag",
+			outbounds: []Outbound{
+				{Type: "selector", Tag: "A", Outbounds: []string{"B", "awg-x"}},
+				{Type: "urltest", Tag: "B", Outbounds: []string{"awg-y"}},
+			},
+			wantErr: false,
+		},
+		{
+			name: "leaf members only",
+			outbounds: []Outbound{
+				{Type: "urltest", Tag: "DE", Outbounds: []string{"awg-awg10", "sub-9a40a86d"}},
+			},
+			wantErr: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateNoCompositeCycles(tc.outbounds)
+			if tc.wantErr && err == nil {
+				t.Errorf("expected cycle error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestAddCompositeOutbound_RejectsSelfReference(t *testing.T) {
+	cfg := &RouterConfig{Outbounds: []Outbound{}}
+	err := cfg.AddCompositeOutbound(Outbound{Type: "urltest", Tag: "DE", Outbounds: []string{"awg-awg10", "DE"}})
+	if err == nil {
+		t.Fatal("self-referential composite must be rejected")
+	}
+	if len(cfg.Outbounds) != 0 {
+		t.Errorf("rejected outbound must not be persisted, got %d", len(cfg.Outbounds))
+	}
+}
+
+func TestUpdateCompositeOutbound_MissingTagReturnsNotFound(t *testing.T) {
+	cfg := &RouterConfig{Outbounds: []Outbound{}}
+	err := cfg.UpdateCompositeOutbound("nope", Outbound{Type: "selector", Tag: "nope", Outbounds: []string{"a", "b"}})
+	if !errors.Is(err, ErrOutboundNotFound) {
+		t.Fatalf("expected ErrOutboundNotFound, got %v", err)
+	}
+	if errors.Is(err, ErrOutboundTagConflict) {
+		t.Error("missing-tag update must not surface as a tag conflict")
+	}
+}
+
+func TestUpdateCompositeOutbound_RejectsCycle(t *testing.T) {
+	cfg := &RouterConfig{Outbounds: []Outbound{
+		{Type: "selector", Tag: "A", Outbounds: []string{"awg-x"}},
+		{Type: "selector", Tag: "B", Outbounds: []string{"A"}},
+	}}
+	// Updating A to point back at B closes an A->B->A cycle.
+	err := cfg.UpdateCompositeOutbound("A", Outbound{Type: "selector", Tag: "A", Outbounds: []string{"B"}})
+	if err == nil {
+		t.Fatal("update closing a cycle must be rejected")
 	}
 }

@@ -14,11 +14,13 @@
 		PeerConfModal,
 		PeerSortControls,
 		ManagedPeerTable,
+		ServerAccessPolicyDropdown,
 	} from '$lib/components/servers';
 	import { comparePeerFieldsDirected } from '$lib/utils/peerSort';
 	import { peerSort } from '$lib/stores/peerSort';
-	import { isStandardAccessPolicyName } from '$lib/utils/accessPolicy';
 	import { classifyAwgVersionFromAsc } from '$lib/utils/classifyAwgVersion';
+	import { formatSubnetPlaceholder, maskToPrefix, resolveNatMode, type NatMode } from '$lib/utils/network';
+	import { countActiveManagedPeers } from '$lib/utils/serverPeerActivity';
 
 	interface Props {
 		server: ManagedServer;
@@ -47,7 +49,6 @@
 	let confPeerName = $state('');
 	let deleting = $state(false);
 	let confirmDelete = $state(false);
-	let confirmDeletePeerKey = $state<string | null>(null);
 
 	let searchQuery = $state('');
 
@@ -58,8 +59,7 @@
 	let sortedPeers = $derived.by(() => {
 		let peers = server.peers ?? [];
 
-		// Filter (only when search is rendered: 5+ peers)
-		if (searchQuery && peers.length >= 5) {
+		if (searchQuery) {
 			const q = searchQuery.toLowerCase();
 			peers = peers.filter(p =>
 				(p.description || '').toLowerCase().includes(q) ||
@@ -100,10 +100,12 @@
 		return sorted;
 	});
 
-	let onlineCount = $derived(stats?.peers?.filter(p => p.online).length ?? 0);
+	let onlineCount = $derived(countActiveManagedPeers(server.peers, stats?.peers));
+	let statusUnknown = $derived(stats === null);
 	let isUp = $derived(stats?.status === 'up');
 	let totalRx = $derived(stats?.peers?.reduce((sum, p) => sum + p.rxBytes, 0) ?? 0);
 	let totalTx = $derived(stats?.peers?.reduce((sum, p) => sum + p.txBytes, 0) ?? 0);
+	let togglingPeerKeys = $state(new Set<string>());
 
 	async function handleDeleteServer() {
 		if (!confirmDelete) {
@@ -126,37 +128,34 @@
 	}
 
 	async function handleTogglePeer(peer: ManagedPeer) {
+		if (togglingPeerKeys.has(peer.publicKey)) return;
+		togglingPeerKeys = new Set(togglingPeerKeys).add(peer.publicKey);
 		try {
 			const fresh = await api.toggleManagedPeer(serverId, peer.publicKey, !peer.enabled);
 			servers.applyMutationResponse(fresh);
 			onUpdated();
 		} catch (e) {
 			notifications.error(e instanceof Error ? e.message : 'Ошибка');
+		} finally {
+			const next = new Set(togglingPeerKeys);
+			next.delete(peer.publicKey);
+			togglingPeerKeys = next;
 		}
 	}
 
-	function handleDeletePeerClick(peer: ManagedPeer) {
-		if (confirmDeletePeerKey === peer.publicKey) {
-			doDeletePeer(peer);
-		} else {
-			confirmDeletePeerKey = peer.publicKey;
-			setTimeout(() => {
-				if (confirmDeletePeerKey === peer.publicKey) {
-					confirmDeletePeerKey = null;
-				}
-			}, 3000);
-		}
+	function isPeerToggling(publicKey: string): boolean {
+		return togglingPeerKeys.has(publicKey);
 	}
 
 	async function doDeletePeer(peer: ManagedPeer) {
 		try {
-			confirmDeletePeerKey = null;
 			const fresh = await api.deleteManagedPeer(serverId, peer.publicKey);
 			servers.applyMutationResponse(fresh);
 			notifications.success('Клиент удалён');
 			onUpdated();
 		} catch (e) {
 			notifications.error(e instanceof Error ? e.message : 'Ошибка удаления');
+			throw e;
 		}
 	}
 
@@ -165,15 +164,12 @@
 		editPeerOpen = true;
 	}
 
-	function maskToPrefix(mask: string): string {
-		if (/^\d+$/.test(mask)) return mask;
-		const parts = mask.split('.').map(Number);
-		let bits = 0;
-		for (const p of parts) {
-			bits += (p >>> 0).toString(2).split('1').length - 1;
-		}
-		return String(bits);
-	}
+	const WAN_IP_MASKED = 'показать';
+
+	let wanIP = $state('');
+	let showWanIP = $state(false);
+	let lanRouterLabel = $derived(routerIP ? ` (${routerIP})` : '');
+	let vpnSubnetLabel = $derived(formatSubnetPlaceholder(server.address, server.mask));
 
 	let togglingEnabled = $state(false);
 	let restartingServer = $state(false);
@@ -209,9 +205,7 @@
 	let togglingNAT = $state(false);
 	let togglingIngress = $state(false);
 
-	let natMode = $derived<'full' | 'internet-only' | 'none'>(
-		server.natMode ?? (server.natEnabled ? 'full' : 'none')
-	);
+	let natMode = $derived<NatMode>(resolveNatMode(server.natMode, server.natEnabled));
 
 	const natModeOptions: DropdownOption<'full' | 'internet-only' | 'none'>[] = [
 		{ value: 'full', label: 'Полный NAT' },
@@ -263,31 +257,33 @@
 		confModalOpen = true;
 	}
 
-	let policies = $state<{ id: string; description: string }[]>([]);
 	let policyChanging = $state(false);
-	// Local mirror of server.policy for the <select>. On error we reset
-	// it back to server.policy so the DOM reverts — without this the
-	// browser keeps the failed value because no fresh snapshot arrives.
-	// Empty initial value is overwritten by the $effect on mount before
-	// the select is interactive.
-	let selectedPolicy = $state('');
 	let ascParams = $state<ASCParams | null>(null);
-
-	$effect(() => {
-		selectedPolicy = server.policy;
-	});
+	let ascLoadedFor = $state('');
 
 	$effect(() => {
 		const id = server.interfaceName;
+		if (ascLoadedFor === id) return;
+
+		if (ascLoadedFor && ascLoadedFor !== id) {
+			ascParams = null;
+			ascLoadedFor = '';
+		}
+
 		let cancelled = false;
-		ascParams = null;
 
 		void (async () => {
 			try {
 				const params = await api.getManagedServerASC(id);
-				if (!cancelled) ascParams = params;
+				if (!cancelled) {
+					ascParams = params;
+					ascLoadedFor = id;
+				}
 			} catch {
-				if (!cancelled) ascParams = null;
+				if (!cancelled) {
+					ascParams = null;
+					ascLoadedFor = '';
+				}
 			}
 		})();
 
@@ -299,30 +295,8 @@
 	let awgVersion = $derived(classifyAwgVersionFromAsc(ascParams));
 
 	onMount(async () => {
-		try {
-			policies = await api.getManagedServerPolicies();
-		} catch {
-			policies = [];
-		}
+		void api.getWANIP().then((ip) => { wanIP = ip; }).catch(() => {});
 	});
-
-	let orphanedPolicy = $derived.by(() => {
-		const p = server.policy;
-		if (!p || p === 'none' || p === 'permit' || p === 'deny') return null;
-		if (policies.some(o => o.id === p)) return null;
-		return p;
-	});
-
-	let standardPolicies = $derived(policies.filter((p) => isStandardAccessPolicyName(p.id)));
-
-	let policyOptions = $derived<DropdownOption[]>([
-		{ value: 'none', label: 'Политика по умолчанию' },
-		...(orphanedPolicy ? [{ value: orphanedPolicy, label: `${orphanedPolicy} (отсутствует)` }] : []),
-		...standardPolicies.map((p) => ({
-			value: p.id,
-			label: p.description ? `${p.id} — ${p.description}` : p.id,
-		})),
-	]);
 
 	async function handlePolicyChange(newPolicy: string) {
 		if (newPolicy === server.policy) return;
@@ -333,14 +307,13 @@
 			notifications.success('Политика обновлена');
 		} catch (e) {
 			notifications.error(e instanceof Error ? e.message : 'Ошибка изменения политики');
-			selectedPolicy = server.policy;
 		} finally {
 			policyChanging = false;
 		}
 	}
 </script>
 
-<div class="card managed-card" class:status-up={isUp}>
+<div class="card server-detail-card managed-card" class:status-up={isUp}>
 	<!-- Header -->
 	<div class="card-header">
 		<div class="header-info">
@@ -349,7 +322,7 @@
 					<Toggle
 						checked={isUp}
 						onchange={handleToggleEnabled}
-						disabled={togglingEnabled || restartingServer}
+						disabled={togglingEnabled || restartingServer || statusUnknown}
 						size="sm"
 						spinner="none"
 					/>
@@ -377,20 +350,22 @@
 		<div class="header-right">
 			<div class="header-actions">
 			<Button
-				variant="ghost"
+				variant="secondary"
 				size="sm"
 				onclick={handleRestartOrStart}
 				disabled={restartingServer || togglingEnabled || deleting}
 				loading={restartingServer}
 				iconBefore={restartIcon}
-				title={isUp
-					? `Перезапустить сервер «${serverDisplayName}»`
-					: `Запустить сервер «${serverDisplayName}»`}
+				title={statusUnknown
+					? `Статус сервера «${serverDisplayName}» загружается`
+					: isUp
+						? `Перезапустить сервер «${serverDisplayName}»`
+						: `Запустить сервер «${serverDisplayName}»`}
 			>
-				{isUp ? 'Рестарт' : 'Запуск'}
+				{statusUnknown ? 'Рестарт' : isUp ? 'Рестарт' : 'Запуск'}
 			</Button>
 			<Button
-				variant="ghost"
+				variant="secondary"
 				size="sm"
 				onclick={onOpenASC}
 				iconBefore={ascIcon}
@@ -399,7 +374,7 @@
 				Обфускация
 			</Button>
 			<Button
-				variant="ghost"
+				variant="secondary"
 				size="sm"
 				onclick={() => editServerOpen = true}
 				iconBefore={settingsIcon}
@@ -438,10 +413,16 @@
 		<div class="setting-row">
 			<div class="setting-copy">
 				<span class="setting-title">NAT</span>
-				{#if natMode === 'internet-only'}
-					<span class="setting-description">реальный IP клиента в LAN, NAT только в интернет</span>
+				{#if natMode === 'full'}
+					<span class="setting-description">
+						Клиент выходит в интернет с внешним IP {@render wanIpButton()}. В LAN виден не как отдельное устройство, а как роутер{lanRouterLabel}.
+					</span>
+				{:else if natMode === 'internet-only'}
+					<span class="setting-description">
+						Клиент выходит в интернет с внешним IP {@render wanIpButton()}, в LAN виден со своим VPN-адресом ({vpnSubnetLabel}).
+					</span>
 				{:else}
-					<span class="setting-description">Трансляция адресов для выхода клиентов в интернет</span>
+					<span class="setting-description">Выхода в интернет для клиента нет (без дополнительной подмены адреса), в LAN виден со своим VPN-адресом ({vpnSubnetLabel}).</span>
 				{/if}
 				{#if ingressEnabled && natMode === 'full'}
 					<span class="setting-description setting-description-warning">NAT для интернета не действует — интернет-трафик идёт через sing-box (туннель); режим NAT влияет только на видимость в LAN</span>
@@ -461,7 +442,7 @@
 		<div class="setting-row">
 			<div class="setting-copy">
 				<span class="setting-title">Доступ в LAN</span>
-				<span class="setting-description">Сегменты LAN, доступные клиентам этого сервера</span>
+				<span class="setting-description">Сегменты LAN, доступные клиентам этого сервера.</span>
 			</div>
 			<div class="setting-control">
 				<ChipMultiSelect values={server.lanSegments ?? []} options={lanSegmentOptions} onchange={handleSetLANSegments} disabled={settingLAN} />
@@ -471,28 +452,18 @@
 		<div class="setting-row setting-row-toggle">
 			<div class="setting-copy">
 				<span class="setting-title">Маршрутизация через sing-box</span>
-				<span class="setting-description">Заворачивать интернет-трафик клиентов данного сервера в sing-box</span>
+				<span class="setting-description">Заворачивать интернет-трафик клиентов данного сервера в sing-box.</span>
 			</div>
 			<div class="setting-control setting-control-toggle">
-				<Toggle checked={ingressEnabled} onchange={handleToggleIngress} disabled={togglingIngress} spinner="after" />
+				<Toggle checked={ingressEnabled} onchange={handleToggleIngress} disabled={togglingIngress} spinner="before" />
 			</div>
 		</div>
 
-		<div class="setting-row">
-			<div class="setting-copy">
-				<span class="setting-title">Политика доступа</span>
-				<span class="setting-description">Регулирует выход в интернет для клиентов сервера. Применяется ко всем клиентам этого сервера.</span>
-			</div>
-			<div class="setting-control">
-				<Dropdown
-					value={selectedPolicy}
-					options={policyOptions}
-					disabled={policyChanging}
-					onchange={handlePolicyChange}
-					fullWidth
-				/>
-			</div>
-		</div>
+		<ServerAccessPolicyDropdown
+			policy={server.policy}
+			disabled={policyChanging}
+			onchange={handlePolicyChange}
+		/>
 	</div>
 
 	<!-- Peers -->
@@ -502,7 +473,7 @@
 			<div class="peers-controls">
 				<PeerSortControls
 					bind:searchQuery
-					showSearch={(server.peers ?? []).length >= 5}
+					showSearch={(server.peers ?? []).length > 0}
 					hideSortOnDesktop
 				/>
 				<Button variant="secondary" size="sm" onclick={() => addPeerOpen = true} iconBefore={addPeerIcon}>
@@ -517,15 +488,28 @@
 			<ManagedPeerTable
 				peers={sortedPeers}
 				{getPeerStats}
-				{confirmDeletePeerKey}
 				onTogglePeer={handleTogglePeer}
+				{isPeerToggling}
 				onOpenConf={openConf}
 				onOpenEditPeer={openEditPeer}
-				onDeletePeerClick={handleDeletePeerClick}
+				onDeletePeer={doDeletePeer}
 			/>
 		{/if}
 	</div>
 </div>
+
+{#snippet wanIpButton()}
+	<button
+		type="button"
+		class="wan-ip-reveal mono"
+		onclick={() => (showWanIP = !showWanIP)}
+		title={showWanIP && wanIP ? wanIP : 'Показать внешний IP'}
+		aria-label={showWanIP ? 'Скрыть внешний IP' : 'Показать внешний IP'}
+		aria-pressed={showWanIP}
+	>
+		({showWanIP && wanIP ? wanIP : WAN_IP_MASKED})
+	</button>
+{/snippet}
 
 <!-- Modals -->
 <EditManagedServerModal
@@ -586,72 +570,9 @@
 
 
 <style>
-	.managed-card {
-		display: flex;
-		flex-direction: column;
-		--managed-section-gap: 0.625rem;
-		gap: var(--managed-section-gap);
-		border-color: var(--accent);
-	}
-
-	.card-header {
-		display: flex;
-		flex-wrap: wrap;
-		justify-content: space-between;
-		align-items: flex-start;
-		gap: 1rem;
-		margin-bottom: 0;
-		padding-bottom: 0;
-		border-bottom: none;
-	}
-
-	.header-info {
-		display: flex;
-		flex-direction: column;
-		gap: 0.375rem;
-		flex: 1 1 265px;
-		min-width: 265px;
-		max-width: 100%;
-	}
-
-	.title-row {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		column-gap: 0.5rem;
-		row-gap: 0.375rem;
-		min-width: 0;
-	}
-
-	.title-main {
-		display: flex;
-		align-items: center;
-		gap: 0.5rem;
-		min-width: 0;
-		flex: 0 1 auto;
-		max-width: 100%;
-	}
-
-	.title-main :global(.toggle-container) {
-		flex-shrink: 0;
-		display: inline-flex;
-		align-items: center;
-		align-self: center;
-	}
-
 	.title-badges {
-		display: inline-flex;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: 0.375rem;
 		flex: 1 1 auto;
 		min-width: fit-content;
-	}
-
-	.card-title {
-		font-size: 1.125rem;
-		font-weight: 600;
-		min-width: 0;
 	}
 
 	.badge-managed {
@@ -665,251 +586,35 @@
 		color: var(--accent);
 	}
 
-	.server-meta {
-		display: flex;
-		align-items: center;
-		gap: 0.75rem;
-		flex-wrap: wrap;
+	.wan-ip-reveal {
+		display: inline;
+		padding: 0;
+		margin: 0;
+		border: none;
+		background: none;
+		font: inherit;
+		font-size: inherit;
+		line-height: inherit;
+		color: var(--text-secondary);
+		cursor: pointer;
+		text-decoration: none;
+		vertical-align: baseline;
+		-webkit-tap-highlight-color: transparent;
 	}
 
-	.meta {
-		font-size: 0.75rem;
-		color: var(--text-muted);
-	}
-
-	.mono {
-		font-family: var(--font-mono, monospace);
-	}
-
-	.header-right {
-		display: flex;
-		flex-wrap: nowrap;
-		align-items: center;
-		justify-content: flex-end;
-		gap: 0.5rem;
-		flex: 0 0 auto;
-		margin-left: auto;
-	}
-
-	.header-actions {
-		display: flex;
-		flex-wrap: nowrap;
-		align-items: center;
-		justify-content: flex-end;
-		gap: 0.25rem;
-		flex: 0 0 auto;
-	}
-
-	.server-settings {
-		background: var(--color-bg-tertiary);
-		border: 1px solid var(--border);
-		border-radius: var(--radius-sm);
-		padding: 0 0.875rem;
-		margin-top: 0.5rem;
-		min-width: 0;
-	}
-
-	.server-settings .setting-row:first-child {
-		padding-top: 0.875rem;
-	}
-
-	.server-settings .setting-row:last-child {
-		padding-bottom: 0.875rem;
-	}
-
-	.setting-copy {
-		display: flex;
-		flex-direction: column;
-		gap: 0.125rem;
-		min-width: 0;
-	}
-
-	.setting-title {
-		font-size: 0.875rem;
-		font-weight: 500;
+	.wan-ip-reveal:hover {
 		color: var(--text-primary);
 	}
 
-	.setting-description-warning {
-		color: var(--warning, #f59e0b);
-	}
-
-	.setting-control {
-		width: 100%;
-		min-width: 0;
-		max-width: 280px;
-		justify-self: end;
-	}
-
-	.setting-control :global(.dropdown),
-	.setting-control :global(.field),
-	.setting-control :global(.picker) {
-		width: 100%;
-		min-width: 0;
-	}
-
-	.setting-control-toggle {
-		width: auto;
-		max-width: none;
-		justify-self: end;
-		align-self: center;
-	}
-
-	.setting-row-toggle {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) auto;
-		align-items: center;
-		gap: 0.75rem;
-	}
-
-	.setting-row-toggle .setting-copy {
-		min-width: 0;
-	}
-
-	.server-settings :global(.field .trigger) {
-		background: var(--color-settings-surface-bg);
-		border-color: var(--color-border);
-	}
-
-	.server-settings :global(.field .trigger:hover:not(:disabled)) {
-		background: var(--color-bg-hover);
+	.wan-ip-reveal:focus-visible {
+		outline: 2px solid var(--accent);
+		outline-offset: 2px;
+		border-radius: 2px;
 	}
 
 	.server-settings :global(.picker .chips) {
 		background: var(--color-settings-surface-bg);
 		border-color: var(--color-border);
 		border-radius: var(--radius-sm);
-	}
-
-	.server-settings :global(.toggle-container .toggle-slider) {
-		background: var(--color-settings-surface-bg);
-	}
-
-	.server-settings :global(.toggle-container:hover input:not(:checked) ~ .toggle-slider) {
-		background: var(--color-bg-hover);
-	}
-
-	@media (min-width: 641px) {
-		.server-settings .setting-row {
-			display: grid;
-			grid-template-columns: minmax(0, 1fr) minmax(12rem, 280px);
-			align-items: start;
-			gap: 0.75rem;
-		}
-
-		.server-settings .setting-row-toggle {
-			grid-template-columns: minmax(0, 1fr) auto;
-			align-items: center;
-		}
-
-		.setting-control {
-			max-width: none;
-		}
-	}
-
-	.peers-section {
-		--peers-divider-gap: 1rem;
-		border-top: 1px solid var(--border);
-		padding-top: var(--peers-divider-gap);
-		margin-top: calc(var(--peers-divider-gap) - var(--managed-section-gap));
-	}
-
-	.peers-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		margin-bottom: 0.75rem;
-	}
-
-	.peers-controls {
-		display: flex;
-		align-items: center;
-		gap: 0.375rem;
-	}
-
-	.peers-title {
-		font-size: 0.875rem;
-		font-weight: 600;
-		color: var(--text-secondary);
-	}
-
-	.empty-peers {
-		padding: 1.5rem;
-		text-align: center;
-		font-size: 0.8125rem;
-		color: var(--text-muted);
-	}
-
-	@media (max-width: 640px) {
-		.peers-header {
-			flex-direction: column;
-			align-items: stretch;
-			gap: 0.5rem;
-		}
-
-		.peers-controls {
-			flex-wrap: wrap;
-		}
-
-		.peers-controls :global(.btn) {
-			width: 100%;
-		}
-
-		.card-header {
-			flex-direction: column;
-		}
-
-		.header-info {
-			flex: 1 1 auto;
-			min-width: 0;
-		}
-
-		.header-right {
-			width: 100%;
-			margin-left: 0;
-			flex-direction: column;
-			align-items: stretch;
-			gap: 0.5rem;
-		}
-
-		.setting-control {
-			max-width: none;
-		}
-
-		.header-actions {
-			align-self: stretch;
-			display: grid;
-			grid-template-columns: repeat(2, minmax(0, 1fr));
-			gap: 0.5rem;
-			width: 100%;
-		}
-
-		.header-actions :global(.btn) {
-			width: 100%;
-			min-width: 0;
-			justify-content: center;
-		}
-
-	}
-
-	@media (max-width: 640px) {
-		.managed-card {
-			overflow: hidden;
-		}
-
-		.peers-controls {
-			display: grid;
-			grid-template-columns: 1fr;
-			width: 100%;
-			gap: 0.4rem;
-		}
-
-		.peers-controls :global(.peer-sort-controls) {
-			width: 100%;
-		}
-
-		.peers-controls :global(.btn) {
-			width: 100%;
-		}
 	}
 </style>

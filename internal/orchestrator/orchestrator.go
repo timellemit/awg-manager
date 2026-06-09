@@ -89,6 +89,12 @@ type Orchestrator struct {
 
 	// clock returns current time; injectable for tests. nil → time.Now.
 	clock func() time.Time
+
+	// ifaceInvalidator, when set, refreshes the NDMS interface cache for a
+	// kernel tunnel's NDMS name on its confirmed "running" transition (#328).
+	// nil-safe. Production wires an async closure; the orchestrator calls it
+	// synchronously so async-ness stays a wiring detail (and tests deterministic).
+	ifaceInvalidator func(name string)
 }
 
 // New creates a new Orchestrator.
@@ -126,6 +132,10 @@ func (o *Orchestrator) SetClientRoute(cr ClientRouteExecutor) { o.clientRoute = 
 
 // SetEventBus sets the event bus for SSE publishing.
 func (o *Orchestrator) SetEventBus(bus *events.Bus) { o.bus = bus }
+
+// SetInterfaceInvalidator wires the NDMS interface-cache refresh invoked on a
+// kernel tunnel's confirmed "running" transition. nil-safe. See issue #328.
+func (o *Orchestrator) SetInterfaceInvalidator(fn func(name string)) { o.ifaceInvalidator = fn }
 
 // SetSupportsASC sets the ASC support flag.
 func (o *Orchestrator) SetSupportsASC(fn func() bool) {
@@ -433,6 +443,18 @@ func (o *Orchestrator) updateState(action Action) {
 				ID: t.ID, Name: t.Name, State: "running", Backend: t.Backend,
 			})
 			publishInvalidatedBus(o.bus, "tunnels", "state-running")
+			// Kernel tunnels: NDMS iflayerchanged hooks are unreliable for
+			// OpkgTun, so the cache invalidate done at InterfaceUp can snapshot
+			// a pre-"running" layer and then never get corrected — leaving
+			// List* readers (policies/WAN/all) with a frozen "down" (#328).
+			// Re-refresh now that the start sequence is fully complete and the
+			// layer has had time to settle. nwg self-invalidates on its own
+			// path (and uses a different NDMS name), so skip it.
+			if o.ifaceInvalidator != nil && t.Backend == "kernel" {
+				if ndmsName := tunnel.NewNames(t.ID).NDMSName; ndmsName != "" {
+					o.ifaceInvalidator(ndmsName)
+				}
+			}
 		case ActionStopKernel, ActionStopNativeWG, ActionSuspendProxy, ActionSuspendKernel:
 			o.bus.Publish("tunnel:state", events.TunnelStateEvent{
 				ID: t.ID, Name: t.Name, State: "stopped", Backend: t.Backend,

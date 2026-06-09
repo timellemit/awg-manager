@@ -17,6 +17,7 @@
 	import { singboxDelayFromHistory } from '$lib/utils/singboxDelay';
 	import { singboxDelayStatusDot } from '$lib/utils/statusDot';
 	import { resolveSubscriptionMemberTag } from '$lib/utils/subscriptionMember';
+	import { isCardNestedInteraction } from '$lib/utils/cardClick';
 	import TunnelDiagnosticsModal from '$lib/components/testing/TunnelDiagnosticsModal.svelte';
 
 	interface Props {
@@ -110,15 +111,13 @@
 			testingDelay = false;
 		}
 	}
-	function isNestedActionEvent(e: Event): boolean {
-		const target = e.target;
-		if (!(target instanceof HTMLElement)) return false;
-		return target.closest('button,a,input,select,textarea') !== null;
+	function open(e?: MouseEvent | KeyboardEvent): void {
+		if (e && isCardNestedInteraction(e)) return;
+		goto(`/subscriptions/${subscription.id}`);
 	}
 
-	function open(e?: MouseEvent | KeyboardEvent): void {
-		if (e && isNestedActionEvent(e)) return;
-		goto(`/subscriptions/${subscription.id}`);
+	function openSettings(): void {
+		goto(`/subscriptions/${subscription.id}?tab=settings`);
 	}
 
 	let diagnosticsOpen = $state(false);
@@ -244,7 +243,6 @@
 			<td
 				class="tunnel-list-cell tunnel-list-cell--traffic lc lc-traffic"
 				data-label="Трафик"
-				onclick={(e) => e.stopPropagation()}
 			>
 				{#if subscription.lastError || !subscription.enabled}
 					<span class="delay-dash">—</span>
@@ -264,7 +262,6 @@
 			<td
 				class="tunnel-list-cell tunnel-list-cell--ping lc"
 				data-label="Ping"
-				onclick={(e) => e.stopPropagation()}
 			>
 				{#if subscription.lastError || !subscription.enabled}
 					<span class="delay-dash">—</span>
@@ -282,12 +279,11 @@
 			<td
 				class="tunnel-list-cell tunnel-list-cell--actions lc lc-actions col-actions"
 				data-label=""
-				onclick={(e) => e.stopPropagation()}
 			>
 				<TunnelListActions
-					onEdit={() => open()}
-					editLabel="Открыть"
-					editTitle="Открыть подписку «{subscription.label || subscription.url}»"
+					onEdit={openSettings}
+					editLabel="Изменить"
+					editTitle="Настройки подписки «{subscription.label || subscription.url}»"
 					onTest={() => (diagnosticsOpen = true)}
 					testTitle="Открыть диагностику подписки «{subscription.label || subscription.url}»"
 					onDelete={ondelete ? () => ondelete(subscription.id) : undefined}
@@ -296,26 +292,24 @@
 			</td>
 	</tr>
 {:else if layout === 'dense' || renderMode === 'list-card'}
-{@const denseCardClickProps = renderMode === 'list-card'
-	? {}
-	: {
-			role: 'button' as const,
-			tabindex: 0,
-			onclick: (e: MouseEvent) => open(e),
-			onkeydown: (e: KeyboardEvent) => {
-				if (e.key === 'Enter' || e.key === ' ') {
-					e.preventDefault();
-					open(e);
-				}
-			},
-		}}
+{@const cardClickProps = {
+		role: 'button' as const,
+		tabindex: 0,
+		onclick: (e: MouseEvent) => open(e),
+		onkeydown: (e: KeyboardEvent) => {
+			if (e.key === 'Enter' || e.key === ' ') {
+				e.preventDefault();
+				open(e);
+			}
+		},
+	}}
 <div
 	class="card inactive-panel"
 	class:view-dense={renderMode !== 'list-card'}
 	class:view-list={renderMode === 'list-card'}
 	class:err={status === 'error'}
 	class:off={!subscription.enabled}
-	{...denseCardClickProps}
+	{...cardClickProps}
 >
 	<div class="inactive-header-dense">
 		<div class="inactive-header-main">
@@ -373,9 +367,9 @@
 	<div class="actions">
 		<TunnelListActions
 			variant="labeled"
-			onEdit={() => open()}
-			editLabel="Открыть"
-			editTitle="Открыть подписку «{subscription.label || subscription.url}»"
+			onEdit={openSettings}
+			editLabel="Изменить"
+			editTitle="Настройки подписки «{subscription.label || subscription.url}»"
 			onTest={() => (diagnosticsOpen = true)}
 			testTitle="Открыть диагностику подписки «{subscription.label || subscription.url}»"
 			onDelete={ondelete ? () => ondelete(subscription.id) : undefined}
@@ -389,6 +383,15 @@
 	class="card panel inactive-panel view-compact"
 	class:err={status === 'error'}
 	class:off={!subscription.enabled}
+	role="button"
+	tabindex="0"
+	onclick={(e) => open(e)}
+	onkeydown={(e) => {
+		if (e.key === 'Enter' || e.key === ' ') {
+			e.preventDefault();
+			open(e);
+		}
+	}}
 >
 	<div class="inactive-header">
 		<div class="inactive-header-main">
@@ -451,9 +454,9 @@
 	<div class="actions actions--bar-top">
 		<TunnelListActions
 			variant="labeled"
-			onEdit={() => open()}
-			editLabel="Открыть"
-			editTitle="Открыть подписку «{subscription.label || subscription.url}»"
+			onEdit={openSettings}
+			editLabel="Изменить"
+			editTitle="Настройки подписки «{subscription.label || subscription.url}»"
 			onTest={() => (diagnosticsOpen = true)}
 			testTitle="Открыть диагностику подписки «{subscription.label || subscription.url}»"
 			onDelete={ondelete ? () => ondelete(subscription.id) : undefined}
@@ -494,13 +497,17 @@
 	.card.panel {
 		gap: 0;
 		padding: 12px 14px;
-		cursor: default;
+	}
+	.card.panel.inactive-panel.view-compact {
+		cursor: pointer;
 	}
 	.card.panel.inactive-panel {
 		border: 1px dashed color-mix(in srgb, var(--color-text-muted) 38%, transparent);
 	}
-	.card.inactive-panel:hover {
-		border-color: var(--color-accent);
+	@media (hover: hover) and (pointer: fine) {
+		.card.inactive-panel:hover {
+			border-color: var(--color-accent-border);
+		}
 	}
 	.card.panel.inactive-panel.off {
 		opacity: 1;
@@ -517,7 +524,7 @@
 		color: inherit;
 	}
 	.card.view-list.inactive-panel {
-		cursor: default;
+		cursor: pointer;
 	}
 	.inactive-header-dense {
 		display: flex;
@@ -671,6 +678,7 @@
 		gap: 10px;
 		margin-top: 12px;
 		padding-top: 12px;
+		padding-bottom: 12px;
 		border-top: 1px solid var(--color-border);
 	}
 	.detail-row {

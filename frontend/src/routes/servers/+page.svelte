@@ -20,6 +20,16 @@
 		type RailItem,
 	} from '$lib/components/servers';
 	import { dedupBy } from '$lib/utils/dedupBy';
+	import { createIngressMutationLock } from '$lib/utils/ingressMutation';
+	import { countActiveManagedPeers, countActiveSystemPeers } from '$lib/utils/serverPeerActivity';
+	import { systemServerIsUp } from '$lib/utils/systemServerState';
+
+	const withIngressLock = createIngressMutationLock();
+
+	/** System servers in the rail are built-in VPN Server or user-marked interfaces only. */
+	function isMarkedSystemServer(server: { builtIn?: boolean; description: string }): boolean {
+		return !(server.builtIn ?? server.description === 'Wireguard VPN Server');
+	}
 
 	let unsub: (() => void) | undefined;
 	onMount(() => {
@@ -58,14 +68,30 @@
 		}
 	}
 
-	async function handleToggleIngress(interfaceName: string, enabled: boolean) {
-		const s = await api.singboxRouterGetSettings();
-		const set = new Set(s.ingressInterfaces ?? []);
-		const ref = `managed:${interfaceName}`;
-		if (enabled) set.add(ref); else set.delete(ref);
-		const next = [...set];
-		await api.singboxRouterPutSettings({ ...s, ingressInterfaces: next });
-		ingressRefs = next;
+	async function handleToggleManagedIngress(interfaceName: string, enabled: boolean) {
+		await withIngressLock(async () => {
+			const s = await api.singboxRouterGetSettings();
+			const set = new Set(s.ingressInterfaces ?? []);
+			const ref = `managed:${interfaceName}`;
+			if (enabled) set.add(ref);
+			else set.delete(ref);
+			const next = [...set];
+			await api.singboxRouterPutSettings({ ...s, ingressInterfaces: next });
+			ingressRefs = next;
+		});
+	}
+
+	async function handleToggleSystemIngress(interfaceName: string, enabled: boolean) {
+		await withIngressLock(async () => {
+			const s = await api.singboxRouterGetSettings();
+			const set = new Set(s.ingressInterfaces ?? []);
+			const ref = `iface:${interfaceName}`;
+			if (enabled) set.add(ref);
+			else set.delete(ref);
+			const next = [...set];
+			await api.singboxRouterPutSettings({ ...s, ingressInterfaces: next });
+			ingressRefs = next;
+		});
 	}
 
 	// ─── Rail item ids for managed servers ─────────────────────────
@@ -119,7 +145,7 @@
 				// hooks emit. Comparing against "running" never matched and
 				// flagged the rail item as stopped even on healthy servers.
 				status: stats?.status === 'up' ? 'running' : 'stopped',
-				peerActive: statsPeers.filter((p) => p.online).length,
+				peerActive: countActiveManagedPeers(mPeers, statsPeers),
 				peerCount: mPeers.length,
 				kind: 'managed',
 			});
@@ -131,9 +157,9 @@
 				name: s.description || s.interfaceName,
 				iface: s.interfaceName,
 				listenPort: s.listenPort,
-				status: s.status === 'up' ? 'running' : 'stopped',
+				status: systemServerIsUp(s) ? 'running' : 'stopped',
 				peerCount: sPeers.length,
-				peerActive: sPeers.filter((p) => p.rxBytes > 0 || p.txBytes > 0).length,
+				peerActive: countActiveSystemPeers(sPeers),
 				kind: 'system',
 			});
 		}
@@ -272,14 +298,16 @@
 						{routerIP}
 						onOpenASC={() => openManagedASC(activeManaged!.interfaceName)}
 						ingressEnabled={ingressRefs.includes(`managed:${activeManaged.interfaceName}`)}
-						onToggleIngress={handleToggleIngress}
+						onToggleIngress={handleToggleManagedIngress}
 						{lanSegmentOptions}
 					/>
 				{:else if activeItem?.kind === 'system' && activeServer}
 				<ServerCard
 					server={activeServer}
-					isBuiltIn={activeServer.description === 'Wireguard VPN Server'}
+					isMarked={isMarkedSystemServer(activeServer)}
 					onUnmark={unmarkServer}
+					ingressEnabled={ingressRefs.includes(`iface:${activeServer.interfaceName}`)}
+					onToggleIngress={handleToggleSystemIngress}
 				/>
 				{/if}
 			</main>

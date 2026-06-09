@@ -27,7 +27,14 @@ type ConfigMutator interface {
 	RemoveRouteRule(inboundTag, outboundTag string) error
 	EnsureProxy(ctx context.Context, idx, port int, description string) error
 	RemoveProxy(ctx context.Context, idx int) error
+	// Reload commits the batch of mutations since the last commit with a
+	// single validate+save+reload (#331). Mutations (Add*/Remove*/Update*)
+	// only accumulate in memory; nothing reaches sing-box until Reload.
 	Reload(ctx context.Context) error
+	// Rollback discards an uncommitted batch (mutations since the last
+	// commit), restoring the last committed config. Used on a failed Create
+	// so a partial materialisation can't linger in the in-memory slot.
+	Rollback()
 	// SelectClashProxy hits the running sing-box Clash API to switch the
 	// selector's active member at runtime, without rewriting config or
 	// triggering a reload. The config slot's stored selector.default
@@ -61,10 +68,96 @@ type Service struct {
 	fetchOpts FetchOpts
 	log       *logging.ScopedLogger // nil-safe; sing-box journal (runtime)
 	appLog    *logging.ScopedLogger // nil-safe; app journal (subscription partition)
+	// ndmsProxyEnabled mirrors Settings.CreateNDMSProxyForSingbox. When the
+	// closure is nil the service behaves as if enabled (back-compat for
+	// tests / legacy bootstrap), mirroring OperatorDeps.IsNDMSProxyEnabled.
+	ndmsProxyEnabled func() bool
 }
 
 func NewService(store *Store, mutator ConfigMutator) *Service {
 	return &Service{store: store, mutator: mutator}
+}
+
+// SetNDMSProxyEnabled wires the global "Create NDMS Proxy for sing-box"
+// toggle. When off, Create/Update do not register a ProxyN interface for
+// the subscription (ProxyIndex stays -1); SyncProxies (re-)creates them
+// when the toggle is turned back on.
+func (s *Service) SetNDMSProxyEnabled(fn func() bool) { s.ndmsProxyEnabled = fn }
+
+func (s *Service) proxyEnabled() bool {
+	if s.ndmsProxyEnabled == nil {
+		return true
+	}
+	return s.ndmsProxyEnabled()
+}
+
+// SyncProxies ensures every subscription has its NDMS ProxyN interface when
+// the global toggle is on. It is the toggle-ON counterpart to the gated
+// Create: subscriptions created while the toggle was off carry ProxyIndex=-1
+// and get a freshly allocated proxy here; subscriptions that already had one
+// (index retained across a toggle-off) are re-registered idempotently.
+//
+// Allocation is serialized (createMu) against Create. AllocProxyIndex scans
+// the live router without a reserved set, so two passes are required: first
+// re-register every subscription that already holds an index (occupying its
+// router slot), then allocate fresh indices for the proxy-less ones. Without
+// pass 1 a fresh allocation could land on a slot a retained subscription still
+// owns in the store but hasn't re-registered yet — store.List() order is
+// non-deterministic, so the proxy-less subscription is not reliably processed
+// last. Within pass 2 each proxy is committed via EnsureProxy before the next
+// index is allocated, for the same reason.
+func (s *Service) SyncProxies(ctx context.Context) error {
+	if !s.proxyEnabled() {
+		return nil
+	}
+	s.createMu.Lock()
+	defer s.createMu.Unlock()
+
+	subs := s.store.List()
+	// Pass 1: re-register retained indices so their router slots are occupied
+	// before pass 2 allocates.
+	for _, sub := range subs {
+		if sub.ListenPort == 0 || sub.ProxyIndex < 0 {
+			continue
+		}
+		mu := s.lockSub(sub.ID)
+		err := func() error {
+			mu.Lock()
+			defer mu.Unlock()
+			return s.mutator.EnsureProxy(ctx, sub.ProxyIndex, int(sub.ListenPort), sub.Label)
+		}()
+		if err != nil {
+			return fmt.Errorf("subscription %s: ensure proxy: %w", sub.ID, err)
+		}
+	}
+	// Pass 2: allocate a fresh ProxyN for subscriptions created while the
+	// toggle was off (ProxyIndex=-1). The live-router scan now sees the pass-1
+	// slots as taken, so no collision with a retained index.
+	for _, sub := range subs {
+		if sub.ListenPort == 0 || sub.ProxyIndex >= 0 {
+			continue
+		}
+		mu := s.lockSub(sub.ID)
+		err := func() error {
+			mu.Lock()
+			defer mu.Unlock()
+			idx, err := s.mutator.AllocProxyIndex(ctx)
+			if err != nil {
+				return fmt.Errorf("alloc proxy index: %w", err)
+			}
+			if err := s.mutator.EnsureProxy(ctx, idx, int(sub.ListenPort), sub.Label); err != nil {
+				return fmt.Errorf("ensure proxy: %w", err)
+			}
+			if err := s.store.SetProxyIndex(sub.ID, idx); err != nil {
+				return fmt.Errorf("persist proxy index: %w", err)
+			}
+			return nil
+		}()
+		if err != nil {
+			return fmt.Errorf("subscription %s: %w", sub.ID, err)
+		}
+	}
+	return nil
 }
 
 // SetAppLogger wires UI-visible logging for events outside of the
@@ -152,43 +245,49 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*Subscription, er
 		return nil, err
 	}
 
-	proxyIdx, err := s.mutator.AllocProxyIndex(ctx)
-	if err != nil {
-		s.store.Delete(sub.ID)
-		s.logWarn("subscription-create", sub.ID, "failed to allocate proxy index: "+err.Error())
-		return nil, fmt.Errorf("subscription: alloc proxy index: %w", err)
-	}
-	if err := s.store.SetProxyIndex(sub.ID, proxyIdx); err != nil {
-		s.store.Delete(sub.ID)
-		return nil, err
-	}
-	if err := s.mutator.EnsureProxy(ctx, proxyIdx, int(port), sub.Label); err != nil {
-		// Best-effort cleanup: EnsureProxy may have partially registered
-		// the interface before failing. RemoveProxy is idempotent.
-		_ = s.mutator.RemoveProxy(ctx, proxyIdx)
-		s.store.Delete(sub.ID)
-		s.logWarn("subscription-create", sub.ID, "failed to ensure NDMS proxy: "+err.Error())
-		return nil, fmt.Errorf("subscription: register NDMS proxy: %w", err)
+	// NDMS Proxy is only created when the global toggle is on. When off, the
+	// subscription stays proxy-less (ProxyIndex=-1) and routes via its mixed
+	// inbound + selector through the internal sing-box router; SyncProxies
+	// allocates the ProxyN later if the toggle is turned back on.
+	proxyIdx := -1
+	if s.proxyEnabled() {
+		idx, err := s.mutator.AllocProxyIndex(ctx)
+		if err != nil {
+			s.store.Delete(sub.ID)
+			s.logWarn("subscription-create", sub.ID, "failed to allocate proxy index: "+err.Error())
+			return nil, fmt.Errorf("subscription: alloc proxy index: %w", err)
+		}
+		if err := s.store.SetProxyIndex(sub.ID, idx); err != nil {
+			s.store.Delete(sub.ID)
+			return nil, err
+		}
+		proxyIdx = idx
+		if err := s.mutator.EnsureProxy(ctx, idx, int(port), sub.Label); err != nil {
+			// Best-effort cleanup: EnsureProxy may have partially registered
+			// the interface before failing. RemoveProxy is idempotent.
+			_ = s.mutator.RemoveProxy(ctx, idx)
+			s.store.Delete(sub.ID)
+			s.logWarn("subscription-create", sub.ID, "failed to ensure NDMS proxy: "+err.Error())
+			return nil, fmt.Errorf("subscription: register NDMS proxy: %w", err)
+		}
 	}
 
 	if _, err := s.refreshLocked(ctx, sub.ID); err != nil {
-		// refreshLocked commits to the slot incrementally (each AddOutbound
-		// flushes + persists), so a mid-failure may have already written
-		// member outbounds / selector / inbound / route to
-		// 40-subscriptions.json. Purge them — otherwise they linger as
-		// orphans referencing a subscription that is about to be deleted,
-		// and (issue #287) break every later flush. Reads the live slot via
-		// DeclaredOutboundTags since the store's MemberTags are not written
-		// on a failed refresh.
-		s.purgeCreatedSlotEntries(sub)
+		// refreshLocked accumulates member outbounds / selector / inbound /
+		// route into the in-memory slot but commits only at Reload (#331).
+		// On a mid-failure nothing was flushed to 40-subscriptions.json, so
+		// discard the uncommitted batch — otherwise the partial would linger
+		// in memory and get committed by the next operation (issue #287).
+		s.mutator.Rollback()
 		// EnsureProxy succeeded above — the NDMS Proxy interface is now
 		// live in the router. We must roll it back before dropping the
 		// storage row; otherwise every failed Create leaks a ProxyN that
 		// only the startup cleanup sweep would eventually reap. Swallow
 		// the RemoveProxy error: the storage row is going away regardless,
 		// and a stranded ProxyN is recoverable via Settings → cleanup.
-		_ = s.mutator.RemoveProxy(ctx, proxyIdx)
-		_ = s.mutator.Reload(ctx)
+		if proxyIdx >= 0 {
+			_ = s.mutator.RemoveProxy(ctx, proxyIdx)
+		}
 		s.store.Delete(sub.ID)
 		s.logWarn("subscription-create", sub.ID, "initial refresh failed: "+err.Error())
 		return nil, fmt.Errorf("subscription: initial fetch failed: %w", err)
@@ -384,25 +483,6 @@ func filterDeclaredMembers(members []MemberInfo, declared map[string]bool) (kept
 	return kept, dropped
 }
 
-// purgeCreatedSlotEntries removes everything a partial Create committed to the
-// subscription slot: member outbounds (enumerated from the live slot by the
-// subscription's tag prefix), the selector, the mixed inbound and the route
-// rule. Used to roll back a failed Create so it cannot leave orphans in
-// 40-subscriptions.json (issue #287). Reads the actual slot via
-// DeclaredOutboundTags rather than the store, because the store's MemberTags
-// are not written when refreshLocked fails mid-commit. The caller is
-// responsible for the subsequent Reload.
-func (s *Service) purgeCreatedSlotEntries(sub *Subscription) {
-	memberPrefix := sub.SelectorTag + "-" // "sub-<short>-"
-	for _, tag := range s.mutator.DeclaredOutboundTags() {
-		if tag == sub.SelectorTag || strings.HasPrefix(tag, memberPrefix) {
-			s.mutator.RemoveOutbound(tag)
-		}
-	}
-	s.mutator.RemoveInbound(sub.InboundTag)
-	s.mutator.RemoveRouteRule(sub.InboundTag, sub.SelectorTag)
-}
-
 // applyDiff commits the diff to sing-box config. Selector + mixed inbound +
 // route rule are recreated each refresh (they may not exist yet on first
 // run). Per-member outbounds are added/updated/left alone — orphans are NOT
@@ -587,11 +667,13 @@ func (s *Service) Update(id string, patch UpdatePatch) (*Subscription, error) {
 			return sub, fmt.Errorf("reload after mode change: %w", err)
 		}
 	}
-	if patch.Label != nil {
+	if patch.Label != nil && s.proxyEnabled() && sub.ProxyIndex >= 0 {
 		// EnsureProxy is idempotent — re-running with new description updates
 		// NDMS Proxy.description in place. Best-effort: on failure the store
 		// already has the new label, the proxy description stays stale until
 		// next refresh; we surface the error so the UI can show a warning.
+		// Skipped when the toggle is off or the subscription has no ProxyN
+		// (created while off): there is no interface to relabel.
 		if err := s.mutator.EnsureProxy(context.Background(), sub.ProxyIndex, int(sub.ListenPort), sub.Label); err != nil {
 			return sub, fmt.Errorf("sync proxy description: %w", err)
 		}
@@ -635,25 +717,18 @@ func (s *Service) SetActiveMember(ctx context.Context, id, memberTag string) err
 		return fmt.Errorf("member %q not in subscription", memberTag)
 	}
 
-	// 1. Update config slot's selector.default for restart persistence.
-	//    NOT followed by Reload — clash API handles the runtime switch.
-	//    For urltest mode: BuildURLTest ignores defaultTag (urltest has
-	//    no `default` field). The Clash API call below still pins the
-	//    chosen member as a temporary override until sing-box's next
-	//    auto-test interval, matching mihomo/sing-box semantics.
-	s.mutator.RemoveOutbound(sub.SelectorTag)
-	if err := s.mutator.AddOutbound(sub.SelectorTag, BuildGroupOutbound(*sub, sub.MemberTags, memberTag)); err != nil {
-		return err
-	}
-
-	// 2. Persist active member in store.
+	// Persist the choice in the store — the source of truth for the active
+	// member. The config slot is deliberately NOT rewritten: selector.default
+	// is rebuilt as first-member on every refresh, so persisting it here buys
+	// nothing, and a slot write without Reload would only leave an uncommitted
+	// batch open in the adapter.
 	if err := s.store.SetActiveMember(id, memberTag); err != nil {
 		return err
 	}
 
-	// 3. Hit Clash API for instant runtime switch — no SIGHUP, no connection
-	//    drop. If clash is unreachable (sing-box not running), return error but
-	//    config is already updated so a future restart will use the new default.
+	// Switch the live selector via the Clash API — instant, no SIGHUP, no
+	// connection drop. If clash is unreachable (sing-box not running) we return
+	// the error, but the store already holds the new active member.
 	if err := s.mutator.SelectClashProxy(sub.SelectorTag, memberTag); err != nil {
 		s.logWarn("subscription-active-member", id, "clash switch failed: "+err.Error())
 		return fmt.Errorf("subscription: clash select: %w", err)
