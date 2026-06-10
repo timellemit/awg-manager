@@ -15,7 +15,7 @@ describe('addWizardStore', () => {
     const m = await import('./addWizardStore');
     expect(get(m.addWizardOpen)).toBe(false);
     expect(get(m.wizardOutboundCategory)).toBe(null);
-    expect(get(m.wizardTunnelTag)).toBe(null);
+    expect(get(m.wizardTunnelTags)).toEqual([]);
     const c = get(m.wizardCustom);
     expect(c.rulesList).toBe('');
   });
@@ -31,12 +31,12 @@ describe('addWizardStore', () => {
     const m = await import('./addWizardStore');
     m.openAddWizard();
     m.setOutboundCategory('tunnel');
-    m.setTunnelTag('warp');
+    m.toggleTunnelTag('warp');
     m.updateCustomField('rulesList', 'a.com');
     m.closeAddWizard();
     expect(get(m.addWizardOpen)).toBe(false);
     expect(get(m.wizardOutboundCategory)).toBe(null);
-    expect(get(m.wizardTunnelTag)).toBe(null);
+    expect(get(m.wizardTunnelTags)).toEqual([]);
     expect(get(m.wizardCustom).rulesList).toBe('');
     expect(window.location.search).not.toContain('add=1');
   });
@@ -51,12 +51,22 @@ describe('addWizardStore', () => {
     expect(get(m.wizardOutboundCategory)).toBe(null);
   });
 
-  it('setTunnelTag updates', async () => {
+  it('toggleTunnelTag adds and removes', async () => {
     const m = await import('./addWizardStore');
-    m.setTunnelTag('warp');
-    expect(get(m.wizardTunnelTag)).toBe('warp');
-    m.setTunnelTag(null);
-    expect(get(m.wizardTunnelTag)).toBe(null);
+    m.toggleTunnelTag('warp');
+    expect(get(m.wizardTunnelTags)).toEqual(['warp']);
+    m.toggleTunnelTag('awg10');
+    expect(get(m.wizardTunnelTags)).toEqual(['warp', 'awg10']);
+    m.toggleTunnelTag('warp');
+    expect(get(m.wizardTunnelTags)).toEqual(['awg10']);
+  });
+
+  it('setTunnelTags replaces selection', async () => {
+    const m = await import('./addWizardStore');
+    m.setTunnelTags(['warp', 'awg10']);
+    expect(get(m.wizardTunnelTags)).toEqual(['warp', 'awg10']);
+    m.setTunnelTags([]);
+    expect(get(m.wizardTunnelTags)).toEqual([]);
   });
 
   it('updateCustomField пишет rulesList', async () => {
@@ -76,12 +86,12 @@ describe('addWizardStore', () => {
     const m = await import('./addWizardStore');
     m.openAddWizard();
     m.setOutboundCategory('tunnel');
-    m.setTunnelTag('warp');
+    m.toggleTunnelTag('warp');
     m.updateCustomField('rulesList', 'a.com');
     m.resetWizardState();
     expect(get(m.addWizardOpen)).toBe(true);
     expect(get(m.wizardOutboundCategory)).toBe(null);
-    expect(get(m.wizardTunnelTag)).toBe(null);
+    expect(get(m.wizardTunnelTags)).toEqual([]);
     expect(get(m.wizardCustom).rulesList).toBe('');
   });
 
@@ -97,7 +107,7 @@ describe('addWizardStore', () => {
       editMode: 'inline',
       rulesList: 'foo.com',
       outboundCategory: 'tunnel',
-      tunnelTag: 'warp',
+      tunnelTags: ['warp', 'awg10'],
       existingInlineRuleSetTag: 'custom-1',
       wasInlineText: false,
     });
@@ -108,7 +118,7 @@ describe('addWizardStore', () => {
     expect(get(m.wizardWasInlineText)).toBe(false);
     expect(get(m.wizardCustom).rulesList).toBe('foo.com');
     expect(get(m.wizardOutboundCategory)).toBe('tunnel');
-    expect(get(m.wizardTunnelTag)).toBe('warp');
+    expect(get(m.wizardTunnelTags)).toEqual(['warp', 'awg10']);
   });
 
   it('openEditWizard external mode', async () => {
@@ -117,7 +127,7 @@ describe('addWizardStore', () => {
       editMode: 'external',
       rulesList: '',
       outboundCategory: 'block',
-      tunnelTag: null,
+      tunnelTags: [],
       wasInlineText: false,
     });
     expect(get(m.wizardEditMode)).toBe('external');
@@ -130,7 +140,7 @@ describe('addWizardStore', () => {
       editMode: 'inline',
       rulesList: 'a.com',
       outboundCategory: 'direct',
-      tunnelTag: null,
+      tunnelTags: [],
       wasInlineText: true,
     });
     m.closeAddWizard();
@@ -145,7 +155,7 @@ describe('addWizardStore', () => {
       editMode: 'inline',
       rulesList: 'x.com',
       outboundCategory: 'tunnel',
-      tunnelTag: 'warp',
+      tunnelTags: ['warp'],
     });
     m.openAddWizard();
     expect(get(m.wizardEditRuleIndex)).toBe(null);

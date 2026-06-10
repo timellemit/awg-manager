@@ -1,7 +1,13 @@
-import type { SingboxRouterPreset, SingboxRouterRule, SingboxRouterRuleSet } from '$lib/types';
+import type {
+  SingboxRouterOutbound,
+  SingboxRouterPreset,
+  SingboxRouterRule,
+  SingboxRouterRuleSet,
+} from '$lib/types';
 import { stringifyInlineRuleListForWizard } from '$lib/utils/singboxInlineRules';
 import type { OutboundCategory } from './addWizardStore';
 import { classifyRuleSimplicity, templateIdForExternalRuleSetTag } from './simpleRule';
+import { isCompositeOutboundType } from './wizardCompositeOutbound';
 
 export type WizardEditMode = 'inline' | 'external';
 
@@ -11,24 +17,31 @@ export interface WizardPrefill {
   templateIds: string[];
   rulesList: string;
   outboundCategory: OutboundCategory;
-  tunnelTag: string | null;
+  tunnelTags: string[];
   /** Inline rule_set для update in-place (inline-set). */
   existingInlineRuleSetTag?: string;
   /** Было inline-text — при сохранении конвертировать в новый custom-N. */
   wasInlineText?: boolean;
 }
 
-function outboundFromRule(rule: SingboxRouterRule): {
+function outboundFromRule(
+  rule: SingboxRouterRule,
+  outbounds: SingboxRouterOutbound[],
+): {
   outboundCategory: OutboundCategory;
-  tunnelTag: string | null;
+  tunnelTags: string[];
 } {
   if (rule.action === 'reject') {
-    return { outboundCategory: 'block', tunnelTag: null };
+    return { outboundCategory: 'block', tunnelTags: [] };
   }
   if (rule.outbound === 'direct' || !rule.outbound) {
-    return { outboundCategory: 'direct', tunnelTag: null };
+    return { outboundCategory: 'direct', tunnelTags: [] };
   }
-  return { outboundCategory: 'tunnel', tunnelTag: rule.outbound };
+  const ob = outbounds.find((o) => o.tag === rule.outbound);
+  if (ob && isCompositeOutboundType(ob.type) && (ob.outbounds?.length ?? 0) > 0) {
+    return { outboundCategory: 'tunnel', tunnelTags: [...ob.outbounds!] };
+  }
+  return { outboundCategory: 'tunnel', tunnelTags: [rule.outbound] };
 }
 
 /** Map a simple rule into wizard form state. Caller must verify rule is simple. */
@@ -36,9 +49,10 @@ export function prefillWizardFromRule(
   rule: SingboxRouterRule,
   presets: SingboxRouterPreset[],
   ruleSets: SingboxRouterRuleSet[],
+  outbounds: SingboxRouterOutbound[] = [],
 ): WizardPrefill {
   const info = classifyRuleSimplicity(rule, ruleSets);
-  const outbound = outboundFromRule(rule);
+  const outbound = outboundFromRule(rule, outbounds);
 
   if (!info.simple) {
     return { templateIds: [], rulesList: '', ...outbound };

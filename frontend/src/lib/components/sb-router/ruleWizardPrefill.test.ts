@@ -36,7 +36,7 @@ describe('prefillWizardFromRule — external', () => {
       templateIds: ['svc:discord'],
       rulesList: '',
       outboundCategory: 'tunnel',
-      tunnelTag: 'warp',
+      tunnelTags: ['warp'],
     });
     expect(r.wasInlineText).toBeUndefined();
   });
@@ -54,7 +54,7 @@ describe('prefillWizardFromRule — external', () => {
     const rule: SingboxRouterRule = { rule_set: ['geosite-discord'], action: 'reject' };
     const r = prefillWizardFromRule(rule, presets, [remoteDiscord]);
     expect(r.outboundCategory).toBe('block');
-    expect(r.tunnelTag).toBeNull();
+    expect(r.tunnelTags).toEqual([]);
   });
 
   it('direct outbound', () => {
@@ -65,7 +65,20 @@ describe('prefillWizardFromRule — external', () => {
     };
     const r = prefillWizardFromRule(rule, presets, [remoteDiscord]);
     expect(r.outboundCategory).toBe('direct');
-    expect(r.tunnelTag).toBeNull();
+    expect(r.tunnelTags).toEqual([]);
+  });
+
+  it('composite outbound → раскрывает участников', () => {
+    const rule: SingboxRouterRule = {
+      rule_set: ['geosite-discord'],
+      action: 'route',
+      outbound: 'custom-composite-1',
+    };
+    const r = prefillWizardFromRule(rule, presets, [remoteDiscord], [
+      { type: 'selector', tag: 'custom-composite-1', outbounds: ['warp', 'awg10'] },
+    ]);
+    expect(r.outboundCategory).toBe('tunnel');
+    expect(r.tunnelTags).toEqual(['warp', 'awg10']);
   });
 });
 

@@ -5,6 +5,7 @@ vi.mock('$lib/api/client', () => ({
     singboxRouterApplyPreset: vi.fn(),
     singboxRouterAddRule: vi.fn(),
     singboxRouterAddRuleSet: vi.fn(),
+    singboxRouterAddOutbound: vi.fn(),
     singboxRouterUpdateRule: vi.fn(),
     singboxRouterUpdateRuleSet: vi.fn(),
     expandGeoTag: vi.fn(),
@@ -19,7 +20,7 @@ import { api } from '$lib/api/client';
 import { expandGeoLinesInInput } from '$lib/utils/singboxInlineGeoExpand';
 import {
   resolveOutbound, submitWizard, submitWizardEdit, ValidationError,
-  nextCustomRuleSetTag, parseCustomList,
+  nextCustomRuleSetTag, parseCustomList, resolveTunnelOutbound,
 } from './addWizardActions';
 import type { CustomMatcherFields } from './addWizardStore';
 import type { TemplateGroup } from './templatesData';
@@ -46,21 +47,58 @@ const presets: SingboxRouterPreset[] = [
   },
 ];
 
+const noOutbounds: never[] = [];
+
 describe('resolveOutbound', () => {
-  it('tunnel returns tag', () => {
-    expect(resolveOutbound('tunnel', 'warp')).toBe('warp');
+  it('tunnel returns single tag', async () => {
+    await expect(resolveOutbound('tunnel', ['warp'], noOutbounds)).resolves.toBe('warp');
   });
 
-  it('tunnel without tag throws', () => {
-    expect(() => resolveOutbound('tunnel', null)).toThrow(ValidationError);
+  it('tunnel without tags throws', async () => {
+    await expect(resolveOutbound('tunnel', [], noOutbounds)).rejects.toThrow(ValidationError);
   });
 
-  it('direct returns "direct"', () => {
-    expect(resolveOutbound('direct', null)).toBe('direct');
+  it('direct returns "direct"', async () => {
+    await expect(resolveOutbound('direct', [], noOutbounds)).resolves.toBe('direct');
   });
 
-  it('block returns "block"', () => {
-    expect(resolveOutbound('block', null)).toBe('block');
+  it('block returns "block"', async () => {
+    await expect(resolveOutbound('block', [], noOutbounds)).resolves.toBe('block');
+  });
+});
+
+describe('resolveTunnelOutbound', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('один туннель — без API', async () => {
+    await expect(resolveTunnelOutbound(['warp'], [])).resolves.toBe('warp');
+    expect(api.singboxRouterAddOutbound).not.toHaveBeenCalled();
+  });
+
+  it('находит существующий composite', async () => {
+    const tag = await resolveTunnelOutbound(['warp', 'awg10'], [
+      { type: 'selector', tag: 'custom-composite-1', outbounds: ['warp', 'awg10'] },
+    ]);
+    expect(tag).toBe('custom-composite-1');
+    expect(api.singboxRouterAddOutbound).not.toHaveBeenCalled();
+  });
+
+  it('создаёт custom-composite-N при отсутствии совпадения', async () => {
+    (api.singboxRouterAddOutbound as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    const tag = await resolveTunnelOutbound(['warp', 'awg20'], [
+      { type: 'selector', tag: 'custom-composite-1', outbounds: ['warp', 'awg10'] },
+    ]);
+    expect(tag).toBe('custom-composite-2');
+    expect(api.singboxRouterAddOutbound).toHaveBeenCalledWith({
+      type: 'urltest',
+      tag: 'custom-composite-2',
+      outbounds: ['warp', 'awg20'],
+      url: 'https://www.gstatic.com/generate_204',
+      interval: '60s',
+      tolerance: 50,
+    });
   });
 });
 
@@ -83,8 +121,8 @@ describe('submitWizard', () => {
   it('no templates AND no custom → throws ValidationError', async () => {
     await expect(submitWizard({
       selectedTemplates: [], customFields: emptyCustom,
-      outboundCategory: 'tunnel', tunnelTag: 'warp', groups,
-      existingRuleSetTags: [],
+      outboundCategory: 'tunnel', tunnelTags: ['warp'], groups,
+      existingRuleSetTags: [], existingOutbounds: [],
     })).rejects.toThrow(ValidationError);
   });
 
@@ -92,8 +130,8 @@ describe('submitWizard', () => {
     (api.singboxRouterApplyPreset as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
     const r = await submitWizard({
       selectedTemplates: ['svc:netflix'], customFields: emptyCustom,
-      outboundCategory: 'tunnel', tunnelTag: 'warp', groups,
-      existingRuleSetTags: [],
+      outboundCategory: 'tunnel', tunnelTags: ['warp'], groups,
+      existingRuleSetTags: [], existingOutbounds: [],
     });
     expect(api.singboxRouterApplyPreset).toHaveBeenCalledWith('netflix', 'warp');
     expect(r.successes).toEqual(['svc:netflix']);
@@ -105,8 +143,8 @@ describe('submitWizard', () => {
     const r = await submitWizard({
       selectedTemplates: [],
       customFields: { rulesList: 'domain:example.com' },
-      outboundCategory: 'tunnel', tunnelTag: 'warp', groups,
-      existingRuleSetTags: [],
+      outboundCategory: 'tunnel', tunnelTags: ['warp'], groups,
+      existingRuleSetTags: [], existingOutbounds: [],
     });
     expect(api.singboxRouterAddRuleSet).toHaveBeenCalledWith(
       expect.objectContaining({ tag: 'custom-1', type: 'inline' }),
@@ -117,14 +155,32 @@ describe('submitWizard', () => {
     expect(r.successes).toEqual(['custom']);
   });
 
+  it('несколько туннелей → composite outbound + rule', async () => {
+    (api.singboxRouterAddOutbound as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (api.singboxRouterAddRuleSet as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    (api.singboxRouterAddRule as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    await submitWizard({
+      selectedTemplates: [],
+      customFields: { rulesList: 'domain:example.com' },
+      outboundCategory: 'tunnel', tunnelTags: ['warp', 'awg10'], groups,
+      existingRuleSetTags: [], existingOutbounds: [],
+    });
+    expect(api.singboxRouterAddOutbound).toHaveBeenCalledWith(
+      expect.objectContaining({ tag: 'custom-composite-1', outbounds: ['warp', 'awg10'] }),
+    );
+    expect(api.singboxRouterAddRule).toHaveBeenCalledWith(
+      expect.objectContaining({ outbound: 'custom-composite-1' }),
+    );
+  });
+
   it('block outbound → action=reject в rule', async () => {
     (api.singboxRouterAddRuleSet as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
     (api.singboxRouterAddRule as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
     const r = await submitWizard({
       selectedTemplates: [],
       customFields: { rulesList: 'domain:example.com' },
-      outboundCategory: 'block', tunnelTag: null, groups,
-      existingRuleSetTags: [],
+      outboundCategory: 'block', tunnelTags: [], groups,
+      existingRuleSetTags: [], existingOutbounds: [],
     });
     expect(api.singboxRouterAddRule).toHaveBeenCalledWith(
       expect.objectContaining({ rule_set: ['custom-1'], action: 'reject' }),
@@ -138,8 +194,8 @@ describe('submitWizard', () => {
     await submitWizard({
       selectedTemplates: [],
       customFields: { rulesList: 'domain:example.com' },
-      outboundCategory: 'direct', tunnelTag: null, groups,
-      existingRuleSetTags: ['custom-1', 'custom-2'],
+      outboundCategory: 'direct', tunnelTags: [], groups,
+      existingRuleSetTags: ['custom-1', 'custom-2'], existingOutbounds: [],
     });
     expect(api.singboxRouterAddRuleSet).toHaveBeenCalledWith(
       expect.objectContaining({ tag: 'custom-3' }),
@@ -153,8 +209,8 @@ describe('submitWizard', () => {
     const r = await submitWizard({
       selectedTemplates: ['svc:netflix'],
       customFields: { rulesList: 'domain:example.com' },
-      outboundCategory: 'tunnel', tunnelTag: 'warp', groups,
-      existingRuleSetTags: [],
+      outboundCategory: 'tunnel', tunnelTags: ['warp'], groups,
+      existingRuleSetTags: [], existingOutbounds: [],
     });
     expect(r.successes.sort()).toEqual(['custom', 'svc:netflix']);
     expect(r.failures).toEqual([]);
@@ -166,18 +222,18 @@ describe('submitWizard', () => {
     const r = await submitWizard({
       selectedTemplates: ['svc:netflix'],
       customFields: { rulesList: 'domain:example.com' },
-      outboundCategory: 'tunnel', tunnelTag: 'warp', groups,
-      existingRuleSetTags: [],
+      outboundCategory: 'tunnel', tunnelTags: ['warp'], groups,
+      existingRuleSetTags: [], existingOutbounds: [],
     });
     expect(r.successes).toEqual(['svc:netflix']);
     expect(r.failures).toEqual([{ id: 'custom', error: 'bad rule' }]);
   });
 
-  it('tunnel category без tunnelTag → throws', async () => {
+  it('tunnel category без tunnelTags → throws', async () => {
     await expect(submitWizard({
       selectedTemplates: ['svc:netflix'], customFields: emptyCustom,
-      outboundCategory: 'tunnel', tunnelTag: null, groups,
-      existingRuleSetTags: [],
+      outboundCategory: 'tunnel', tunnelTags: [], groups,
+      existingRuleSetTags: [], existingOutbounds: [],
     })).rejects.toThrow(ValidationError);
   });
 });
@@ -196,10 +252,11 @@ describe('submitWizardEdit', () => {
     selectedTemplates: [] as string[],
     customFields: { rulesList: 'new.example.com' },
     outboundCategory: 'tunnel' as const,
-    tunnelTag: 'warp',
+    tunnelTags: ['warp'],
     groups,
     presets,
     existingRuleSetTags: ['custom-1', 'geosite-netflix'],
+    existingOutbounds: [],
   };
 
   it('external: svc template → update rule', async () => {
@@ -210,10 +267,11 @@ describe('submitWizardEdit', () => {
       selectedTemplates: ['svc:netflix'],
       customFields: emptyCustom,
       outboundCategory: 'tunnel',
-      tunnelTag: 'warp',
+      tunnelTags: ['warp'],
       groups,
       presets,
       existingRuleSetTags: [],
+      existingOutbounds: [],
     });
     expect(api.singboxRouterUpdateRule).toHaveBeenCalledWith(1, {
       rule_set: ['geosite-netflix'],
@@ -231,10 +289,11 @@ describe('submitWizardEdit', () => {
       selectedTemplates: ['rs:geoip-ru'],
       customFields: emptyCustom,
       outboundCategory: 'direct',
-      tunnelTag: null,
+      tunnelTags: [],
       groups,
       presets: [],
       existingRuleSetTags: [],
+      existingOutbounds: [],
     });
     expect(api.singboxRouterUpdateRule).toHaveBeenCalledWith(2, {
       rule_set: ['geoip-ru'],
@@ -251,10 +310,11 @@ describe('submitWizardEdit', () => {
       selectedTemplates: ['svc:netflix'],
       customFields: emptyCustom,
       outboundCategory: 'block',
-      tunnelTag: null,
+      tunnelTags: [],
       groups,
       presets,
       existingRuleSetTags: [],
+      existingOutbounds: [],
     });
     expect(api.singboxRouterUpdateRule).toHaveBeenCalledWith(0, {
       rule_set: ['geosite-netflix'],
@@ -270,10 +330,11 @@ describe('submitWizardEdit', () => {
         selectedTemplates: ['svc:netflix', 'rs:geoip-ru'],
         customFields: emptyCustom,
         outboundCategory: 'tunnel',
-        tunnelTag: 'warp',
+        tunnelTags: ['warp'],
         groups,
         presets,
         existingRuleSetTags: [],
+        existingOutbounds: [],
       }),
     ).rejects.toThrow(/один шаблон/i);
   });
@@ -286,10 +347,11 @@ describe('submitWizardEdit', () => {
         selectedTemplates: ['svc:missing'],
         customFields: emptyCustom,
         outboundCategory: 'tunnel',
-        tunnelTag: 'warp',
+        tunnelTags: ['warp'],
         groups,
         presets,
         existingRuleSetTags: [],
+        existingOutbounds: [],
       }),
     ).rejects.toThrow(/не найден/i);
   });
@@ -338,7 +400,7 @@ describe('submitWizardEdit', () => {
     await submitWizardEdit({
       ...baseInlineArgs,
       outboundCategory: 'block',
-      tunnelTag: null,
+      tunnelTags: [],
       wasInlineText: true,
       existingRuleSetTags: [],
     });

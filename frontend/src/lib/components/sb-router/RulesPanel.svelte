@@ -137,14 +137,14 @@
     const info = classifyRuleSimplicity(rule, $ruleSets);
     if (!info.simple) return;
     cancelDrag();
-    const prefill = prefillWizardFromRule(rule, $presets, $ruleSets);
+    const prefill = prefillWizardFromRule(rule, $presets, $ruleSets, $outbounds);
     if (!prefill.editMode) return;
     setTemplateSelection(prefill.templateIds);
     openEditWizard(index, {
       editMode: prefill.editMode,
       rulesList: prefill.rulesList,
       outboundCategory: prefill.outboundCategory,
-      tunnelTag: prefill.tunnelTag,
+      tunnelTags: prefill.tunnelTags,
       existingInlineRuleSetTag: prefill.existingInlineRuleSetTag,
       wasInlineText: prefill.wasInlineText,
     });

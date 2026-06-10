@@ -14,7 +14,7 @@ function emptyCustom(): CustomMatcherFields {
 
 const openW: Writable<boolean> = writable(false);
 const categoryW: Writable<OutboundCategory | null> = writable(null);
-const tunnelW: Writable<string | null> = writable(null);
+const tunnelW: Writable<string[]> = writable([]);
 const customW: Writable<CustomMatcherFields> = writable(emptyCustom());
 const editRuleIndexW: Writable<number | null> = writable(null);
 const editModeW: Writable<WizardEditMode | null> = writable(null);
@@ -23,7 +23,7 @@ const wasInlineTextW: Writable<boolean> = writable(false);
 
 export const addWizardOpen: Readable<boolean> = { subscribe: openW.subscribe };
 export const wizardOutboundCategory: Readable<OutboundCategory | null> = { subscribe: categoryW.subscribe };
-export const wizardTunnelTag: Readable<string | null> = { subscribe: tunnelW.subscribe };
+export const wizardTunnelTags: Readable<string[]> = { subscribe: tunnelW.subscribe };
 export const wizardCustom: Readable<CustomMatcherFields> = { subscribe: customW.subscribe };
 export const wizardEditRuleIndex: Readable<number | null> = { subscribe: editRuleIndexW.subscribe };
 export const wizardEditMode: Readable<WizardEditMode | null> = { subscribe: editModeW.subscribe };
@@ -66,7 +66,7 @@ export function openEditWizard(
     editMode: WizardEditMode;
     rulesList: string;
     outboundCategory: OutboundCategory;
-    tunnelTag: string | null;
+    tunnelTags: string[];
     existingInlineRuleSetTag?: string;
     wasInlineText?: boolean;
   },
@@ -77,7 +77,7 @@ export function openEditWizard(
   existingInlineRuleSetTagW.set(prefill.existingInlineRuleSetTag ?? null);
   wasInlineTextW.set(prefill.wasInlineText ?? false);
   categoryW.set(prefill.outboundCategory);
-  tunnelW.set(prefill.tunnelTag);
+  tunnelW.set([...prefill.tunnelTags]);
   customW.set({ rulesList: prefill.rulesList });
   openW.set(true);
   setUrl(true);
@@ -86,7 +86,7 @@ export function openEditWizard(
 export function closeAddWizard(): void {
   openW.set(false);
   categoryW.set(null);
-  tunnelW.set(null);
+  tunnelW.set([]);
   customW.set(emptyCustom());
   clearEditState();
   setUrl(false);
@@ -96,8 +96,16 @@ export function setOutboundCategory(c: OutboundCategory | null): void {
   categoryW.set(c);
 }
 
-export function setTunnelTag(tag: string | null): void {
-  tunnelW.set(tag);
+export function setTunnelTags(tags: string[]): void {
+  tunnelW.set([...tags]);
+}
+
+export function toggleTunnelTag(tag: string): void {
+  tunnelW.update((tags) => {
+    const i = tags.indexOf(tag);
+    if (i >= 0) return tags.filter((t) => t !== tag);
+    return [...tags, tag];
+  });
 }
 
 export function updateCustomField<K extends keyof CustomMatcherFields>(
@@ -109,7 +117,7 @@ export function updateCustomField<K extends keyof CustomMatcherFields>(
 
 export function resetWizardState(): void {
   categoryW.set(null);
-  tunnelW.set(null);
+  tunnelW.set([]);
   customW.set(emptyCustom());
 }
 

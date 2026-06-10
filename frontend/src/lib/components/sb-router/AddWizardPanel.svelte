@@ -27,9 +27,9 @@
   import SbRouterServiceCatalogModal from './SbRouterServiceCatalogModal.svelte';
   import {
     addWizardOpen,
-    wizardOutboundCategory, wizardTunnelTag, wizardCustom,
+    wizardOutboundCategory, wizardTunnelTags, wizardCustom,
     wizardEditRuleIndex, wizardEditMode, wizardExistingInlineRuleSetTag, wizardWasInlineText,
-    closeAddWizard, setOutboundCategory, setTunnelTag, resetWizardState,
+    closeAddWizard, setOutboundCategory, toggleTunnelTag, resetWizardState,
   } from './addWizardStore';
   import {
     templatesSelection, openTemplatesModal, clearSelection,
@@ -41,6 +41,7 @@
   import { mode } from './modeStore';
   import { ensureTunnelDnsInfra, syncTunnelDnsRule } from './emptyStateActions';
   import { pluralize, RULE_WORDS, SERVICE_WORDS, SET_WORDS } from '$lib/utils/pluralize';
+  import { previewTunnelOutboundResolution } from './wizardCompositeOutbound';
 
   const outbounds = singboxRouterStore.outbounds;
   const options = singboxRouterStore.options;
@@ -85,10 +86,15 @@
   });
   const step2Ok = $derived.by(() => {
     if ($wizardOutboundCategory === null) return false;
-    if ($wizardOutboundCategory === 'tunnel') return $wizardTunnelTag !== null;
+    if ($wizardOutboundCategory === 'tunnel') return $wizardTunnelTags.length > 0;
     return true;
   });
   const canSave = $derived(step1Ok && step2Ok);
+
+  const tunnelOutboundPreview = $derived.by(() => {
+    if ($wizardOutboundCategory !== 'tunnel' || $wizardTunnelTags.length === 0) return null;
+    return previewTunnelOutboundResolution($wizardTunnelTags, $outbounds);
+  });
 
   let submitting = $state(false);
   // Бамп для remount CustomMatcherForm после «добавить ещё одно»:
@@ -99,8 +105,8 @@
     if (get(mode) !== 'beginner') return;
     try {
       const cat = get(wizardOutboundCategory);
-      const tag = get(wizardTunnelTag);
-      if (cat === 'tunnel' && tag) await ensureTunnelDnsInfra(tag);
+      const tags = get(wizardTunnelTags);
+      if (cat === 'tunnel' && tags.length > 0) await ensureTunnelDnsInfra(tags[0]!);
       await syncTunnelDnsRule();
     } catch (e) {
       notifications.error(`DNS: ${e instanceof Error ? e.message : String(e)}`);
@@ -119,10 +125,11 @@
           selectedTemplates: Array.from(get(templatesSelection)),
           customFields: get(wizardCustom),
           outboundCategory: get(wizardOutboundCategory)!,
-          tunnelTag: get(wizardTunnelTag),
+          tunnelTags: get(wizardTunnelTags),
           groups,
           presets: get(presets),
           existingRuleSetTags: get(ruleSets).map((r) => r.tag),
+          existingOutbounds: get(outbounds),
           existingInlineRuleSetTag: get(wizardExistingInlineRuleSetTag),
           wasInlineText: get(wizardWasInlineText),
         });
@@ -138,9 +145,10 @@
         selectedTemplates: Array.from(get(templatesSelection)),
         customFields: get(wizardCustom),
         outboundCategory: get(wizardOutboundCategory)!,
-        tunnelTag: get(wizardTunnelTag),
+        tunnelTags: get(wizardTunnelTags),
         groups,
         existingRuleSetTags: get(ruleSets).map((r) => r.tag),
+        existingOutbounds: get(outbounds),
       });
       if (result.failures.length === 0) {
         await syncDnsAfterSave();
@@ -280,11 +288,17 @@
 
       {#if $wizardOutboundCategory === 'tunnel'}
         <div class="tunnel-row">
-          <div class="tunnel-cap">Выбрать туннель</div>
+          <div class="tunnel-cap">
+            Выбрать туннели
+            {#if $wizardTunnelTags.length > 1}
+              <span class="tunnel-count">{$wizardTunnelTags.length} выбрано</span>
+            {/if}
+          </div>
+          <p class="tunnel-hint">Можно выбрать несколько — будет использован composite outbound</p>
           {#if tunnelOutbounds.length > 0}
             <div class="tunnel-chips">
               {#each tunnelOutbounds as ob (ob.value)}
-                {@const selected = $wizardTunnelTag === ob.value}
+                {@const selected = $wizardTunnelTags.includes(ob.value)}
                 {@const tunnelDisplay = resolveOutboundDisplay(
                   ob.value,
                   'route',
@@ -295,7 +309,7 @@
                   $singboxTunnels.data ?? [],
                 )}
                 {@const tunnelTone = displayTone(tunnelDisplay)}
-                <button type="button" class="t-chip" class:selected onclick={() => setTunnelTag(ob.value)}>
+                <button type="button" class="t-chip" class:selected onclick={() => toggleTunnelTag(ob.value)}>
                   <span class="tone-icon {toneClass(tunnelTone)}">
                     <OutboundToneIcon tone={tunnelTone} kind={tunnelDisplay.kind} size={12} />
                   </span>
@@ -323,6 +337,15 @@
             {pluralize($templatesSelection.size + (hasCustom ? 1 : 0), RULE_WORDS)} будет создано.
           </span>
         </div>
+        {#if tunnelOutboundPreview?.willCreate}
+          <div class="preview-composite">
+            <Info size={14} />
+            <span>
+              Будет создан composite outbound «{tunnelOutboundPreview.outboundTag}»
+              из выбранных туннелей ({tunnelOutboundPreview.tunnelCount})
+            </span>
+          </div>
+        {/if}
       {/if}
     </WizardStep>
 
@@ -442,12 +465,30 @@
     border-top: 1px solid var(--border);
   }
   .tunnel-cap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     font-size: 11px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: var(--text-muted);
-    margin-bottom: 8px;
+    margin-bottom: 4px;
+  }
+  .tunnel-count {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: none;
+    letter-spacing: 0;
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .tunnel-hint {
+    margin: 0 0 8px;
+    font-size: 11.5px;
+    color: var(--text-muted);
   }
   .tunnel-chips {
     display: flex;
@@ -485,7 +526,8 @@
     font-size: 13px;
     color: var(--text-secondary);
   }
-  .preview-info {
+  .preview-info,
+  .preview-composite {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -494,6 +536,12 @@
     color: var(--text-muted);
     background: rgba(107, 148, 168, 0.08);
     border-radius: var(--radius-sm);
+  }
+  .preview-composite {
+    margin-top: 8px;
+    color: var(--text-secondary);
+    background: var(--accent-soft);
+    border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
   }
   .actions {
     display: flex;

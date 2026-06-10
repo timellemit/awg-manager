@@ -76,7 +76,7 @@ export { default as CustomMatcherForm } from './CustomMatcherForm.svelte';
 export {
   addWizardOpen,
   wizardOutboundCategory,
-  wizardTunnelTag,
+  wizardTunnelTags,
   wizardCustom,
   wizardEditRuleIndex,
   wizardEditMode,
@@ -86,7 +86,8 @@ export {
   openEditWizard,
   closeAddWizard,
   setOutboundCategory,
-  setTunnelTag,
+  setTunnelTags,
+  toggleTunnelTag,
   updateCustomField,
   resetWizardState,
   type OutboundCategory,
