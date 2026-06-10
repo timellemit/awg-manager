@@ -51,7 +51,7 @@ func (s *Service) checkHTTP(ctx context.Context, tunnelID string) (*Connectivity
 	checkURL := s.connectivityCheckURL()
 	s.appLog.Full("http-check", tunnelID, fmt.Sprintf("Executing HTTP check: %s", checkURL))
 
-	res, err := httpprobe.ByInterface(ctx, iface, checkURL)
+	res, err := httpprobe.ByInterface(ctx, iface, checkURL, nil)
 	if err != nil {
 		errDetail := err.Error()
 		s.appLog.Warn("http-check", tunnelID, fmt.Sprintf("HTTP check failed: %s", errDetail))
@@ -232,7 +232,7 @@ func CheckConnectivityByInterface(ctx context.Context, ifaceName string) *Connec
 // CheckConnectivityByInterfaceURL performs connectivity test using a kernel
 // interface name directly and the supplied HTTP check URL.
 func CheckConnectivityByInterfaceURL(ctx context.Context, ifaceName string, checkURL string) *ConnectivityResult {
-	res, err := httpprobe.ByInterface(ctx, ifaceName, checkURL)
+	res, err := httpprobe.ByInterface(ctx, ifaceName, checkURL, nil)
 	if err != nil {
 		return &ConnectivityResult{
 			Connected: false,

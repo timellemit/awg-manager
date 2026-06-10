@@ -14,8 +14,8 @@ const (
 )
 
 // checkHTTP performs HTTP 204 connectivity check through the tunnel.
-func checkHTTP(ctx context.Context, ifaceName string, checkURL string) CheckResult {
-	res, err := httpprobe.ByInterface(ctx, ifaceName, checkURL)
+func checkHTTP(ctx context.Context, ifaceName string, checkURL string, dnsServers []string) CheckResult {
+	res, err := httpprobe.ByInterface(ctx, ifaceName, checkURL, dnsServers)
 	if err != nil {
 		return CheckResult{
 			Success: false,
@@ -64,6 +64,6 @@ func performCheck(ctx context.Context, ifaceName string, method string, target s
 	case "icmp":
 		return checkICMP(ctx, ifaceName, target, dnsServers)
 	default: // "http" is default
-		return checkHTTP(ctx, ifaceName, checkURL)
+		return checkHTTP(ctx, ifaceName, checkURL, dnsServers)
 	}
 }
