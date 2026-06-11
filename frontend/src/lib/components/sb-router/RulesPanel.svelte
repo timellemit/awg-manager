@@ -961,7 +961,6 @@
     transition:
       height var(--drop-slot-motion-ms, 360ms) var(--slot-ease, cubic-bezier(0.45, 0.05, 0.55, 0.95)),
       margin var(--drop-slot-motion-ms, 360ms) var(--slot-ease, cubic-bezier(0.45, 0.05, 0.55, 0.95)),
-      top var(--drop-slot-motion-ms, 360ms) var(--slot-ease, cubic-bezier(0.45, 0.05, 0.55, 0.95)),
       border-radius calc(var(--drop-slot-motion-ms, 360ms) * 0.85) var(--slot-ease, cubic-bezier(0.45, 0.05, 0.55, 0.95)),
       background calc(var(--drop-slot-motion-ms, 360ms) * 0.85) var(--slot-ease, cubic-bezier(0.45, 0.05, 0.55, 0.95)),
       box-shadow calc(var(--drop-slot-motion-ms, 360ms) * 0.85) var(--slot-ease, cubic-bezier(0.45, 0.05, 0.55, 0.95)),
@@ -989,7 +988,6 @@
     box-shadow: none;
   }
   .drop-indicator.collapsing {
-    height: 0 !important;
     margin: 0 !important;
     opacity: 0;
     border-color: transparent;
@@ -998,6 +996,7 @@
   }
   .drop-indicator.collapsing.expanded {
     position: static;
+    height: 0 !important;
     transition:
       height var(--drop-slot-motion-ms, 360ms) var(--slot-ease, cubic-bezier(0.45, 0.05, 0.55, 0.95)),
       margin var(--drop-slot-motion-ms, 360ms) var(--slot-ease, cubic-bezier(0.45, 0.05, 0.55, 0.95)),
@@ -1007,14 +1006,28 @@
       border-color calc(var(--drop-slot-motion-ms, 360ms) * 0.85) var(--slot-ease, cubic-bezier(0.45, 0.05, 0.55, 0.95)),
       opacity var(--drop-slot-motion-ms, 360ms) var(--slot-ease, cubic-bezier(0.45, 0.05, 0.55, 0.95));
   }
+  /* Тонкая линия: держим top/height, иначе при .collapsing теряется :not(.collapsing)
+     и absolute-блок прыгает к верху card-shell → «точка» ниже щели между карточками. */
   .drop-indicator.collapsing:not(.expanded) {
     position: absolute;
+    top: calc(-1 * var(--card-gap, 6px) / 2 - 1px);
+    left: 0;
+    right: 0;
+    height: 2px !important;
+    z-index: 2;
     transition:
-      height var(--drop-line-collapse-ms, 240ms) var(--slot-ease, cubic-bezier(0.45, 0.05, 0.55, 0.95)),
       opacity var(--drop-line-collapse-ms, 240ms) var(--slot-ease, cubic-bezier(0.45, 0.05, 0.55, 0.95)),
       box-shadow calc(var(--drop-line-collapse-ms, 240ms) * 0.85) var(--slot-ease, cubic-bezier(0.45, 0.05, 0.55, 0.95)),
       background calc(var(--drop-line-collapse-ms, 240ms) * 0.85) var(--slot-ease, cubic-bezier(0.45, 0.05, 0.55, 0.95)),
       border-color calc(var(--drop-line-collapse-ms, 240ms) * 0.85) var(--slot-ease, cubic-bezier(0.45, 0.05, 0.55, 0.95));
+  }
+  .drop-indicator-end.collapsing:not(.expanded) {
+    position: relative;
+    top: auto;
+    left: auto;
+    right: auto;
+    height: 2px !important;
+    margin: calc(-1 * var(--card-gap, 6px) / 2 - 1px) 0 0 !important;
   }
   .drop-indicator-end:not(.expanded):not(.collapsing) {
     position: relative;
