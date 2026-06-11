@@ -14,7 +14,7 @@
   import type { OutboundGroup } from '$lib/components/routing/singboxRouter/outboundOptions';
   import { Badge, Button } from '$lib/components/ui';
   import { Trash2, Edit3 } from 'lucide-svelte';
-  import { resolveOutboundDisplay } from './adapters';
+  import { dnsServerDetourDisplay } from './dnsServerDetourDisplay';
   import OutboundTile from './OutboundTile.svelte';
   import { dnsRuleTarget } from './dnsRuleLabel';
   import { dnsMatcherParts, dnsMatcherSummary } from './dnsMatcherParts';
@@ -60,20 +60,6 @@
     return `${s.type ?? 'dns'} · ${s.server}`;
   }
 
-  function detourDisplay(s: SingboxRouterDNSServer) {
-    const detour = s.detour ?? 'direct';
-    const action = detour === 'direct' ? 'direct' as const : 'route' as const;
-    return resolveOutboundDisplay(
-      detour,
-      action,
-      outbounds,
-      outboundOptions,
-      subscriptions,
-      proxyGroups,
-      singboxTunnels,
-    );
-  }
-
   function serverDeleteReason(s: SingboxRouterDNSServer): string | null {
     if (!dnsUsage) return null;
     return dnsServerDeleteBlockReason(s, dnsUsage);
@@ -93,7 +79,17 @@
           </div>
         </button>
         <span class="detour-chip">
-          <OutboundTile outbound={detourDisplay(s)} size="compact" />
+          <OutboundTile
+            outbound={dnsServerDetourDisplay(
+              s,
+              outbounds,
+              outboundOptions,
+              subscriptions,
+              proxyGroups,
+              singboxTunnels,
+            )}
+            size="compact"
+          />
         </span>
         <div class="server-actions">
           <button
@@ -121,7 +117,7 @@
       </div>
     {/each}
     {#if servers.length === 0}
-      <div class="empty">Нет серверов</div>
+      <div class="empty">Нет DNS-серверов.</div>
     {/if}
   </div>
 
@@ -205,7 +201,7 @@
       </div>
     </div>
   {:else}
-    <div class="rules-empty">нет правил</div>
+    <div class="empty">Нет правил</div>
   {/if}
 </div>
 
@@ -217,6 +213,12 @@
   .servers {
     display: flex;
     flex-direction: column;
+  }
+  .empty {
+    padding: 14px;
+    color: var(--text-muted);
+    text-align: center;
+    font-size: 12px;
   }
   .server-row {
     transition: background-color 0.15s ease;
@@ -294,13 +296,6 @@
     text-transform: uppercase;
     letter-spacing: 0.05em;
     font-weight: 600;
-  }
-  .rules-empty {
-    padding: 12px 14px;
-    color: var(--text-muted);
-    text-align: center;
-    font-size: 11.5px;
-    font-style: italic;
   }
   .rules-table {
     display: grid;
@@ -394,13 +389,6 @@
     flex-shrink: 0;
     white-space: nowrap;
   }
-  .empty {
-    padding: 14px;
-    color: var(--text-muted);
-    text-align: center;
-    font-size: 12px;
-  }
-
   @media (max-width: 768px) {
     .rules-rows {
       gap: 0;

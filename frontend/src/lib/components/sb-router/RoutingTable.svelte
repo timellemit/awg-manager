@@ -222,6 +222,12 @@
     border-radius: var(--radius);
     overflow: hidden;
   }
+  .empty {
+    padding: 14px;
+    color: var(--text-muted);
+    text-align: center;
+    font-size: 12px;
+  }
   .header,
   .row {
     display: grid;
@@ -336,12 +342,6 @@
     align-items: center;
     justify-content: flex-end;
     gap: 4px;
-  }
-  .empty {
-    padding: 14px;
-    color: var(--text-muted);
-    text-align: center;
-    font-size: 12px;
   }
   @media (max-width: 768px) {
     .table {

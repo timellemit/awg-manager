@@ -111,6 +111,16 @@
 	font-weight: 500;
 }
 
+.tone-chip.tone-via-route,
+.tone-icon.tone-via-route {
+	color: #8ab4f8;
+}
+
+.tone-chip.tone-via-route {
+	background: color-mix(in srgb, #8ab4f8 12%, transparent);
+	border-color: color-mix(in srgb, #8ab4f8 32%, transparent);
+}
+
 .tone-chip.tone-system,
 .tone-icon.tone-system {
 	color: var(--text-muted);

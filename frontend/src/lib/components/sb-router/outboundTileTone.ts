@@ -8,6 +8,7 @@ export type OutboundTileTone =
 	| 'composite'
 	| 'block'
 	| 'direct'
+	| 'via-route'
 	| 'system'
 	| 'unknown';
 
@@ -30,6 +31,8 @@ export function toneForKind(kind: OutboundKind): OutboundTileTone {
 			return 'block';
 		case 'direct':
 			return 'direct';
+		case 'via-route':
+			return 'via-route';
 		case 'sniff':
 		case 'hijack-dns':
 			return 'system';

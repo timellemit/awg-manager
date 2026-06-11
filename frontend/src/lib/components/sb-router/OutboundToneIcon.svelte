@@ -2,6 +2,7 @@
   import {
     Ban,
     GitBranch,
+    GitCommitHorizontal,
     Globe,
     Network,
     Rss,
@@ -49,6 +50,8 @@
   <Ban {...iconProps} />
 {:else if tone === 'direct'}
   <Globe {...iconProps} />
+{:else if tone === 'via-route'}
+  <GitCommitHorizontal {...iconProps} />
 {:else if tone === 'system'}
   {#if kind === 'hijack-dns'}
     <Network {...iconProps} />

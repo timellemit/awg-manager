@@ -37,6 +37,11 @@
     <OutboundToneIcon {tone} kind={outbound.kind} size={iconSize} />
     <span>Напрямую</span>
   </div>
+{:else if outbound.kind === 'via-route'}
+  <div class={cls} title="DNS маршрутизируется по таблице route">
+    <OutboundToneIcon {tone} kind={outbound.kind} size={iconSize} />
+    <span>{outbound.label}</span>
+  </div>
 {:else}
   <div class={cls} title={outbound.kind === 'unknown' ? 'Outbound не найден в конфиге' : undefined}>
     <OutboundToneIcon {tone} kind={outbound.kind} size={iconSize} />

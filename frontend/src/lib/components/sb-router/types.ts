@@ -35,6 +35,7 @@ export type OutboundKind =
 	| 'direct'
 	| 'block'
 	| 'composite'
+	| 'via-route'
 	| 'unknown'
 	| 'sniff'
 	| 'hijack-dns';
