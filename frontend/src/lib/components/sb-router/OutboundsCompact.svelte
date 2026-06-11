@@ -6,7 +6,7 @@
   import type { SingboxRouterOutbound, Subscription } from '$lib/types';
   import { Badge } from '$lib/components/ui';
   import { Edit3, Trash2 } from 'lucide-svelte';
-  import { outboundDisplay } from './outboundLabel';
+  import { isSubscriptionOutbound, outboundDisplay } from './outboundLabel';
   import { outboundDeleteBlockReason, type OutboundUsageInput } from './outboundUsage';
 
   interface Props {
@@ -26,9 +26,10 @@
     return 'info';
   }
 
-  function kindLabel(type: string): string {
-    if (type === 'selector' || type === 'urltest' || type === 'loadbalance') return 'composite';
-    return type;
+  function kindLabel(o: SingboxRouterOutbound): string {
+    if (isSubscriptionOutbound(o, subscriptions)) return 'subscription';
+    if (o.type === 'selector' || o.type === 'urltest' || o.type === 'loadbalance') return 'composite';
+    return o.type;
   }
 
   function deleteBlockReason(o: SingboxRouterOutbound): string | null {
@@ -49,7 +50,7 @@
           <div class="sub">{d.subtitle}</div>
         </div>
       </button>
-      <Badge variant="default" size="sm">{kindLabel(o.type)}</Badge>
+      <Badge variant="default" size="sm">{kindLabel(o)}</Badge>
       <div class="actions">
         <button
           type="button"

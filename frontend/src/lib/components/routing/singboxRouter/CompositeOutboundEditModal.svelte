@@ -4,6 +4,7 @@
 	import SingboxSettingsModal from './SingboxSettingsModal.svelte';
 	import type { SingboxRouterOutbound, SingboxRouterWANInterface } from '$lib/types';
 	import type { OutboundGroup } from './outboundOptions';
+	import { isSubscriptionOutbound } from '$lib/components/sb-router/outboundLabel';
 	import { subscriptionsStore } from '$lib/stores/subscriptions';
 	import { resolveMemberLabel } from '$lib/utils/memberLabel';
 	import { api } from '$lib/api/client';
@@ -90,11 +91,18 @@
 		}
 	});
 
+	const subsData = $derived($subscriptionsStore?.data ?? []);
+	const isSubscription = $derived(
+		outbound ? isSubscriptionOutbound(outbound, subsData) : false,
+	);
+
 	const isDirty = $derived.by(() => {
+		const membersChanged =
+			!isSubscription && [...members].join(',') !== [...initialMembers].join(',');
 		return (
 			type !== initialType ||
 			tag !== initialTag ||
-			[...members].join(',') !== [...initialMembers].join(',') ||
+			membersChanged ||
 			url !== initialUrl ||
 			interval !== initialInterval ||
 			tolerance !== initialTolerance ||
@@ -130,7 +138,6 @@
 	// Default-picker options: only members already chosen. Подписочные
 	// тэги (sub-XXX-YYY) и awg-XXX тэги резолвим в человеческие labels —
 	// тот же UX, что и на карточке composite outbound (issue #214).
-	const subsData = $derived($subscriptionsStore?.data ?? []);
 	function memberLabel(tag: string): string {
 		return resolveMemberLabel(tag, subsData, outboundOptions);
 	}
@@ -139,6 +146,7 @@
 	);
 
 	function addMember(v: string): void {
+		if (isSubscription) return;
 		if (!v) return;
 		if (members.includes(v)) return;
 		members = [...members, v];
@@ -147,6 +155,7 @@
 	}
 
 	function removeMember(v: string): void {
+		if (isSubscription) return;
 		members = members.filter((m) => m !== v);
 		if (defaultOutbound === v) defaultOutbound = '';
 	}
@@ -170,7 +179,8 @@
 				}
 				built = { type: 'direct', tag: tag.trim(), bind_interface: bindInterface };
 			} else {
-				if (members.length < 2) {
+				const memberList = isSubscription && outbound ? [...(outbound.outbounds ?? [])] : [...members];
+				if (memberList.length < 2) {
 					error = 'Нужно минимум 2 члена';
 					busy = false;
 					return;
@@ -178,8 +188,11 @@
 				built = {
 					type,
 					tag: tag.trim(),
-					outbounds: [...members],
+					outbounds: memberList,
 				};
+				if (outbound?.source === 'subscription') {
+					built.source = 'subscription';
+				}
 				if (type === 'urltest') {
 					built.url = url;
 					built.interval = interval;
@@ -242,7 +255,7 @@
 
 		{#if type !== 'direct'}
 			<div class="field">
-				<div class="lbl">Members (минимум 2)</div>
+				<div class="lbl">{isSubscription ? 'Участники' : 'Members (минимум 2)'}</div>	
 				<div class="member-chips" class:empty={members.length === 0}>
 					{#if members.length === 0}
 						<span class="chips-placeholder">Участники не выбраны</span>
@@ -250,29 +263,36 @@
 						{#each members as m (m)}
 							<span class="member-chip" title={m}>
 								<span class="member-chip-label">{memberLabel(m)}</span>
-								<button
-									type="button"
-									class="member-chip-remove"
-									aria-label={`Удалить ${m}`}
-									title="Удалить"
-									onclick={() => removeMember(m)}
-								>
-									<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-										<line x1="18" y1="6" x2="6" y2="18" />
-										<line x1="6" y1="6" x2="18" y2="18" />
-									</svg>
-								</button>
+								{#if !isSubscription}
+									<button
+										type="button"
+										class="member-chip-remove"
+										aria-label={`Удалить ${m}`}
+										title="Удалить"
+										onclick={() => removeMember(m)}
+									>
+										<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+											<line x1="18" y1="6" x2="6" y2="18" />
+											<line x1="6" y1="6" x2="18" y2="18" />
+										</svg>
+									</button>
+								{/if}
 							</span>
 						{/each}
 					{/if}
 				</div>
-				<Dropdown
-					value={memberPicker}
-					options={memberDropdownOptions}
-					placeholder="Добавить участника"
-					onchange={addMember}
-					fullWidth
-				/>
+				{#if isSubscription}
+					<div class="type-hint">Список редактируется в разделе «Туннели» -> «Sing-box подписки»</div>
+				{/if}
+				{#if !isSubscription}
+					<Dropdown
+						value={memberPicker}
+						options={memberDropdownOptions}
+						placeholder="Добавить участника"
+						onchange={addMember}
+						fullWidth
+					/>
+				{/if}
 			</div>
 
 			{#if type === 'urltest'}

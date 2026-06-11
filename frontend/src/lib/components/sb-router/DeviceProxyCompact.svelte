@@ -172,9 +172,8 @@
       <div class="sub">device proxy</div>
     </div>
   {:else}
-    <div class="info">
-      <div class="title">Нет inbounds</div>
-      <div class="sub">Добавьте inbound для локального прокси</div>
+    <div class="empty-mild">
+      Inbound'ов нет. «Inbound» — локальный прокси для устройств в сети.
     </div>
   {/if}
   {#if !bare && onConfigure}
@@ -262,6 +261,15 @@
   }
   .dot[data-tone='error'] {
     background: var(--color-error, #dc2626);
+  }
+  .empty-mild {
+    flex: 1;
+    min-width: 0;
+    padding: 0.6rem 0.9rem;
+    background: var(--surface-bg);
+    border-radius: 4px;
+    color: var(--muted-text);
+    font-size: 0.85rem;
   }
   .info, .proxy-info {
     flex: 1;
