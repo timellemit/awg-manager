@@ -234,6 +234,30 @@ func TestParseSingboxOutboundIndex_NoMatch(t *testing.T) {
 	}
 }
 
+func TestParseSingboxOutboundIndex_DecodeError(t *testing.T) {
+	// Captured verbatim from issue #350: decode-phase error (bad field
+	// value), not initialize-phase. The index refers to the outbounds
+	// array of the named slot file.
+	msg := "1 cross-slot validation error(s):\n  - [subscriptions] sing-box check:  (sing-box check failed: FATAL[0000] decode config at /opt/etc/awg-manager/singbox/config.d/.save-check-992106189/40-subscriptions.json: outbounds[462].tls.certificate_public_key_sha256: (illegal base64 data at input byte 4 | json: cannot unmarshal string into Go value of type [][]uint8)\n: exit status 1)"
+	idx, ok := parseSingboxOutboundIndex(msg)
+	if !ok {
+		t.Fatalf("expected to parse index from %q", msg)
+	}
+	if idx != 462 {
+		t.Errorf("idx = %d, want 462", idx)
+	}
+}
+
+func TestParseSingboxOutboundIndex_DecodeErrorOtherSlotFile(t *testing.T) {
+	// A decode error in a different slot file: its index refers to THAT
+	// file's outbounds array, not ours — must not be parsed, otherwise
+	// we would drop an unrelated outbound from our slot.
+	msg := "1 cross-slot validation error(s):\n  - [subscriptions] sing-box check:  (sing-box check failed: FATAL[0000] decode config at /opt/etc/awg-manager/singbox/config.d/.save-check-992106189/20-router.json: outbounds[3].tls.certificate_public_key_sha256: (illegal base64 data at input byte 4 | json: cannot unmarshal string into Go value of type [][]uint8)\n: exit status 1)"
+	if _, ok := parseSingboxOutboundIndex(msg); ok {
+		t.Error("expected no match on decode error in another slot file")
+	}
+}
+
 // === Reference cleanup ===================================================
 
 func TestDropOutboundAndCleanRefs_CascadeToSelectorAndUrltest(t *testing.T) {

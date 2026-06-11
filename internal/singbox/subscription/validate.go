@@ -170,12 +170,23 @@ func isValidUUID(s string) bool {
 // outbounds array as it was POSTed (zero-based).
 var singboxOutboundIdxRe = regexp.MustCompile(`initialize outbound\[(\d+)\]:`)
 
+// singboxDecodeIdxRe parses the index from a decode-phase error of the
+// form `decode config at <path>/40-subscriptions.json: outbounds[N].field:
+// <reason>` (e.g. a bad field value, issue #350). Decode errors are
+// per-file and N indexes THAT file's outbounds array, so the match is
+// anchored on the subscriptions slot filename (orchestrator.KnownSlots) —
+// a decode error in another slot's file must not be isolated here.
+var singboxDecodeIdxRe = regexp.MustCompile(`decode config at \S*/40-subscriptions\.json: outbounds\[(\d+)\][.:]`)
+
 // parseSingboxOutboundIndex extracts the failing outbound index from a
 // sing-box check error message. Returns (-1, false) when the message
-// does not match the known pattern — caller should treat that as a
+// does not match the known patterns — caller should treat that as a
 // terminal failure (cannot isolate).
 func parseSingboxOutboundIndex(msg string) (int, bool) {
 	m := singboxOutboundIdxRe.FindStringSubmatch(msg)
+	if len(m) != 2 {
+		m = singboxDecodeIdxRe.FindStringSubmatch(msg)
+	}
 	if len(m) != 2 {
 		return -1, false
 	}
