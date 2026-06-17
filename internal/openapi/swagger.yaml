@@ -3532,15 +3532,6 @@ definitions:
       policyName:
         example: awgm-router
         type: string
-      refreshDailyTime:
-        example: "03:00"
-        type: string
-      refreshIntervalHours:
-        example: 24
-        type: integer
-      refreshMode:
-        example: interval
-        type: string
       snifferEnabled:
         example: true
         type: boolean

@@ -61,10 +61,7 @@ type SingboxRouterSettingsData struct {
 	Enabled         bool   `json:"enabled" example:"true"`
 	PolicyName      string `json:"policyName" example:"awgm-router"`
 	DeviceMode      string `json:"deviceMode,omitempty" example:"policy" enums:"policy,all"`
-	SnifferEnabled  bool   `json:"snifferEnabled" example:"true"`
-	RefreshMode     string `json:"refreshMode,omitempty" example:"interval"`
-	RefreshInterval int    `json:"refreshIntervalHours,omitempty" example:"24"`
-	RefreshDaily    string `json:"refreshDailyTime,omitempty" example:"03:00"`
+	SnifferEnabled bool `json:"snifferEnabled" example:"true"`
 	// WANAutoDetect / WANInterface form a two-field discriminator:
 	//   true  + ""    → sing-box auto_detect_interface
 	//   false + "ppp0"→ sing-box default_interface=ppp0
