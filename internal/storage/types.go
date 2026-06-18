@@ -68,11 +68,8 @@ type SingboxRouterSettings struct {
 	// "policy" (default) keeps the historical NDMS access-policy mark
 	// filter. "all" installs unmarked PREROUTING jumps so every LAN
 	// device that reaches the router netfilter path is filtered.
-	DeviceMode      string `json:"deviceMode,omitempty"`
-	SnifferEnabled  bool   `json:"snifferEnabled"`
-	RefreshMode     string `json:"refreshMode,omitempty"`
-	RefreshInterval int    `json:"refreshIntervalHours,omitempty"`
-	RefreshDaily    string `json:"refreshDailyTime,omitempty"`
+	DeviceMode     string `json:"deviceMode,omitempty"`
+	SnifferEnabled bool   `json:"snifferEnabled"`
 	// WANAutoDetect is the discriminator for the WAN-binding mode.
 	// true (default) → sing-box uses route.auto_detect_interface; the
 	// WANInterface field is ignored and must be empty (enforced by

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,7 +23,7 @@ import (
 const (
 	awgProxyDir         = "/opt/etc/awg-manager/modules"
 	defaultKoPath       = awgProxyDir + "/awg_proxy.ko"
-	expectedKmodVersion = "1.1.10" // minimum required awg_proxy.ko version (issue #234)
+	expectedKmodVersion = "1.1.12" // minimum required awg_proxy.ko version (I1-I5 wire parity)
 )
 
 // KmodManager manages the awg_proxy.ko kernel module for NativeWG tunnels.
@@ -34,7 +35,8 @@ type KmodManager struct {
 
 	// procWriteFn / procReadFn isolate /proc/awg_proxy/* I/O so unit
 	// tests can stub them without touching a real procfs. Default:
-	// os.WriteFile / os.ReadFile.
+	// os.WriteFile / kmod.ReadProc (NOT os.ReadFile — its 512-byte
+	// first chunk truncates the list on kmod < 1.1.11, issue #362).
 	procWriteFn func(path string, data []byte) error
 	procReadFn  func(path string) ([]byte, error)
 }
@@ -71,7 +73,7 @@ func NewKmodManager(appLogger logging.AppLogger) *KmodManager {
 		tunnels:     make(map[string]kmodEntry),
 		appLog:      logging.NewScopedLogger(appLogger, logging.GroupTunnel, logging.SubKmod),
 		procWriteFn: func(path string, data []byte) error { return os.WriteFile(path, data, 0) },
-		procReadFn:  os.ReadFile,
+		procReadFn:  kmod.ReadProc,
 	}
 }
 
@@ -276,7 +278,7 @@ var listenPortRe = regexp.MustCompile(`listen=127\.0\.0\.1:(\d+)`)
 
 func countProxySlotsList(data string) int {
 	count := 0
-	for _, line := range strings.Split(strings.TrimSpace(data), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(data), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "(") {
 			continue
@@ -292,11 +294,9 @@ func countProxySlotsList(data string) int {
 // a slot listening on 127.0.0.1:listenPort.
 func hasSlotListeningInList(data string, listenPort int) bool {
 	want := fmt.Sprintf("listen=127.0.0.1:%d", listenPort)
-	for _, line := range strings.Split(data, "\n") {
-		for _, field := range strings.Fields(line) {
-			if field == want {
-				return true
-			}
+	for line := range strings.SplitSeq(data, "\n") {
+		if slices.Contains(strings.Fields(line), want) {
+			return true
 		}
 	}
 	return false
@@ -312,7 +312,7 @@ func (km *KmodManager) readListenPortLocked(endpointIP string, endpointPort int)
 
 	// Each line: "IP:PORT listen=127.0.0.1:LPORT rx=... tx=..."
 	target := fmt.Sprintf("%s:%d ", endpointIP, endpointPort)
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		if !strings.HasPrefix(line, target) {
 			continue
 		}

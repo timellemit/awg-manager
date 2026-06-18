@@ -3532,15 +3532,6 @@ definitions:
       policyName:
         example: awgm-router
         type: string
-      refreshDailyTime:
-        example: "03:00"
-        type: string
-      refreshIntervalHours:
-        example: 24
-        type: integer
-      refreshMode:
-        example: interval
-        type: string
       snifferEnabled:
         example: true
         type: boolean
@@ -3594,6 +3585,9 @@ definitions:
         items:
           $ref: '#/definitions/api.SingboxRouterIssueDTO'
         type: array
+      lastError:
+        example: engine start failed
+        type: string
       netfilterAvailable:
         example: true
         type: boolean

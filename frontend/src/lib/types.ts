@@ -1292,9 +1292,6 @@ export interface SingboxRouterSettings {
 	policyName: string;
 	deviceMode?: 'policy' | 'all';
 	snifferEnabled: boolean;
-	refreshMode?: 'interval' | 'daily';
-	refreshIntervalHours?: number;
-	refreshDailyTime?: string;
 	// WAN-binding discriminator (mirrors backend storage):
 	//   wanAutoDetect=true  + wanInterface=""    → sing-box auto_detect_interface
 	//   wanAutoDetect=false + wanInterface="X"   → sing-box default_interface=X
@@ -1351,6 +1348,8 @@ export interface SingboxRouterStatus {
 	outboundCompositeCount: number;
 	final: string;
 	issues?: SingboxRouterIssue[];
+	/** Последняя fatal-причина sing-box; непусто только при «СБОЙ» (enabled && !active). */
+	lastError?: string;
 }
 
 /**
