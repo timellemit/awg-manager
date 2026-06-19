@@ -73,6 +73,8 @@
 	}
 </script>
 
+<HrNeoGeoDataView files={geoFiles} onrefresh={loadGeoFiles} />
+
 {#if settings}
 	<div class="geo-settings">
 		<HrNeoGeoRefreshSettings value={settings.geoFile} saving={saving} onToggle={toggleAutoRefresh} onSave={saveGeo} />
@@ -85,9 +87,7 @@
 	</Button>
 </div>
 
-<HrNeoGeoDataView files={geoFiles} onrefresh={loadGeoFiles} />
-
 <style>
-	.geo-settings { display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 1rem; }
-	.geo-actions { margin-bottom: 1rem; }
+	.geo-settings { display: flex; flex-direction: column; gap: 0.75rem; margin-top: 1rem; }
+	.geo-actions { margin-top: 0.75rem; }
 </style>
