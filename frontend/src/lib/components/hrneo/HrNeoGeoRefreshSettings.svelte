@@ -11,8 +11,12 @@
 
 	let { value, saving, onToggle, onSave }: Props = $props();
 
+	// Local editable copies seeded from the prop, then synced via the $effect blocks below.
+	// svelte-ignore state_referenced_locally
 	let localMode = $state(value.refreshMode || 'interval');
+	// svelte-ignore state_referenced_locally
 	let localInterval = $state(value.refreshIntervalHours || 6);
+	// svelte-ignore state_referenced_locally
 	let localDailyTime = $state(value.refreshDailyTime || '03:00');
 
 	let savedMode = $derived(value.refreshMode || 'interval');
