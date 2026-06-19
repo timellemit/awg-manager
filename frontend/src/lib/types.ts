@@ -718,6 +718,13 @@ export interface DNSRouteSettings {
 	refreshDailyTime?: string;  // "HH:MM" 24h format
 }
 
+export interface GeoFileSettings {
+	autoRefreshEnabled: boolean;
+	refreshIntervalHours: number;
+	refreshMode?: 'interval' | 'daily';
+	refreshDailyTime?: string;
+}
+
 export interface Settings {
 	schemaVersion?: number;
 	authEnabled: boolean;
@@ -729,6 +736,7 @@ export interface Settings {
 	updates: UpdateSettings;
 	download: DownloadSettings;
 	dnsRoute: DNSRouteSettings;
+	geoFile: GeoFileSettings;
 	connectivityCheckUrl: string;
 	usageLevel: UsageLevel;
 	hiddenSystemTunnels?: string[];
