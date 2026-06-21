@@ -99,6 +99,11 @@ type SingboxRouterSettings struct {
 	// в sing-box. Формат: "managed:Wireguard3" (резолвится в kernel-имя на
 	// сборке спека) или "iface:nwg5" (kernel-имя как есть). Пусто = выключено.
 	IngressInterfaces []string `json:"ingressInterfaces,omitempty"`
+	// UDPTimeout задаёт таймаут UDP-сессий в tproxy-in inbound (формат Go duration,
+	// например "3m0s", "10m0s"). Пустая строка = использовать значение по умолчанию
+	// (DefaultUDPTimeout). Увеличение помогает при работе игр и других UDP-приложений,
+	// которые могут молчать дольше стандартных 3 минут.
+	UDPTimeout string `json:"udpTimeout,omitempty"`
 }
 
 // ManagedServer represents the user-created WireGuard server interface.

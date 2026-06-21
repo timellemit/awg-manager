@@ -1309,6 +1309,9 @@ export interface SingboxRouterSettings {
 	bypassPresets?: string[];
 	bypassExtraPorts?: string;
 	ingressInterfaces?: string[];
+	// UDP session timeout for tproxy-in. Go duration string (e.g. "3m0s", "10m0s").
+	// Empty = backend default (3m0s). Increase to fix dropped sessions in games.
+	udpTimeout?: string;
 }
 
 // WAN interface for the sing-box router WAN-binding picker. `name` is

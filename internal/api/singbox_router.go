@@ -80,6 +80,11 @@ type SingboxRouterSettingsData struct {
 	// IngressInterfaces lists interface refs whose ingress traffic is
 	// redirected through the sing-box router (e.g. "managed:Wireguard3").
 	IngressInterfaces []string `json:"ingressInterfaces,omitempty" example:"managed:Wireguard3"`
+	// UDPTimeout sets the UDP session timeout for the tproxy-in inbound
+	// (Go duration string, e.g. "3m0s", "10m0s"). Empty = use default (3m0s).
+	// Increase to prevent long-quiet UDP applications (games, etc.) from
+	// having their sessions silently dropped mid-game.
+	UDPTimeout string `json:"udpTimeout,omitempty" example:"10m0s"`
 }
 
 // SingboxRouterSettingsResponse is the envelope for GET /singbox/router/settings.

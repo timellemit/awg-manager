@@ -691,7 +691,7 @@ func (s *ServiceImpl) Enable(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	cfg.Inbounds = ensureTProxyInbound(cfg.Inbounds)
+	cfg.Inbounds = ensureTProxyInbound(cfg.Inbounds, sr.UDPTimeout)
 	cfg.Outbounds = stripAutoManagedDirect(cfg.Outbounds)
 	cfg.EnsureSystemRules(sr.SnifferEnabled)
 	// Settings was already loaded above; revalidate here in case the
@@ -835,7 +835,7 @@ func filterTProxyInbound(in []Inbound) []Inbound {
 // tproxy-in inbound if missing. Idempotent. Used by Reconcile to
 // recover from a prior failed-Install rollback (which used to strip
 // the inbound destructively).
-func (s *ServiceImpl) healTProxyInbound(ctx context.Context) error {
+func (s *ServiceImpl) healTProxyInbound(ctx context.Context, udpTimeout string) error {
 	cfg, err := s.loadRouterConfig()
 	if err != nil {
 		return err
@@ -845,7 +845,7 @@ func (s *ServiceImpl) healTProxyInbound(ctx context.Context) error {
 			return nil // already present, nothing to do
 		}
 	}
-	cfg.Inbounds = ensureTProxyInbound(cfg.Inbounds)
+	cfg.Inbounds = ensureTProxyInbound(cfg.Inbounds, udpTimeout)
 	// System self-heal — direct write, no staging UI.
 	return s.persistConfigDirect(ctx, cfg)
 }
@@ -866,7 +866,23 @@ func (s *ServiceImpl) healTProxyInbound(ctx context.Context) error {
 // "::" for the same reason.
 const inboundListen = "0.0.0.0"
 
-func ensureTProxyInbound(in []Inbound) []Inbound {
+// DefaultUDPTimeout is the fallback UDP session timeout for tproxy-in when
+// the user has not configured a custom value. 3 minutes matches the original
+// sing-box default, but may cause games and other UDP applications that go
+// quiet for longer than 3 minutes to drop their session unexpectedly.
+const DefaultUDPTimeout = "3m0s"
+
+// resolveUDPTimeout returns the effective UDP timeout string: the user value
+// when non-empty, otherwise DefaultUDPTimeout.
+func resolveUDPTimeout(configured string) string {
+	if configured != "" {
+		return configured
+	}
+	return DefaultUDPTimeout
+}
+
+func ensureTProxyInbound(in []Inbound, udpTimeout string) []Inbound {
+	effective := resolveUDPTimeout(udpTimeout)
 	hasTProxy := false
 	hasRedirect := false
 	for i := range in {
@@ -882,9 +898,8 @@ func ensureTProxyInbound(in []Inbound) []Inbound {
 			if !in[i].UDPFragment {
 				in[i].UDPFragment = true
 			}
-			if in[i].UDPTimeout == "" {
-				in[i].UDPTimeout = "3m0s"
-			}
+			// Always apply the effective timeout — user may have changed it.
+			in[i].UDPTimeout = effective
 			// tcp_fast_open is meaningless on a UDP-only inbound.
 			if in[i].TCPFastOpen {
 				in[i].TCPFastOpen = false
@@ -915,7 +930,7 @@ func ensureTProxyInbound(in []Inbound) []Inbound {
 			ListenPort:  TPROXYPort,
 			Network:     "udp",
 			UDPFragment: true,
-			UDPTimeout:  "3m0s",
+			UDPTimeout:  effective,
 		}}, out...)
 	}
 	if !hasRedirect {
@@ -1192,7 +1207,7 @@ func (s *ServiceImpl) reconcileInstalled(ctx context.Context, sr storage.Singbox
 	// Self-heal: a previous Install rollback or upgrade hop may
 	// have left 20-router.json without the tproxy-in inbound. Re-add
 	// it idempotently so sing-box keeps listening on TPROXYPort.
-	if err := s.healTProxyInbound(ctx); err != nil {
+	if err := s.healTProxyInbound(ctx, sr.UDPTimeout); err != nil {
 		s.appLog.Warn("heal-tproxy", "", err.Error())
 	}
 	return nil
@@ -1589,6 +1604,11 @@ func NormalizeSingboxRouterSettings(sr storage.SingboxRouterSettings) (storage.S
 	}
 	if err := validateIngressRefs(sr.IngressInterfaces); err != nil {
 		return sr, err
+	}
+	if sr.UDPTimeout != "" {
+		if _, err := time.ParseDuration(sr.UDPTimeout); err != nil {
+			return sr, fmt.Errorf("udpTimeout: invalid duration %q: %w", sr.UDPTimeout, err)
+		}
 	}
 	return sr, nil
 }
