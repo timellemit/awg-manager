@@ -810,10 +810,16 @@ func IsAutoManagedIface(name string) bool {
 // owned by awgoutbounds). User-created direct outbounds bound to other VPN
 // interfaces (IPSec/IKEv2/etc.) are kept — they live here in 20-router.json.
 // Composite outbounds and bind_interface-less direct are always kept.
-func stripAutoManagedDirect(in []Outbound) []Outbound {
+//
+// nativeProxies holds kernel names (e.g. "t2s0") of KeenOS-native SOCKS
+// proxies — NDMS ProxyN that are NOT ours. Their kernel name matches the
+// auto-managed "t2s"/"proxy" prefix, but they are legitimate user-chosen
+// bind targets, so a direct outbound to one is kept (see #323).
+func stripAutoManagedDirect(in []Outbound, nativeProxies map[string]bool) []Outbound {
 	out := make([]Outbound, 0, len(in))
 	for _, o := range in {
-		if o.Type == "direct" && o.BindInterface != "" && IsAutoManagedIface(o.BindInterface) {
+		if o.Type == "direct" && o.BindInterface != "" && IsAutoManagedIface(o.BindInterface) &&
+			!nativeProxies[o.BindInterface] {
 			continue
 		}
 		out = append(out, o)

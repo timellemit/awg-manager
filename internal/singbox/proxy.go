@@ -169,6 +169,28 @@ func proxyIsOurs(idx int, desc string, tunnelTags map[string]bool, ourPortSlots,
 	return ourPortSlots[idx]
 }
 
+// proxyEntry is an NDMS Proxy interface candidate: NDMS slot index, NDMS
+// description, and resolved kernel name (e.g. "t2s0").
+type proxyEntry struct {
+	idx    int
+	desc   string
+	kernel string
+}
+
+// nativeProxyKernelNames returns kernel names of Proxy interfaces NOT created
+// by us — KeenOS-native SOCKS proxies the user may bind a router direct
+// outbound to (#323). Pure filter over proxyIsOurs; I/O lives in the caller.
+func nativeProxyKernelNames(proxies []proxyEntry, tunnelTags map[string]bool, ourPortSlots, subProxyIdx map[int]bool) []string {
+	var out []string
+	for _, p := range proxies {
+		if proxyIsOurs(p.idx, p.desc, tunnelTags, ourPortSlots, subProxyIdx) {
+			continue
+		}
+		out = append(out, p.kernel)
+	}
+	return out
+}
+
 // SyncProxies reconciles NDMS Proxy interfaces with current config.json tunnels.
 // Creates missing Proxy for each tunnel and brings existing Proxy up if Down.
 // Removal of proxies for absent tunnels is the Operator's responsibility.

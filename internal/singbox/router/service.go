@@ -692,7 +692,9 @@ func (s *ServiceImpl) Enable(ctx context.Context) error {
 		return err
 	}
 	cfg.Inbounds = ensureTProxyInbound(cfg.Inbounds, sr.UDPTimeout)
-	cfg.Outbounds = stripAutoManagedDirect(cfg.Outbounds)
+	// nativeProxies is wired in a later step (provider over proxyIsOurs); nil
+	// here preserves legacy behavior until then — see #323 design.
+	cfg.Outbounds = stripAutoManagedDirect(cfg.Outbounds, nil)
 	cfg.EnsureSystemRules(sr.SnifferEnabled)
 	// Settings was already loaded above; revalidate here in case the
 	// store is corrupted or hand-edited around a schema migration. We
