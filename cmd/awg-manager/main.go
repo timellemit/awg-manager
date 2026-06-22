@@ -223,6 +223,9 @@ func (a *deviceproxyRouterOutboundsAdapter) ListDeviceProxyRouterOutbounds() []d
 			Detail: detail,
 		})
 	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Label < out[j].Label
+	})
 	return out
 }
 
