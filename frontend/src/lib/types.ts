@@ -1283,12 +1283,6 @@ export interface MonitoringSnapshot {
 	updatedAt: string;
 }
 
-export interface MonitoringSample {
-	ts: string;
-	latencyMs: number | null;
-	ok: boolean;
-}
-
 // #endregion
 
 // ─────────────────────────────────────────────

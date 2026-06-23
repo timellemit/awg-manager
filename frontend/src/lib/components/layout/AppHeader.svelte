@@ -38,18 +38,9 @@
 			matches: (p) => p.startsWith('/routing'),
 		},
 		{
-			section: 'monitoring',
-			href: '/monitoring',
-			label: 'МОНИТОРИНГ',
-			matches: (p) =>
-				p.startsWith('/monitoring') ||
-				p.startsWith('/pingcheck') ||
-				p.startsWith('/connections'),
-		},
-		{
 			section: 'diagnostics',
 			href: '/diagnostics',
-			label: 'ДИАГНОСТИКА',
+			label: 'ИНСТРУМЕНТЫ',
 			matches: (p) => p.startsWith('/diagnostics') || p.startsWith('/logs'),
 		},
 		{
@@ -132,8 +123,7 @@
 			ТУННЕЛИ: 'Туннели',
 			СЕРВЕРЫ: 'Серверы',
 			МАРШРУТИЗАЦИЯ: 'Маршрутизация',
-			МОНИТОРИНГ: 'Мониторинг',
-			ДИАГНОСТИКА: 'Диагностика',
+			ИНСТРУМЕНТЫ: 'Инструменты',
 			НАСТРОЙКИ: 'Настройки',
 		};
 		return map[upperLabel] ?? upperLabel;

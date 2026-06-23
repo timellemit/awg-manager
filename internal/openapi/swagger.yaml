@@ -1857,28 +1857,6 @@ definitions:
         example: tun_abc123
         type: string
     type: object
-  api.MonitoringHistoryResponse:
-    properties:
-      data:
-        items:
-          $ref: '#/definitions/api.MonitoringSampleDTO'
-        type: array
-      success:
-        example: true
-        type: boolean
-    type: object
-  api.MonitoringSampleDTO:
-    properties:
-      latencyMs:
-        example: 42
-        type: integer
-      ok:
-        example: true
-        type: boolean
-      ts:
-        example: "2024-01-15T10:30:00Z"
-        type: string
-    type: object
   api.MonitoringSnapshotData:
     properties:
       cells:
@@ -7935,49 +7913,6 @@ paths:
       summary: Restore drifted managed servers
       tags:
       - managed
-  /monitoring/history:
-    get:
-      description: Returns up to `limit` (default 60) most-recent samples for a single
-        (target, tunnelId) pair, oldest-first.
-      parameters:
-      - description: Target identifier
-        in: query
-        name: target
-        required: true
-        type: string
-      - description: Tunnel identifier
-        in: query
-        name: tunnelId
-        required: true
-        type: string
-      - description: Max samples to return (default 60)
-        in: query
-        name: limit
-        type: integer
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: OK
-          schema:
-            $ref: '#/definitions/api.MonitoringHistoryResponse'
-        "400":
-          description: Bad Request
-          schema:
-            $ref: '#/definitions/api.APIErrorEnvelope'
-        "405":
-          description: Method Not Allowed
-          schema:
-            $ref: '#/definitions/api.APIErrorEnvelope'
-        "503":
-          description: Service Unavailable
-          schema:
-            $ref: '#/definitions/api.APIErrorEnvelope'
-      security:
-      - CookieAuth: []
-      summary: Get monitoring history
-      tags:
-      - monitoring
   /monitoring/matrix:
     get:
       description: Returns the latest cross-tunnel × cross-target latency/loss matrix

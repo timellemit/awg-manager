@@ -63,7 +63,6 @@ import type {
 	AWGTagInfo,
 	TunnelReferencedError,
 	MonitoringSnapshot,
-	MonitoringSample,
 	SingboxRouterStatus,
 	SingboxRouterSettings,
 	SingboxRouterRule,
@@ -1833,19 +1832,6 @@ class ApiClient {
 	async getMonitoringMatrix(opts?: { force?: boolean }): Promise<MonitoringSnapshot> {
 		const path = opts?.force ? '/monitoring/matrix?force=1' : '/monitoring/matrix';
 		return this.request<MonitoringSnapshot>(path);
-	}
-
-	async getMonitoringHistory(params: {
-		target: string;
-		tunnelId: string;
-		limit?: number;
-	}): Promise<MonitoringSample[]> {
-		const qs = new URLSearchParams({
-			target: params.target,
-			tunnelId: params.tunnelId,
-		});
-		if (params.limit && params.limit > 0) qs.set('limit', String(params.limit));
-		return this.request<MonitoringSample[]>(`/monitoring/history?${qs.toString()}`);
 	}
 
 	// #endregion
