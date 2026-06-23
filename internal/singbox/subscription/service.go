@@ -1133,7 +1133,7 @@ func (s *Service) RestoreMembers(ctx context.Context, id string, tags []string) 
 }
 
 // PreviewMember — display-метаданные одного сервера из read-only превью URL-подписки.
-// Key = IdentityHash (subID-независимый суффикс) — по нему исключают при создании.
+// Key — subID-независимый суффикс тега (узкий, либо расширенный при коллизии маскировки); по нему исключают при создании.
 type PreviewMember struct {
 	Key       string `json:"key"`
 	Label     string `json:"label,omitempty"`
@@ -1146,7 +1146,7 @@ type PreviewMember struct {
 }
 
 // PreviewURL качает и парсит URL-подписку БЕЗ создания/записи — для шага превью
-// при импорте. Key = IdentityHash (subID-независимый суффикс) для исключения.
+// при импорте. Key — subID-независимый суффикс тега (узкий, либо расширенный при коллизии маскировки); по нему исключают при создании.
 // ponytail: small read-only dup of fetch+detect — safer than refactoring tested refreshLocked.
 func (s *Service) PreviewURL(ctx context.Context, url string, headers []Header) ([]PreviewMember, error) {
 	if url == "" {
@@ -1168,10 +1168,11 @@ func (s *Service) PreviewURL(ctx context.Context, url string, headers []Header) 
 	}
 	parts := partitionParsedOutbounds("preview", parseRes.Outbounds)
 	out := make([]PreviewMember, 0, len(parts.Valid))
-	for _, p := range parts.Valid {
+	keys := chooseKeys(parts.Valid)
+	for i, p := range parts.Valid {
 		mi := toMemberInfo(StableTag("preview00", p), p) // tag игнорируется, берём поля
 		out = append(out, PreviewMember{
-			Key: IdentityHash(p), Label: mi.Label, Protocol: mi.Protocol,
+			Key: suffixOf(keys[i]), Label: mi.Label, Protocol: mi.Protocol,
 			Server: mi.Server, Port: mi.Port, SNI: mi.SNI,
 			Transport: mi.Transport, Security: mi.Security,
 		})

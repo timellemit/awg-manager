@@ -192,3 +192,22 @@ func TestIdentityHash_SubIDIndependent(t *testing.T) {
 		t.Fatalf("suffix mismatch: t1=%s t2=%s h=%s", t1, t2, h)
 	}
 }
+
+func TestPreviewSuffixMatchesRefreshTag(t *testing.T) {
+	// Коллизирующая группа: суффикс, который превью кладёт в Key, обязан
+	// совпасть с хвостом тега из assignTags (иначе exclude из превью не
+	// сматчится после create+refresh).
+	parsed := []vlink.ParsedOutbound{
+		mkReality("h", 443, "eh1.vk.ru", "01ab"),
+		mkReality("h", 443, "io.ozone.ru", "02cd"),
+	}
+	keys := chooseKeys(parsed)
+	tags := assignTags("subID1234", parsed)
+	for i := range parsed {
+		previewKey := suffixOf(keys[i])
+		tagTail := tags[i][len(tags[i])-8:]
+		if previewKey != tagTail {
+			t.Errorf("member %d: preview Key %s != tag tail %s", i, previewKey, tagTail)
+		}
+	}
+}

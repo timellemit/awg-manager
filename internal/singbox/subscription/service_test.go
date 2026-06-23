@@ -1815,3 +1815,24 @@ func TestCreate_ExcludedKeys(t *testing.T) {
 		t.Fatal("excluded-by-key must not materialize on create")
 	}
 }
+
+func TestPreviewURL_CollisionDistinctKeys(t *testing.T) {
+	svc, _ := newTestService(t)
+	body := "vless://3a3b1c2e-9999-4321-aaaa-1234567890ab@h.example:443?security=tls&sni=a.sni#A\n" +
+		"vless://3a3b1c2e-9999-4321-aaaa-1234567890ab@h.example:443?security=tls&sni=b.sni#B\n"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+
+	members, err := svc.PreviewURL(context.Background(), srv.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(members) != 2 {
+		t.Fatalf("members=%d want 2", len(members))
+	}
+	if members[0].Key == members[1].Key {
+		t.Errorf("colliding endpoints must get distinct preview Key, both = %s", members[0].Key)
+	}
+}
