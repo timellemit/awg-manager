@@ -36,13 +36,16 @@
 <div class="wd-card" class:recovering={statusKind === 'recovering'}>
 	<!-- Header -->
 	<div class="wd-head">
-		<StatusDot variant={st.dot} pulse={st.pulse} size="sm" />
-		<span class="wd-name">{name}</span>
-		<VersionBadge kind="backend" value={backend} />
-		{#if awgVersion}<VersionBadge kind="awg" value={awgVersion} />{/if}
-		{#if isWatchdog}<Badge variant="accent" mono>watchdog</Badge>{/if}
-		<span class="wd-spacer"></span>
-		<Badge variant={st.badge}>{st.label}</Badge>
+		<div class="wd-head-title">
+			<StatusDot variant={st.dot} pulse={st.pulse} size="sm" />
+			<span class="wd-name">{name}</span>
+		</div>
+		<div class="wd-head-meta">
+			<VersionBadge kind="backend" value={backend} />
+			{#if awgVersion}<VersionBadge kind="awg" value={awgVersion} />{/if}
+			{#if isWatchdog}<Badge variant="accent" mono>watchdog</Badge>{/if}
+			<span class="wd-status"><Badge variant={st.badge}>{st.label}</Badge></span>
+		</div>
 	</div>
 
 	{#if hasPingcheck && stats}
@@ -128,6 +131,12 @@
 		padding: 12px 14px;
 		border-bottom: 1px solid var(--color-border);
 	}
+	.wd-head-title {
+		display: flex;
+		align-items: center;
+		gap: 9px;
+		min-width: 0;
+	}
 	.wd-name {
 		font-weight: 600;
 		font-size: 14px;
@@ -136,7 +145,23 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 	}
-	.wd-spacer { flex: 1; }
+	.wd-head-meta {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		flex: 1;
+		min-width: 0;
+		flex-wrap: wrap;
+	}
+	.wd-status { margin-left: auto; }
+
+	@media (max-width: 640px) {
+		.wd-head {
+			flex-direction: column;
+			align-items: stretch;
+			gap: 8px;
+		}
+	}
 
 	/* Config line */
 	.wd-config {
