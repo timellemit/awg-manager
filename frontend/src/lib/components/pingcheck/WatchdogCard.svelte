@@ -151,7 +151,10 @@
 	}
 	.wd-stat {
 		padding: 9px 6px;
-		text-align: center;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: 2px;
 		border-right: 1px solid color-mix(in srgb, var(--color-border) 55%, transparent);
 	}
 	.wd-stat:last-child { border-right: none; }
@@ -171,7 +174,6 @@
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 		color: var(--color-text-muted);
-		margin-top: 2px;
 	}
 
 	/* Last checks */
