@@ -99,6 +99,47 @@ func itoa(p uint16) string {
 	return string(buf)
 }
 
+// chooseKeys returns the identity key for each parsed outbound: the narrow
+// identityKey when it suffices, the extendedKey when masking actually
+// distinguishes endpoints. A narrow-key group is widened only when its members
+// carry >1 distinct extendedKey — i.e. the same server:port:credential is
+// reused with different masking (issue #373). True byte-identical duplicates
+// (one distinct extended key) stay on the narrow key so their tag remains
+// stable across refreshes and matches previously stored narrow tags.
+// Deterministic over the set (frequency is set-, not order-, dependent). Both
+// ApplyDiff and the import preview build on this so the exclusion suffix
+// (preview) and the final tag (refresh) agree.
+func chooseKeys(parsed []vlink.ParsedOutbound) []string {
+	distinctExt := make(map[string]map[string]struct{}, len(parsed))
+	for _, p := range parsed {
+		nk := identityKey(p)
+		if distinctExt[nk] == nil {
+			distinctExt[nk] = make(map[string]struct{})
+		}
+		distinctExt[nk][extendedKey(p)] = struct{}{}
+	}
+	keys := make([]string, len(parsed))
+	for i, p := range parsed {
+		nk := identityKey(p)
+		if len(distinctExt[nk]) > 1 {
+			keys[i] = extendedKey(p)
+		} else {
+			keys[i] = nk
+		}
+	}
+	return keys
+}
+
+// assignTags maps each parsed outbound to its stable tag via chooseKeys.
+func assignTags(subID string, parsed []vlink.ParsedOutbound) []string {
+	keys := chooseKeys(parsed)
+	tags := make([]string, len(keys))
+	for i, k := range keys {
+		tags[i] = stableTagFromKey(subID, k)
+	}
+	return tags
+}
+
 // ApplyDiff classifies parsed outbounds against the stored MemberTags slice.
 func ApplyDiff(subID string, current []string, parsed []vlink.ParsedOutbound) DiffResult {
 	currSet := make(map[string]bool, len(current))
@@ -106,9 +147,10 @@ func ApplyDiff(subID string, current []string, parsed []vlink.ParsedOutbound) Di
 		currSet[t] = true
 	}
 	out := DiffResult{}
+	tags := assignTags(subID, parsed)
 	parsedSet := make(map[string]bool, len(parsed))
-	for _, p := range parsed {
-		t := StableTag(subID, p)
+	for i, p := range parsed {
+		t := tags[i]
 		if parsedSet[t] {
 			out.SkippedDuplicate++
 			continue

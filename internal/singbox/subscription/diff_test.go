@@ -141,6 +141,44 @@ func TestExtendedKey_DistinguishesSNIAndShortID(t *testing.T) {
 	}
 }
 
+func TestApplyDiff_RealityCollisionDistinct(t *testing.T) {
+	// 3 эндпоинта на одном server:port:uuid, разные SNI → 3 различимых тега.
+	parsed := []vlink.ParsedOutbound{
+		mkReality("h", 443, "eh1.vk.ru", "01ab"),
+		mkReality("h", 443, "io.ozone.ru", "02cd"),
+		mkReality("h", 443, "vk.com", "03ef"),
+	}
+	diff := ApplyDiff("subID", nil, parsed)
+	if len(diff.New) != 3 {
+		t.Errorf("New=%d want 3 (each masking distinct)", len(diff.New))
+	}
+	if diff.SkippedDuplicate != 0 {
+		t.Errorf("SkippedDuplicate=%d want 0", diff.SkippedDuplicate)
+	}
+}
+
+func TestApplyDiff_ExtendedKeyCollisionDedup(t *testing.T) {
+	// Те же (SNI,short_id) → побайтово неразличимы → 1 тег, остальные skipped.
+	parsed := []vlink.ParsedOutbound{
+		mkReality("h", 443, "eh1.vk.ru", "01ab"),
+		mkReality("h", 443, "eh1.vk.ru", "01ab"),
+	}
+	diff := ApplyDiff("subID", nil, parsed)
+	if len(diff.New) != 1 || diff.SkippedDuplicate != 1 {
+		t.Errorf("want New=1 Skipped=1, got New=%d Skipped=%d", len(diff.New), diff.SkippedDuplicate)
+	}
+}
+
+func TestApplyDiff_NoCollisionUsesNarrowTag(t *testing.T) {
+	// Сервер-одиночка (узкий ключ уникален) сохраняет узкий тег → 0 churn.
+	p := mkReality("h", 443, "eh1.vk.ru", "01ab")
+	parsed := []vlink.ParsedOutbound{p, mkParsed("other", 443, "vless")}
+	tags := assignTags("subID", parsed)
+	if tags[0] != StableTag("subID", p) {
+		t.Errorf("unique narrow key must keep narrow tag: got %s want %s", tags[0], StableTag("subID", p))
+	}
+}
+
 func TestIdentityHash_SubIDIndependent(t *testing.T) {
 	p := vlink.ParsedOutbound{Protocol: "vless", Server: "a.example", Port: 443, Outbound: []byte(`{"uuid":"u1"}`)}
 	h := IdentityHash(p)
