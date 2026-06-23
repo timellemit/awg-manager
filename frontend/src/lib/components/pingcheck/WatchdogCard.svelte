@@ -2,7 +2,7 @@
 <script lang="ts">
 	import { StatusDot, VersionBadge, Badge, Button, type StatusDotVariant, type BadgeVariant } from '$lib/components/ui';
 	import { TunnelDelaySparkBars } from '$lib/components/tunnels';
-	import { Settings, Power, Info, Check, X, RotateCcw } from 'lucide-svelte';
+	import { Settings, Power, PowerOff, Info, Check, X, RotateCcw } from 'lucide-svelte';
 	import { formatTime } from '$lib/utils/format';
 	import type { CardStats } from '$lib/utils/pingStats';
 
@@ -17,9 +17,10 @@
 		stats: CardStats | null;
 		onConfigure: () => void;
 		onCheckNow: () => void;
+		onDisable: () => void;
 	}
 
-	let { name, backend, awgVersion, statusKind, hasPingcheck, isWatchdog, configLine, stats, onConfigure, onCheckNow }: Props =
+	let { name, backend, awgVersion, statusKind, hasPingcheck, isWatchdog, configLine, stats, onConfigure, onCheckNow, onDisable }: Props =
 		$props();
 
 	const STATUS: Record<Props['statusKind'], { dot: StatusDotVariant; pulse: boolean; label: string; badge: BadgeVariant }> = {
@@ -83,6 +84,10 @@
 
 		<!-- Footer -->
 		<div class="wd-foot">
+			<Button variant="outline-danger" size="sm" onclick={onDisable}>
+				{#snippet iconBefore()}<PowerOff size={14} />{/snippet}
+				Выключить
+			</Button>
 			<Button variant="outline-primary" size="sm" onclick={onConfigure}>
 				{#snippet iconBefore()}<Settings size={14} />{/snippet}
 				Настроить
@@ -234,6 +239,7 @@
 		border-top: 1px solid var(--color-border);
 		display: flex;
 		justify-content: flex-end;
+		gap: 8px;
 	}
 
 	/* No-pingcheck note */

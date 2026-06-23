@@ -128,6 +128,22 @@
 			notifications.error('Не удалось запустить проверку');
 		}
 	}
+	async function disablePingcheck(id: string, name: string, backend: 'kernel' | 'nativewg') {
+		try {
+			if (backend === 'nativewg') {
+				await api.removeNativePingCheck(id);
+			} else {
+				const t = await api.getTunnel(id);
+				if (t.pingCheck) t.pingCheck.enabled = false;
+				await api.updateTunnel(id, t);
+			}
+			notifications.success(`Watchdog выключен: ${name}`);
+			pingCheckStatus.refetch();
+			loadPingLogs();
+		} catch {
+			notifications.error('Не удалось выключить watchdog');
+		}
+	}
 </script>
 
 {#if loading}
@@ -153,6 +169,7 @@
 					stats={c.stats}
 					onConfigure={() => openConfig(c.id, c.name, c.backend)}
 					onCheckNow={checkNow}
+					onDisable={() => disablePingcheck(c.id, c.name, c.backend)}
 				/>
 			{:else}
 				<WatchdogCard
@@ -166,6 +183,7 @@
 					stats={null}
 					onConfigure={() => openConfig(c.id, c.name, c.backend)}
 					onCheckNow={checkNow}
+					onDisable={() => {}}
 				/>
 			{/if}
 		{/each}
