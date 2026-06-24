@@ -18,9 +18,10 @@
 		onConfigure: () => void;
 		onCheckNow: () => void;
 		onDisable: () => void;
+		onEnable: () => void;
 	}
 
-	let { name, backend, awgVersion, statusKind, hasPingcheck, isWatchdog, configLine, stats, onConfigure, onCheckNow, onDisable }: Props =
+	let { name, backend, awgVersion, statusKind, hasPingcheck, isWatchdog, configLine, stats, onConfigure, onCheckNow, onDisable, onEnable }: Props =
 		$props();
 
 	const STATUS: Record<Props['statusKind'], { dot: StatusDotVariant; pulse: boolean; label: string; badge: BadgeVariant }> = {
@@ -48,7 +49,7 @@
 		</div>
 	</div>
 
-	{#if hasPingcheck && stats}
+	{#if isWatchdog && stats}
 		<!-- Config line -->
 		<div class="wd-config">{configLine}</div>
 
@@ -90,6 +91,21 @@
 			<Button variant="outline-danger" size="sm" onclick={onDisable}>
 				{#snippet iconBefore()}<PowerOff size={14} />{/snippet}
 				Выключить
+			</Button>
+			<Button variant="outline-primary" size="sm" onclick={onConfigure}>
+				{#snippet iconBefore()}<Settings size={14} />{/snippet}
+				Настроить
+			</Button>
+		</div>
+	{:else if hasPingcheck}
+		<!-- Configured but disabled: re-enable with saved settings -->
+		<div class="wd-note">
+			<span class="wd-note-text"><PowerOff size={14} /> Мониторинг выключен. Настройки сохранены.</span>
+		</div>
+		<div class="wd-foot">
+			<Button variant="outline-primary" size="sm" onclick={onEnable}>
+				{#snippet iconBefore()}<Power size={14} />{/snippet}
+				Включить
 			</Button>
 			<Button variant="outline-primary" size="sm" onclick={onConfigure}>
 				{#snippet iconBefore()}<Settings size={14} />{/snippet}
