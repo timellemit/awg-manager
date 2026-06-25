@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"sync"
@@ -853,5 +854,55 @@ func TestSetEnabledReconcilesMapDiskDrift(t *testing.T) {
 	}
 	if _, err := os.Stat(disabled); err != nil {
 		t.Errorf("parked disabled copy must survive: %v", err)
+	}
+}
+
+// TestReloadPrunesDanglingSelectorRefs reproduces the live FATAL
+// "dependency[YC-FIN] not found for outbound[device-proxy-selector]": a selector
+// keeps a member tag whose outbound was deleted from another slot. sing-box check
+// does not catch it (like composite cycles, it only surfaces at "start service"),
+// so the broken config reaches the daemon. Reload must prune dangling selector
+// members (and a dangling default) from the slot file before applying.
+func TestReloadPrunesDanglingSelectorRefs(t *testing.T) {
+	o, dir := newTestOrch(t)
+	_ = o.Register(SlotMeta{Slot: SlotDeviceProxy, Filename: "30-deviceproxy.json"})
+
+	// Active slot: selector references "direct" (builtin, ok) + "YC-FIN" (gone).
+	active := filepath.Join(dir, "30-deviceproxy.json")
+	dp := `{"inbounds":[{"type":"mixed","tag":"device-proxy-in","listen_port":1090}],` +
+		`"outbounds":[{"type":"selector","tag":"device-proxy-selector","outbounds":["direct","YC-FIN"],"default":"YC-FIN"}]}`
+	if err := os.WriteFile(active, []byte(dp), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := o.Bootstrap(); err != nil { // file present → enabled[deviceproxy]=true
+		t.Fatal(err)
+	}
+
+	if err := o.Reload(); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+
+	data, err := os.ReadFile(active)
+	if err != nil {
+		t.Fatalf("read pruned slot: %v", err)
+	}
+	var c slotConfig
+	if err := json.Unmarshal(data, &c); err != nil {
+		t.Fatalf("unmarshal pruned slot: %v", err)
+	}
+	if len(c.Outbounds) != 1 {
+		t.Fatalf("want 1 outbound, got %d", len(c.Outbounds))
+	}
+	sel := c.Outbounds[0]
+	for _, m := range sel.Outbounds {
+		if m == "YC-FIN" {
+			t.Errorf("dangling member YC-FIN must be pruned, got %v", sel.Outbounds)
+		}
+	}
+	if sel.Default == "YC-FIN" {
+		t.Errorf("dangling default YC-FIN must be cleared, got %q", sel.Default)
+	}
+	if len(sel.Outbounds) == 0 {
+		t.Errorf("selector must keep surviving member \"direct\"")
 	}
 }
