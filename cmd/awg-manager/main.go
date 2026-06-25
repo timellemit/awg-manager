@@ -1504,11 +1504,13 @@ func main() {
 			tunnelService.HealStaleActiveWAN()
 
 			// Detect actual WAN state.
-			if _, err := ndmsQueries.Routes.GetDefaultGatewayInterface(shutdownCtx); err != nil {
+			gwIface, err := ndmsQueries.Routes.GetDefaultGatewayInterface(shutdownCtx)
+			if err != nil {
 				bootLog.Info("startup", "",
 					fmt.Sprintf("WAN down at boot after %s — waiting for WAN UP event",
 						time.Since(bootStart).Round(time.Second)))
 			} else {
+				bootLog.Info("startup", "", fmt.Sprintf("wan-decision gw=%s after=%s", gwIface, time.Since(bootStart).Round(time.Second)))
 				bootLog.Info("startup", "",
 					fmt.Sprintf("Tunnel start at %s (uptime ~%ds)",
 						time.Since(bootStart).Round(time.Second),
@@ -1698,7 +1700,11 @@ func populateWANModel(ctx context.Context, queries *ndmsquery.Queries, model *wa
 		return
 	}
 	model.Populate(interfaces)
-	appLog.Info("populate-wan", "", fmt.Sprintf("WAN model populated, count=%d", len(interfaces)))
+	ifaceList := make([]string, 0, len(interfaces))
+	for _, iface := range interfaces {
+		ifaceList = append(ifaceList, fmt.Sprintf("%s(up=%t)", iface.Name, iface.Up))
+	}
+	appLog.Info("populate-wan", "", fmt.Sprintf("WAN model populated, count=%d ifaces=[%s]", len(interfaces), strings.Join(ifaceList, " ")))
 }
 
 // getInterfaceIP returns the first IPv4 address of the given interface.

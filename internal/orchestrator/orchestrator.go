@@ -275,6 +275,8 @@ func (o *Orchestrator) HandleEvent(ctx context.Context, event Event) error {
 		consumed := o.consumeExpectedHook(event.NDMSName, event.Level)
 		o.mu.Unlock()
 		if consumed {
+			o.appLog.Debug("boot-trace", event.NDMSName,
+				fmt.Sprintf("expected-hook consumed level=%s", event.Level))
 			return nil
 		}
 	}
@@ -290,6 +292,27 @@ func (o *Orchestrator) HandleEvent(ctx context.Context, event Event) error {
 		o.state.ensureTunnel(event.Tunnel, o.store)
 	}
 	actions := decide(event, &o.state)
+	// conf=disabled detail: тот же резолвер, что decideNDMSHook —
+	// findByNDMSName(event.NDMSName), layer=="conf" (НЕ event.Tunnel).
+	if event.Type == EventNDMSHook && event.Layer == "conf" && event.Level == "disabled" {
+		if t := o.state.findByNDMSName(event.NDMSName); t != nil && t.Running {
+			sinceStart := bootQuiescenceWindow - t.quiescentUntil.Sub(event.Now)
+			windowLeft := t.quiescentUntil.Sub(event.Now)
+			stop := false
+			for _, a := range actions {
+				if a.Type == ActionStopKernel || a.Type == ActionStopNativeWG {
+					stop = true
+				}
+			}
+			if stop {
+				o.appLog.Warn("boot-trace", t.ID,
+					fmt.Sprintf("conf=disabled OUTSIDE-WINDOW->STOP sinceStart=%s windowLeft=%s", sinceStart.Round(time.Second), windowLeft.Round(time.Second)))
+			} else {
+				o.appLog.Debug("boot-trace", t.ID,
+					fmt.Sprintf("conf=disabled suppressed sinceStart=%s windowLeft=%s", sinceStart.Round(time.Second), windowLeft.Round(time.Second)))
+			}
+		}
+	}
 	o.mu.Unlock()
 
 	if len(actions) == 0 {
@@ -418,6 +441,7 @@ func (o *Orchestrator) updateState(action Action) {
 	case ActionColdStartKernel, ActionStartNativeWG, ActionReconcileNativeWG, ActionReconcileKernel, ActionResumeKernel:
 		t.Running = true
 		t.quiescentUntil = o.nowFn().Add(bootQuiescenceWindow)
+		o.appLog.Debug("boot-trace", t.ID, fmt.Sprintf("tunnel-start action=%d", action.Type))
 		// Refresh ActiveWAN from store. Execute layer persists the resolved
 		// WAN; we mirror it into the in-memory cache so decideWANDown can
 		// match correctly via affectedByWANDown.
@@ -428,6 +452,7 @@ func (o *Orchestrator) updateState(action Action) {
 		t.Running = false
 		t.Monitoring = false
 		t.ActiveWAN = ""
+		o.appLog.Debug("boot-trace", t.ID, fmt.Sprintf("tunnel-stop action=%d", action.Type))
 	case ActionSuspendProxy, ActionSuspendKernel:
 		// Keep t.Running=true so the next WANUp picks Resume/Reconcile,
 		// not a fresh ColdStart. Keep ActiveWAN so a duplicate WANDown
